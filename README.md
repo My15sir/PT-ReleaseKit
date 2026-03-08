@@ -23,25 +23,36 @@ PT-BDtool 是一个“媒体信息打包工具”。
 
 ### 2）安装
 
-在项目根目录执行：
+新手更推荐这样装：
 
 ```bash
-bash install.sh --offline
+bash install.sh --offline --no-launch
 export PATH="$HOME/.local/bin:$PATH"
+hash -r
 ```
 
-安装完成后，先检查命令是不是已经可用：
+说明：
+- `--no-launch`：先只安装，不要一装完马上跳进菜单，方便你先检查命令是否正常
+- `export PATH=...`：让当前终端立刻能找到新装好的命令
+- `hash -r`：让当前 shell 刷新命令缓存，避免还指向旧版
+
+安装完成后，先检查下面两个命令：
 
 ```bash
-pt --help
+ptbd --help
 bdtool status
 ```
 
-如果你看到帮助和状态信息，说明安装基本没问题。
+如果这两个都正常，再继续往下走。  
+如果你还想确认 GUI 入口是否能找到脚本，也可以额外执行：
+
+```bash
+ptbd-gui --self-check
+```
 
 ### 3）建议把 PATH 永久写进去
 
-很多新手第一次能用，重开终端后又提示“找不到 pt”。  
+很多新手第一次能用，重开终端后又提示“找不到 pt”或者“找不到 ptbd”。  
 这是因为你刚才的 `export PATH=...` 只对当前终端生效。
 
 如果你用的是 `bash`，建议执行：
@@ -423,7 +434,7 @@ bdtool /data/movie.mkv --log-level debug --out /data/output
 
 ## 常见报错和排查
 
-### 1）提示 `pt: command not found`
+### 1）提示 `pt: command not found` / `ptbd: command not found`
 
 通常是 `~/.local/bin` 没在 PATH 里。
 
@@ -432,12 +443,37 @@ bdtool /data/movie.mkv --log-level debug --out /data/output
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
-pt --help
+ptbd --help
 ```
 
 如果这样能好，再把 PATH 写进 `~/.bashrc` 或 `~/.zshrc`。
 
-### 2）提示缺少 `ffmpeg` / `mediainfo` / `BDInfo`
+### 2）明明安装过，但命令还是旧路径，或者 `ptbd` 还是不见
+
+这通常是两种情况：
+
+- 你当前终端还缓存着旧命令路径
+- 你以前装过旧版，PATH 里还残留旧链接
+
+先执行：
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+command -v ptbd
+command -v bdtool
+command -v pt
+```
+
+如果输出不是你刚安装的位置，最稳的做法是回到项目目录重新装一次：
+
+```bash
+bash install.sh --offline --no-launch
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+```
+
+### 3）提示缺少 `ffmpeg` / `mediainfo` / `BDInfo`
 
 先不要乱装，先直接检查：
 
@@ -451,7 +487,7 @@ bdtool doctor
 bash install.sh --offline
 ```
 
-### 3）菜单能打开，但扫不到文件
+### 4）菜单能打开，但扫不到文件
 
 先确认你输入的是目录，不是某个可执行脚本路径。  
 支持的主要类型有：
@@ -460,7 +496,7 @@ bash install.sh --offline
 - 音频：`mp3` `flac` `wav` `m4a` `aac`
 - 蓝光：`BDMV` 目录、`iso` 文件
 
-### 4）VPS 上处理完成后不知道结果在哪
+### 5）VPS 上处理完成后不知道结果在哪
 
 建议你显式指定下载目录：
 
@@ -514,7 +550,11 @@ pt
 
 ```bash
 set -euo pipefail
-rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/pt" "$HOME/.local/bin/pts"
+rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd" "$HOME/.local/bin/ptbd-gui" \
+  "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/ptbd-remote" "$HOME/.local/bin/ptbd-remote-start" \
+  "$HOME/.local/bin/pt" "$HOME/.local/bin/pts" "$HOME/.local/bin/BDInfo"
 rm -rf "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
-rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd-start /usr/local/bin/pt /usr/local/bin/pts 2>/dev/null || true
+rm -f "$HOME/.local/share/applications/PT-BDtool.desktop" "$HOME/Desktop/PT-BDtool.desktop" "$HOME/桌面/PT-BDtool.desktop" 2>/dev/null || true
+rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd /usr/local/bin/ptbd-gui /usr/local/bin/ptbd-start \
+  /usr/local/bin/ptbd-remote /usr/local/bin/ptbd-remote-start /usr/local/bin/pt /usr/local/bin/pts /usr/local/bin/BDInfo 2>/dev/null || true
 ```

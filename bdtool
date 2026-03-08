@@ -534,25 +534,7 @@ collect_results() {
       if scan_should_prune_dir "$p"; then
         continue
       fi
-      if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
-        type="BDMV"
-        normalized="$(dirname "$p")"
-      elif [[ "${p,,}" == *.iso ]]; then
-        type="ISO"
-        normalized="$p"
-      elif is_video "$p"; then
-        local bdmv_root=""
-        if bdmv_root="$(bdmv_root_from_stream_file "$p")"; then
-          type="BDMV"
-          normalized="$bdmv_root"
-        else
-          type="VIDEO"
-          normalized="$p"
-        fi
-      elif is_audio "$p"; then
-        type="AUDIO"
-        normalized="$p"
-      else
+      if ! resolve_scan_candidate "$p" type normalized; then
         continue
       fi
       if [[ -z "${SCAN_SEEN[$normalized]:-}" ]]; then
@@ -585,25 +567,7 @@ collect_results() {
       if scan_should_prune_dir "$p"; then
         continue
       fi
-      if [[ "${p##*/}" == "BDMV" && -d "$p" ]]; then
-        type="BDMV"
-        normalized="$(dirname "$p")"
-      elif [[ "${p,,}" == *.iso ]]; then
-        type="ISO"
-        normalized="$p"
-      elif is_video "$p"; then
-        local bdmv_root=""
-        if bdmv_root="$(bdmv_root_from_stream_file "$p")"; then
-          type="BDMV"
-          normalized="$bdmv_root"
-        else
-          type="VIDEO"
-          normalized="$p"
-        fi
-      elif is_audio "$p"; then
-        type="AUDIO"
-        normalized="$p"
-      else
+      if ! resolve_scan_candidate "$p" type normalized; then
         continue
       fi
       if [[ -z "${SCAN_SEEN[$normalized]:-}" ]]; then
@@ -631,6 +595,45 @@ show_result_item() {
     *) label="${SCAN_TYPES[idx-1]}" ;;
   esac
   printf "%d) [%s] %s\n" "$idx" "$label" "${SCAN_ITEMS[idx-1]}"
+}
+
+resolve_scan_candidate() {
+  local raw_path="${1:-}"
+  local resolved_type_var="${2:-}"
+  local resolved_path_var="${3:-}"
+  local candidate_type=""
+  local resolved_path=""
+  local bdmv_root=""
+
+  [[ -n "$raw_path" ]] || return 1
+
+  if [[ "${raw_path##*/}" == "BDMV" && -d "$raw_path" ]]; then
+    candidate_type="BDMV"
+    resolved_path="$(dirname "$raw_path")"
+  elif [[ "${raw_path,,}" == *.iso && -f "$raw_path" ]]; then
+    candidate_type="ISO"
+    resolved_path="$raw_path"
+  elif [[ -f "$raw_path" ]] && is_video "$raw_path"; then
+    if bdmv_root="$(bdmv_root_from_stream_file "$raw_path")"; then
+      candidate_type="BDMV"
+      resolved_path="$bdmv_root"
+    else
+      candidate_type="VIDEO"
+      resolved_path="$raw_path"
+    fi
+  elif [[ -f "$raw_path" ]] && is_audio "$raw_path"; then
+    candidate_type="AUDIO"
+    resolved_path="$raw_path"
+  elif [[ -d "$raw_path" && -d "$raw_path/BDMV" ]]; then
+    candidate_type="BDMV"
+    resolved_path="$raw_path"
+  else
+    return 1
+  fi
+
+  printf -v "$resolved_type_var" '%s' "$candidate_type"
+  printf -v "$resolved_path_var" '%s' "$resolved_path"
+  return 0
 }
 
 scan_total_pages() {
@@ -790,6 +793,67 @@ handle_scan_json_command() {
   fi
 
   scan_results_json "$target" "$full"
+  return 0
+}
+
+handle_generate_path_command() {
+  local target=""
+  local item_type=""
+  local item_path=""
+
+  shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path)
+        target="${2:-}"
+        shift 2
+        ;;
+      --path=*)
+        target="${1#*=}"
+        shift
+        ;;
+      --lang)
+        LANG_CODE="${2:-$LANG_CODE}"
+        shift 2
+        ;;
+      --lang=*)
+        LANG_CODE="${1#*=}"
+        shift
+        ;;
+      --help|-h)
+        if [[ "$LANG_CODE" == "en" ]]; then
+          echo "Usage: bdtool generate-path --path TARGET [--lang zh|en]"
+        else
+          echo "用法: bdtool generate-path --path 目标路径 [--lang zh|en]"
+        fi
+        return 0
+        ;;
+      *)
+        if [[ -z "$target" ]]; then
+          target="$1"
+          shift
+        else
+          screen_error "未知参数：$1"
+          return 2
+        fi
+        ;;
+    esac
+  done
+
+  [[ -n "$target" ]] || {
+    screen_error "缺少目标路径：请传入 --path"
+    return 2
+  }
+
+  resolve_scan_candidate "$target" item_type item_path || {
+    screen_error "不支持的目标路径：$target"
+    return 2
+  }
+
+  preflight_post_process || return 1
+  generate_item "$item_type" "$item_path" || return 1
+  post_process_item "$LAST_OUTPUT_DIR" || return 1
+  screen "$(msg op_ok)"
   return 0
 }
 

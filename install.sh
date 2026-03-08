@@ -239,6 +239,7 @@ post_install_self_check() {
   local resolved_start=""
   local resolved_pt=""
   local resolved_pts=""
+  local self_check_path="$bin_dir:${PATH:-}"
   local required_files=(
     "$install_root/bdtool"
     "$install_root/bdtool.sh"
@@ -330,94 +331,86 @@ post_install_self_check() {
     err "self-check failed: $install_root/ptbd-start.sh --help"
     fail=1
   fi
-  if ! "$bin_dir/bdtool" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/bdtool" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/bdtool --help"
     fail=1
   fi
-  if ! "$bin_dir/ptbd-start" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/ptbd-start" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd-start --help"
     fail=1
   fi
-  if ! "$bin_dir/ptbd" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/ptbd" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd --help"
     fail=1
   fi
-  if ! "$bin_dir/ptbd-gui" --self-check >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/ptbd-gui" --self-check >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd-gui --self-check"
     fail=1
   fi
-  if ! "$bin_dir/pt" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/pt" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/pt --help"
     fail=1
   fi
-  if ! "$bin_dir/pts" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/pts" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/pts --help"
     fail=1
   fi
-  if ! "$bin_dir/ptbd-remote" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/ptbd-remote" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd-remote --help"
     fail=1
   fi
-  if ! "$bin_dir/ptbd-remote-start" --help >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" "$bin_dir/ptbd-remote-start" --help >/dev/null 2>&1; then
     err "self-check failed: $bin_dir/ptbd-remote-start --help"
     fail=1
   fi
-  if ! command -v BDInfo >/dev/null 2>&1; then
+  if ! PATH="$self_check_path" command -v BDInfo >/dev/null 2>&1; then
     err "self-check failed: command -v BDInfo"
     fail=1
   fi
 
   resolved_bdtool="$(command -v bdtool 2>/dev/null || true)"
   if [[ -n "$resolved_bdtool" && "$resolved_bdtool" != "$bin_dir/bdtool" ]]; then
-    err "PATH entry mismatch: command -v bdtool -> $resolved_bdtool (expected $bin_dir/bdtool)"
-    err "copy-paste fix: rm -f \"$resolved_bdtool\" && hash -r && \"$bin_dir/bdtool\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves bdtool -> $resolved_bdtool"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   resolved_start="$(command -v ptbd-start 2>/dev/null || true)"
   if [[ -n "$resolved_start" && "$resolved_start" != "$bin_dir/ptbd-start" ]]; then
-    err "PATH entry mismatch: command -v ptbd-start -> $resolved_start (expected $bin_dir/ptbd-start)"
-    err "copy-paste fix: rm -f \"$resolved_start\" && hash -r && \"$bin_dir/ptbd-start\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves ptbd-start -> $resolved_start"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   local resolved_easy=""
   resolved_easy="$(command -v ptbd 2>/dev/null || true)"
   if [[ -n "$resolved_easy" && "$resolved_easy" != "$bin_dir/ptbd" ]]; then
-    err "PATH entry mismatch: command -v ptbd -> $resolved_easy (expected $bin_dir/ptbd)"
-    err "copy-paste fix: rm -f \"$resolved_easy\" && hash -r && \"$bin_dir/ptbd\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves ptbd -> $resolved_easy"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   local resolved_gui=""
   resolved_gui="$(command -v ptbd-gui 2>/dev/null || true)"
   if [[ -n "$resolved_gui" && "$resolved_gui" != "$bin_dir/ptbd-gui" ]]; then
-    err "PATH entry mismatch: command -v ptbd-gui -> $resolved_gui (expected $bin_dir/ptbd-gui)"
-    err "copy-paste fix: rm -f \"$resolved_gui\" && hash -r && \"$bin_dir/ptbd-gui\" --self-check"
-    fail=1
+    log "PATH warning: current shell still resolves ptbd-gui -> $resolved_gui"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   resolved_pt="$(command -v pt 2>/dev/null || true)"
   if [[ -n "$resolved_pt" && "$resolved_pt" != "$bin_dir/pt" ]]; then
-    err "PATH entry mismatch: command -v pt -> $resolved_pt (expected $bin_dir/pt)"
-    err "copy-paste fix: rm -f \"$resolved_pt\" && hash -r && \"$bin_dir/pt\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves pt -> $resolved_pt"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   resolved_pts="$(command -v pts 2>/dev/null || true)"
   if [[ -n "$resolved_pts" && "$resolved_pts" != "$bin_dir/pts" ]]; then
-    err "PATH entry mismatch: command -v pts -> $resolved_pts (expected $bin_dir/pts)"
-    err "copy-paste fix: rm -f \"$resolved_pts\" && hash -r && \"$bin_dir/pts\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves pts -> $resolved_pts"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   local resolved_remote=""
   resolved_remote="$(command -v ptbd-remote 2>/dev/null || true)"
   if [[ -n "$resolved_remote" && "$resolved_remote" != "$bin_dir/ptbd-remote" ]]; then
-    err "PATH entry mismatch: command -v ptbd-remote -> $resolved_remote (expected $bin_dir/ptbd-remote)"
-    err "copy-paste fix: rm -f \"$resolved_remote\" && hash -r && \"$bin_dir/ptbd-remote\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves ptbd-remote -> $resolved_remote"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
   local resolved_remote_start=""
   resolved_remote_start="$(command -v ptbd-remote-start 2>/dev/null || true)"
   if [[ -n "$resolved_remote_start" && "$resolved_remote_start" != "$bin_dir/ptbd-remote-start" ]]; then
-    err "PATH entry mismatch: command -v ptbd-remote-start -> $resolved_remote_start (expected $bin_dir/ptbd-remote-start)"
-    err "copy-paste fix: rm -f \"$resolved_remote_start\" && hash -r && \"$bin_dir/ptbd-remote-start\" --help"
-    fail=1
+    log "PATH warning: current shell still resolves ptbd-remote-start -> $resolved_remote_start"
+    log "copy-paste fix: hash -r && export PATH=\"$bin_dir:\$PATH\""
   fi
 
   if [[ "$fail" -ne 0 ]]; then
