@@ -220,6 +220,25 @@ bdtool ~/Videos/test.mp4 --out ~/PT-output
 - `ptbd-gui`：跨平台图形启动器 MVP
 - `pt` / `bdtool`：旧入口和高级入口
 - `bdtool <文件或目录>`：直接走命令模式
+
+## 项目目录说明
+
+为了避免仓库根目录越堆越乱，现在可以把项目简单理解成这几类：
+
+- **主入口**：`ptbd`、`ptbd-start.sh`、`ptbd-gui`、`ptbd-remote.sh`
+- **核心处理逻辑**：`bdtool`、`bdtool.sh`
+- **公共函数**：`lib/`
+- **安装和依赖打包**：`install.sh`、`scripts/`、`third_party/bundle/`
+- **双击入口**：`PT-BDtool.bat`、`PT-BDtool.command`、`PT-BDtool.desktop`
+- **CI / 回归测试**：`.github/workflows/ci.yml`、`full-test.sh`
+
+下面这些通常都是**运行后自动产生的临时内容**，不属于项目源码，删掉也不会影响功能：
+
+- `bdtool-output/`
+- `.tmp/`、`.tmp-fetch-deps/`
+- `.full-test*`
+- `.rmtest/`
+- `__pycache__/`
 - `bdtool doctor`：检查依赖
 - `bdtool status`：检查安装状态
 - `bdtool clean`：清理默认输出目录

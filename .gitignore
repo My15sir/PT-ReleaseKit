@@ -5,6 +5,11 @@ output/
 reports/
 logs/
 tmp/
+.tmp/
+.tmp-*/
+.tmp*/
+.rmtest/
+.full-test*
 cache/
 dist/
 build/
