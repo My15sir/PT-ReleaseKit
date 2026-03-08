@@ -59,7 +59,6 @@ preflight_install_context() {
     "$SCRIPT_DIR/PT-BDtool.command"
     "$SCRIPT_DIR/PT-BDtool.bat"
     "$SCRIPT_DIR/lib/ui.sh"
-    "$SCRIPT_DIR/lib/i18n.sh"
     "$SCRIPT_DIR/scripts/fetch-deps.sh"
     "$SCRIPT_DIR/scripts/build-bundle.sh"
     "$SCRIPT_DIR/scripts/remote-upload-server.py"
@@ -250,7 +249,6 @@ post_install_self_check() {
     "$install_root/ptbd-remote.sh"
     "$install_root/ptbd-remote-start.sh"
     "$install_root/lib/ui.sh"
-    "$install_root/lib/i18n.sh"
     "$install_root/scripts/remote-upload-server.py"
     "$install_root/third_party/bundle/linux-amd64/bin/ffmpeg"
     "$install_root/third_party/bundle/linux-amd64/bin/ffprobe"
@@ -540,8 +538,7 @@ else
   log "skip (missing optional file): README.md"
   SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
 fi
-copy_if_changed "$SCRIPT_DIR/lib/ui.sh" "$INSTALL_ROOT/lib/ui.sh" "lib/ui.sh"
-copy_if_changed "$SCRIPT_DIR/lib/i18n.sh" "$INSTALL_ROOT/lib/i18n.sh" "lib/i18n.sh"
+  copy_if_changed "$SCRIPT_DIR/lib/ui.sh" "$INSTALL_ROOT/lib/ui.sh" "lib/ui.sh"
 mkdir -p "$INSTALL_ROOT/scripts"
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
