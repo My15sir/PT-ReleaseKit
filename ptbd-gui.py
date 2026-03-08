@@ -6,6 +6,7 @@ import queue
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -127,10 +128,11 @@ class App:
         self.process: subprocess.Popen[str] | None = None
         self.reader_threads: list[threading.Thread] = []
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self.status_var = tk.StringVar(value="就绪：先填配置，保存后点击“一步到位启动”")
+        self.status_var = tk.StringVar(value="就绪：先填 VPS，扫描候选后双击条目或点“一步到位启动”")
         self.selected_path_var = tk.StringVar(value="")
         self.config_vars = {}
         self.scan_items: list[dict] = []
+        self.auto_start_after_scan = False
         self._build_ui()
         self._load_into_form(load_config())
         self._poll_logs()
@@ -149,7 +151,7 @@ class App:
 
         subtitle = ttk.Label(
             container,
-            text="第一次填好 VPS 和保存目录，以后双击后点一下启动即可。",
+            text="第一次填好 VPS 和保存目录。扫描到候选后，双击条目或点按钮即可自动生成、回传并清理。",
         )
         subtitle.pack(anchor=W, pady=(4, 12))
 
@@ -205,6 +207,7 @@ class App:
         self.scan_tree.column("path", width=720, anchor="w")
         self.scan_tree.pack(fill=BOTH, expand=True)
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
+        self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
         ttk.Label(scan_panel, textvariable=self.selected_path_var).pack(anchor=W, pady=(6, 0))
 
         self.log_view = ScrolledText(container, wrap="word", font=("Consolas", 10))
@@ -297,6 +300,12 @@ class App:
         data = self.form_data()
         save_dir = Path(data["save_dir"]).expanduser()
         save_dir.mkdir(parents=True, exist_ok=True)
+        selected_path = self.current_selected_path()
+        if not selected_path and not self.scan_items:
+            self.append_log("[gui] 尚未选择候选，先自动扫描一次 VPS")
+            self.status_var.set("扫描中：先自动获取 VPS 候选列表")
+            self.scan_remote(auto_start=True)
+            return
 
         env = os.environ.copy()
         env.update(
@@ -311,6 +320,8 @@ class App:
                 "PTBD_AUTO_CLEANUP": "1" if data["auto_cleanup"] else "0",
             }
         )
+        if selected_path:
+            env["PTBD_REMOTE_TARGET_PATH"] = selected_path
 
         cmd = [bash_bin, str(remote_script)]
         creationflags = 0
@@ -320,7 +331,11 @@ class App:
         self.append_log("")
         self.append_log(f"[gui] 启动命令：{' '.join(cmd)}")
         self.append_log(f"[gui] 本机保存目录：{save_dir}")
-        self.status_var.set("运行中：请在弹出的终端/当前输出里完成远端菜单选择")
+        if selected_path:
+            self.append_log(f"[gui] 自动处理选中候选：{selected_path}")
+            self.status_var.set("运行中：已直接下发生成/下载/清理任务")
+        else:
+            self.status_var.set("运行中：未选中候选，将回退到远端菜单模式")
 
         self.process = subprocess.Popen(
             cmd,
@@ -335,14 +350,45 @@ class App:
         )
         self._start_reader(self.process)
 
-    def build_ssh_prefix(self, data: dict) -> list[str]:
+    def create_askpass_script(self, password: str) -> str:
+        suffix = ".cmd" if os.name == "nt" else ".sh"
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=suffix, encoding="utf-8") as handle:
+            script_path = handle.name
+            if os.name == "nt":
+                escaped = password
+                for old, new in (
+                    ("^", "^^"),
+                    ("&", "^&"),
+                    ("|", "^|"),
+                    ("<", "^<"),
+                    (">", "^>"),
+                    ("(", "^("),
+                    (")", "^)"),
+                    ("%", "%%"),
+                    ("!", "^^!"),
+                ):
+                    escaped = escaped.replace(old, new)
+                handle.write("@echo off\n")
+                handle.write("setlocal DisableDelayedExpansion\n")
+                handle.write(f"echo {escaped}\n")
+            else:
+                handle.write("#!/usr/bin/env bash\n")
+                escaped = password.replace("'", "'\\''")
+                handle.write(f"printf '%s\\n' '{escaped}'\n")
+        if os.name != "nt":
+            os.chmod(script_path, 0o700)
+        return script_path
+
+    def build_ssh_env(self, data: dict) -> tuple[dict[str, str], str | None]:
+        env = os.environ.copy()
+        askpass_path = None
         password = data["remote_password"]
         if password:
-            sshpass_bin = shutil.which("sshpass")
-            if not sshpass_bin:
-                raise RuntimeError("当前使用密码模式，但本机缺少 sshpass。")
-            return [sshpass_bin, "-p", password]
-        return []
+            askpass_path = self.create_askpass_script(password)
+            env["SSH_ASKPASS"] = askpass_path
+            env["SSH_ASKPASS_REQUIRE"] = "force"
+            env.setdefault("DISPLAY", "ptbd-askpass:0")
+        return env, askpass_path
 
     def build_scan_command(self, data: dict) -> list[str]:
         ssh_bin = shutil.which("ssh")
@@ -353,52 +399,60 @@ class App:
             f"export BDTOOL_SCAN_EXCLUDE_ROOTS={sh_quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
             "exec bdtool scan-json --full --lang zh",
         ]
-        return (
-            self.build_ssh_prefix(data)
-            + [
-                ssh_bin,
-                "-p",
-                data["remote_port"],
-                "-o",
-                "StrictHostKeyChecking=accept-new",
-                data["remote_host"],
-                "bash",
-                "-lc",
-                " ".join([part for part in remote_script if part]),
-            ]
-        )
+        return [
+            ssh_bin,
+            "-p",
+            data["remote_port"],
+            "-o",
+            "StrictHostKeyChecking=accept-new",
+            data["remote_host"],
+            "bash",
+            "-lc",
+            " ".join([part for part in remote_script if part]),
+        ]
 
-    def scan_remote(self) -> None:
+    def scan_remote(self, auto_start: bool = False) -> None:
         if not self.save_form():
             return
+        self.auto_start_after_scan = auto_start
         data = self.form_data()
         self.status_var.set("扫描中：正在从 VPS 获取候选列表")
         self.append_log("[gui] 开始通过 scan-json 获取 VPS 候选列表")
 
         def worker() -> None:
+            askpass_path = None
             try:
                 cmd = self.build_scan_command(data)
+                env, askpass_path = self.build_ssh_env(data)
                 result = subprocess.run(
                     cmd,
                     cwd=str(APP_ROOT),
+                    env=env,
                     text=True,
                     capture_output=True,
                     timeout=1800,
                     check=False,
+                    stdin=subprocess.DEVNULL,
                 )
                 if result.returncode != 0:
                     raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"ssh rc={result.returncode}")
                 payload = json.loads(result.stdout)
                 self.scan_items = payload.get("items", [])
                 self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
-                self.root.after(0, self.refresh_scan_items)
+                self.root.after(0, lambda: self.refresh_scan_items(auto_start=auto_start))
             except Exception as exc:
                 self.log_queue.put(f"[gui] 获取候选失败：{exc}")
                 self.root.after(0, lambda: self.status_var.set("获取候选失败，请看日志"))
+            finally:
+                if askpass_path:
+                    try:
+                        os.remove(askpass_path)
+                    except OSError:
+                        pass
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def refresh_scan_items(self) -> None:
+    def refresh_scan_items(self, auto_start: bool = False) -> None:
         for item in self.scan_tree.get_children():
             self.scan_tree.delete(item)
         for item in self.scan_items:
@@ -408,6 +462,15 @@ class App:
             first = self.scan_tree.get_children()[0]
             self.scan_tree.selection_set(first)
             self.scan_tree.focus(first)
+        if auto_start:
+            self.auto_start_after_scan = False
+            if len(self.scan_items) == 1:
+                self.append_log("[gui] 只发现 1 个候选，自动开始处理")
+                self.root.after(0, self.start_remote)
+            elif len(self.scan_items) == 0:
+                self.status_var.set("扫描完成：没有发现可处理候选")
+            else:
+                self.status_var.set("扫描完成：已自动选中第一项，请双击或点“一步到位启动”继续")
 
     def on_scan_select(self, _event=None) -> None:
         selection = self.scan_tree.selection()
@@ -417,6 +480,19 @@ class App:
         values = self.scan_tree.item(selection[0], "values")
         if values:
             self.selected_path_var.set(f"当前选中：{values[2]}")
+
+    def current_selected_path(self) -> str:
+        selection = self.scan_tree.selection()
+        if not selection:
+            return ""
+        values = self.scan_tree.item(selection[0], "values")
+        if not values or len(values) < 3:
+            return ""
+        return str(values[2]).strip()
+
+    def on_scan_double_click(self, _event=None) -> None:
+        if self.current_selected_path():
+            self.start_remote()
 
     def _start_reader(self, proc: subprocess.Popen[str]) -> None:
         def read_stream() -> None:

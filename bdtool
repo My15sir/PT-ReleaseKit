@@ -1373,6 +1373,10 @@ main() {
       handle_scan_json_command "$@"
       exit $?
     fi
+    if [[ "$1" == "generate-path" ]]; then
+      handle_generate_path_command "$@"
+      exit $?
+    fi
     case "$1" in
       scan|doctor|status|install|clean|start|version|--version|-v|help|--help|-h)
         if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then

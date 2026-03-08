@@ -121,8 +121,10 @@ ptbd-gui
 This is the current cross-platform GUI MVP. It helps you:
 - fill in the VPS address, password, and local save dir
 - fetch the VPS candidate list directly into the GUI
-- save the config
-- click one button to start the current remote flow
+- double-click a scanned candidate to run generate → return → cleanup automatically
+- if only 1 candidate is found, clicking “one-click start” scans first and then starts automatically
+- if multiple candidates are found, the GUI selects the first one but still waits for your double-click confirmation
+- password mode now prefers SSH askpass, so it no longer hard-requires local `sshpass`
 
 The repo also includes double-click launcher files:
 - `PT-BDtool.bat`: better for Windows
