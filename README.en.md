@@ -23,21 +23,32 @@ If you are not sure, just start with the local-machine workflow.
 
 ### 2) Install
 
-Run this from the project root:
+For beginners, this is the safer install path:
 
 ```bash
-bash install.sh --offline
+bash install.sh --offline --no-launch
 export PATH="$HOME/.local/bin:$PATH"
+hash -r
 ```
 
-Then verify the command is available:
+What this does:
+- `--no-launch`: install first, do not jump straight into the menu yet
+- `export PATH=...`: make the freshly installed commands visible in the current terminal
+- `hash -r`: refresh the shell command cache so it does not keep pointing to an older install
+
+Then verify these two commands first:
 
 ```bash
-pt --help
+ptbd --help
 bdtool status
 ```
 
-If both commands print useful output, the install is basically OK.
+If both look normal, continue.
+If you also want to confirm that the GUI entry can locate its runtime files, run:
+
+```bash
+ptbd-gui --self-check
+```
 
 ### 3) Make PATH persistent
 
@@ -420,7 +431,7 @@ bdtool /data/movie.mkv --log-level debug --out /data/output
 
 ## Common Problems
 
-### 1) `pt: command not found`
+### 1) `pt: command not found` / `ptbd: command not found`
 
 Usually `~/.local/bin` is not in `PATH`.
 
@@ -429,12 +440,37 @@ Try:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 hash -r
-pt --help
+ptbd --help
 ```
 
 If that fixes it, add the PATH line to `~/.bashrc` or `~/.zshrc`.
 
-### 2) Missing `ffmpeg`, `mediainfo`, or `BDInfo`
+### 2) You already installed it, but the shell still points to an old command
+
+This usually means one of these:
+
+- your current terminal still cached the old command path
+- an older install is still earlier in `PATH`
+
+Check it with:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+command -v ptbd
+command -v bdtool
+command -v pt
+```
+
+If the printed paths are not the ones you just installed, the simplest fix is to reinstall from the project root:
+
+```bash
+bash install.sh --offline --no-launch
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+```
+
+### 3) Missing `ffmpeg`, `mediainfo`, or `BDInfo`
 
 Do not guess first. Check with:
 
@@ -448,7 +484,7 @@ If dependencies are incomplete, go back to the project root and run:
 bash install.sh --offline
 ```
 
-### 3) The menu opens but finds no files
+### 4) The menu opens but finds no files
 
 Make sure you entered a directory, not an executable script path.  
 Main supported inputs:
@@ -457,7 +493,7 @@ Main supported inputs:
 - audio: `mp3`, `flac`, `wav`, `m4a`, `aac`
 - Blu-ray: `BDMV` folders and `iso` files
 
-### 4) On a VPS, you do not know where the package went
+### 5) On a VPS, you do not know where the package went
 
 Set an explicit download directory:
 
@@ -511,7 +547,11 @@ If you just want to get started, follow the install and launch steps above.
 
 ```bash
 set -euo pipefail
-rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/pt" "$HOME/.local/bin/pts"
+rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd" "$HOME/.local/bin/ptbd-gui" \
+  "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/ptbd-remote" "$HOME/.local/bin/ptbd-remote-start" \
+  "$HOME/.local/bin/pt" "$HOME/.local/bin/pts" "$HOME/.local/bin/BDInfo"
 rm -rf "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
-rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd-start /usr/local/bin/pt /usr/local/bin/pts 2>/dev/null || true
+rm -f "$HOME/.local/share/applications/PT-BDtool.desktop" "$HOME/Desktop/PT-BDtool.desktop" "$HOME/桌面/PT-BDtool.desktop" 2>/dev/null || true
+rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd /usr/local/bin/ptbd-gui /usr/local/bin/ptbd-start \
+  /usr/local/bin/ptbd-remote /usr/local/bin/ptbd-remote-start /usr/local/bin/pt /usr/local/bin/pts /usr/local/bin/BDInfo 2>/dev/null || true
 ```
