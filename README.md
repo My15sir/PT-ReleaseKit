@@ -131,6 +131,19 @@ ptbd-gui
 - `PT-BDtool.command`：更适合 macOS
 - `PT-BDtool.desktop`：更适合 Linux
 
+这 3 个双击文件现在都会优先打开 `ptbd-gui` 图形界面，而不是直接把你扔进旧菜单。
+
+推荐理解成这样：
+- **Windows**：双击 `PT-BDtool.bat`，建议先装好 Python 3 和 Git for Windows
+- **macOS**：双击 `PT-BDtool.command`；如果第一次被系统拦住，先右键“打开”一次
+- **Linux**：双击 `PT-BDtool.desktop`，或者在应用菜单里启动安装后的 PT-BDtool
+
+双击后的推荐顺序：
+1. 填 VPS 地址、端口、密码、本机保存目录
+2. 点“扫描 VPS 候选”
+3. 双击你要处理的条目
+4. 等它自动执行“生成 → 回传 → 清理”
+
 ### 5）菜单里怎么走
 
 进入菜单后，按这个顺序走就行：

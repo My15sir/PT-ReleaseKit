@@ -565,9 +565,10 @@ install_desktop_launcher() {
 Version=1.0
 Type=Application
 Name=PT-BDtool
-Comment=Beginner-friendly PT-BDtool launcher
-Exec=$bin_dir/ptbd-start
-Terminal=true
+Comment=Beginner-friendly PT-BDtool GUI launcher
+Exec=$bin_dir/ptbd-gui
+Terminal=false
+StartupNotify=true
 Categories=Utility;
 EOF
   chmod +x "$launcher_path"

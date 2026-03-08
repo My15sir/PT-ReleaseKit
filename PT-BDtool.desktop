@@ -2,7 +2,8 @@
 Version=1.0
 Type=Application
 Name=PT-BDtool
-Comment=Beginner-friendly PT-BDtool launcher
-Exec=ptbd-start
-Terminal=true
+Comment=Beginner-friendly PT-BDtool GUI launcher
+Exec=bash -lc 'SCRIPT_DIR="$(cd -P "$(dirname "$1")" && pwd)"; exec "$SCRIPT_DIR/ptbd-gui"' dummy %k
+Terminal=false
+StartupNotify=true
 Categories=Utility;

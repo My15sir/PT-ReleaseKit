@@ -131,6 +131,19 @@ The repo also includes double-click launcher files:
 - `PT-BDtool.command`: better for macOS
 - `PT-BDtool.desktop`: better for Linux
 
+These 3 launcher files now try to open the `ptbd-gui` window first, instead of dropping you straight into the old menu flow.
+
+The practical idea is:
+- **Windows**: double-click `PT-BDtool.bat`; install Python 3 and Git for Windows first
+- **macOS**: double-click `PT-BDtool.command`; if macOS blocks the first launch, right-click and choose “Open” once
+- **Linux**: double-click `PT-BDtool.desktop`, or use the installed PT-BDtool app launcher
+
+Recommended beginner flow after the GUI opens:
+1. fill in VPS host, port, password, and local save directory
+2. click “scan VPS candidates”
+3. double-click the item you want
+4. wait for generate → return → cleanup to finish automatically
+
 ### 5) Follow the menu
 
 Inside the menu, the normal path is:
