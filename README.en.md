@@ -221,6 +221,25 @@ This is the recommended way to think about it now:
 - `bdtool status`: check installation state
 - `bdtool clean`: remove the default output directory
 
+## Project Layout
+
+To keep the repository understandable instead of turning into a dumping ground, it helps to think of it in a few simple buckets:
+
+- **Main entrypoints**: `ptbd`, `ptbd-start.sh`, `ptbd-gui`, `ptbd-remote.sh`
+- **Core processing logic**: `bdtool`, `bdtool.sh`
+- **Shared helpers**: `lib/`
+- **Install and dependency bundling**: `install.sh`, `scripts/`, `third_party/bundle/`
+- **Double-click launchers**: `PT-BDtool.bat`, `PT-BDtool.command`, `PT-BDtool.desktop`
+- **CI / regression testing**: `.github/workflows/ci.yml`, `full-test.sh`
+
+The following are usually **generated runtime files**, not source files. Deleting them does not remove project features:
+
+- `bdtool-output/`
+- `.tmp/`, `.tmp-fetch-deps/`
+- `.full-test*`
+- `.rmtest/`
+- `__pycache__/`
+
 For most beginners, only these two commands matter:
 
 ```bash
