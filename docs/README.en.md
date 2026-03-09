@@ -249,7 +249,7 @@ To keep the repository understandable instead of turning into a dumping ground, 
 - **Shared helpers**: `lib/`
 - **Install and dependency bundling**: `install.sh`, `scripts/`, `scripts/ensure-bundle.py`, `third_party/bundle/` (generated on demand)
 - **Double-click launchers**: `PT-BDtool.bat`, `PT-BDtool.command`, `PT-BDtool.desktop`
-- **CI / regression testing**: `.github/workflows/ci.yml`, `full-test.sh`
+- **CI / regression testing**: `.github/workflows/ci.yml`, `scripts/full-test.sh`
 
 The following are usually **generated runtime files**, not source files. Deleting them does not remove project features:
 

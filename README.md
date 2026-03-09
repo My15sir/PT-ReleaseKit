@@ -62,5 +62,5 @@ VPS 上先放好你要处理的视频 / 音频 / `BDMV` / `ISO`。
 
 维护者再看：
 
-- `DEVELOPMENT.md`
-- `README.en.md`
+- `docs/DEVELOPMENT.md`
+- `docs/README.en.md`

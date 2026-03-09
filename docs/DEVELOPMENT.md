@@ -1,7 +1,7 @@
 # PT-BDtool 开发与发布说明
 
 这份文档是给维护者看的，不是给普通用户看的。  
-普通用户直接看 `README.md` 就够了。
+普通用户直接看根目录 `README.md` 就够了。
 
 ---
 
@@ -54,7 +54,7 @@
 
 ### 回归测试
 
-- `full-test.sh`
+- `scripts/full-test.sh`
 - `.github/workflows/ci.yml`
 
 ---
@@ -90,7 +90,7 @@ python3 -m py_compile ptbd-gui.py ptbd_remote_backend.py scripts/build-controlle
 ### 全量回归
 
 ```bash
-./full-test.sh
+./scripts/full-test.sh
 ```
 
 ### GUI 自检
@@ -179,7 +179,7 @@ dist/controller-app/macos/PT-BDtool.app
 作用：
 
 - shell 语法检查
-- `full-test.sh`
+- `scripts/full-test.sh`
 - 离线 bundle 构建
 - 离线安装检查
 

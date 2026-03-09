@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LOG_DIR="$ROOT_DIR/bdtool-output/logs"
 RUN_LOG="$LOG_DIR/run.log"
 FULL_LOG="$LOG_DIR/full-test.log"
@@ -190,7 +191,7 @@ run_step() {
   cp -f "$TMP_RESULTS_TSV" "$RESULTS_TSV"
 }
 
-run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
+run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
 run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
 run_step "workflow-ci-markers" success bash -c "grep -q 'name: CI' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Controller Builds' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
 run_step "bdtool-help" success "$CLI_BIN" --help

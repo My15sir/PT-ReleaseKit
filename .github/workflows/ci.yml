@@ -21,7 +21,7 @@ jobs:
       - name: Install runtime commands
         run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
       - name: Run full-test.sh
-        run: ./full-test.sh
+        run: ./scripts/full-test.sh
 
   fetch-deps:
     runs-on: ubuntu-latest
