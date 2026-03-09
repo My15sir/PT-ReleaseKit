@@ -177,40 +177,15 @@ jobs:
           body: |
             ## 普通用户直接下载这里
 
-            不要下载源码，不要看脚本。  
-            你只需要按系统下载一个压缩包。
+            不要下载源码。  
+            按你的系统下载一个压缩包就行。
 
-            ### Windows 用户下载这个
+            ## 第 1 步：下载
 
-            - `PT-BDtool-windows-portable.zip`
+            - Windows：`PT-BDtool-windows-portable.zip`
+            - macOS：`PT-BDtool-macos-portable.zip`
 
-            下载后这样用：
-            1. 解压
-            2. 双击 `PT-BDtool.exe`
-            3. 填 VPS 地址、端口、密码、本机保存目录
-            4. 点击“扫描 VPS 候选”
-            5. 双击你要处理的条目
-
-            如果 Windows 拦住你：
-            - 点 `更多信息`
-            - 再点 `仍要运行`
-
-            ### macOS 用户下载这个
-
-            - `PT-BDtool-macos-portable.zip`
-
-            下载后这样用：
-            1. 解压
-            2. 双击 `PT-BDtool.app`
-            3. 填 VPS 地址、端口、密码、本机保存目录
-            4. 点击“扫描 VPS 候选”
-            5. 双击你要处理的条目
-
-            如果第一次被 macOS 拦住：
-            - 右键 `PT-BDtool.app`
-            - 点一次 `打开`
-
-            ### 你需要准备
+            ## 第 2 步：准备
 
             - 一台 VPS
             - VPS 地址
@@ -218,7 +193,15 @@ jobs:
             - VPS 密码
             - VPS 上已经有视频 / 音频 / BDMV / ISO
 
-            ### 程序会自动做什么
+            ## 第 3 步：打开后直接用
+
+            1. 解压
+            2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app`
+            3. 填 VPS 地址、端口、密码、本机保存目录
+            4. 点 `扫描 VPS 候选`
+            5. 双击你要处理的条目
+
+            程序会自动：
 
             - 扫描 VPS 候选
             - 生成截图和媒体信息
@@ -226,3 +209,7 @@ jobs:
             - 清理这次生成的 VPS 输出目录
 
             不会删你原始源文件。
+
+            如果系统拦住：
+            - Windows：`更多信息 -> 仍要运行`
+            - macOS：右键应用后点一次 `打开`
