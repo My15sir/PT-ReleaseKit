@@ -97,6 +97,7 @@ jobs:
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
               - 如果系统提示没执行权限，先运行：chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool
               - Linux 便携版配置优先保存在程序同目录
+              - 只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
     steps:
       - name: Checkout
@@ -276,6 +277,7 @@ jobs:
             - macOS：右键应用后点一次 `打开`
             - Linux：如果桌面文件不生效，就改双击 `启动PT-BDtool.sh`
             - Linux：如果提示无执行权限，先运行 `chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool`
+            - Linux：只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
             说明：
             - 本项目为 AI 生成项目

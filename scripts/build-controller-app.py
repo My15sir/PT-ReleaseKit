@@ -6,7 +6,6 @@ import os
 import platform
 import shutil
 import subprocess
-import sys
 import venv
 from pathlib import Path
 
@@ -25,25 +24,6 @@ BUILD_REQUIREMENTS = [
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command))
     subprocess.run(command, check=True, env=env)
-
-
-def ensure_linux_bundle() -> None:
-    bundle_root = PROJECT_ROOT / "third_party" / "bundle" / "linux-amd64"
-    required = [
-        bundle_root / "bin" / "ffmpeg",
-        bundle_root / "bin" / "ffprobe",
-        bundle_root / "bin" / "mediainfo",
-        bundle_root / "bin" / "BDInfo",
-        bundle_root / "lib",
-    ]
-    if all(path.exists() for path in required):
-        return
-    ensure_script = PROJECT_ROOT / "scripts" / "ensure-bundle.py"
-    if not ensure_script.exists():
-        raise SystemExit(f"missing bundle helper: {ensure_script}")
-    python_bin = sys.executable or "python3"
-    run([python_bin, str(ensure_script)])
-
 
 def venv_python_path(venv_dir: Path) -> Path:
     if os.name == "nt":
@@ -78,7 +58,7 @@ def format_add_data(source: Path, dest_dir: str) -> str:
     return f"{source}{add_data_sep()}{dest_dir}"
 
 
-def iter_data_entries(*, include_linux_bundle: bool) -> list[tuple[Path, str]]:
+def iter_data_entries() -> list[tuple[Path, str]]:
     entries: list[tuple[Path, str]] = [
         (PROJECT_ROOT / "bdtool", "."),
         (PROJECT_ROOT / "bdtool.sh", "."),
@@ -87,10 +67,7 @@ def iter_data_entries(*, include_linux_bundle: bool) -> list[tuple[Path, str]]:
         (PROJECT_ROOT / "scripts" / "prepare-remote-runtime.sh", "scripts"),
         (PROJECT_ROOT / "scripts" / "remote-upload-server.py", "scripts"),
     ]
-    base_dirs = [PROJECT_ROOT / "lib"]
-    if include_linux_bundle:
-        base_dirs.append(PROJECT_ROOT / "third_party" / "bundle" / "linux-amd64")
-    for base_dir in base_dirs:
+    for base_dir in (PROJECT_ROOT / "lib",):
         for file_path in sorted(path for path in base_dir.rglob("*") if path.is_file()):
             relative_parent = file_path.relative_to(PROJECT_ROOT).parent.as_posix()
             entries.append((file_path, relative_parent))
@@ -115,7 +92,6 @@ def clean_build_dirs(build_dir: Path, dist_dir: Path, spec_dir: Path) -> None:
 def build_artifact(python_bin: Path) -> Path:
     system = platform.system()
     platform_dir = platform_name()
-    include_linux_bundle = system == "Linux"
     build_dir = BUILD_ROOT / platform_dir / "work"
     spec_dir = BUILD_ROOT / platform_dir / "spec"
     dist_dir = DIST_ROOT / platform_dir
@@ -149,7 +125,7 @@ def build_artifact(python_bin: Path) -> Path:
     if system == "Darwin":
         command.extend(["--osx-bundle-identifier", "com.my15sir.ptbdtool"])
 
-    for source, dest_dir in iter_data_entries(include_linux_bundle=include_linux_bundle):
+    for source, dest_dir in iter_data_entries():
         command.extend(["--add-data", format_add_data(source, dest_dir)])
 
     command.append(str(PROJECT_ROOT / "ptbd-gui.py"))
@@ -175,8 +151,6 @@ def main() -> int:
     if not args.skip_deps:
         install_build_deps(python_bin)
 
-    if platform.system() == "Linux":
-        ensure_linux_bundle()
     artifact = build_artifact(python_bin)
     print(f"[build-controller] artifact={artifact}")
     return 0

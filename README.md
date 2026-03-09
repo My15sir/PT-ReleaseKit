@@ -15,6 +15,12 @@ PT-BDtool 是给 PT 用户整理发种素材用的小工具。
 - macOS：`PT-BDtool-macos-portable.zip`
 - Linux：`PT-BDtool-linux-portable.tar.gz`
 
+说明：
+
+- Windows / macOS / Linux 现在都是轻量便携包
+- 如果 VPS 缺少依赖，程序会优先尝试自动安装
+- 只有自动安装不够时，才会按需下载 Linux 兜底运行包
+
 ## 3 步上手
 
 ### 第 1 步：下载并打开
@@ -58,6 +64,7 @@ VPS 上先放好你要处理的视频 / 音频 / `BDMV` / `ISO`。
 - macOS：右键 `PT-BDtool.app` 后点一次 `打开`
 - Linux：如果桌面文件不生效，就改双击 `启动PT-BDtool.sh`
 - Linux：如果提示无执行权限，先运行 `chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool`
+- Linux：第一次真遇到空白 VPS 且系统依赖不够时，可能会额外联网下载兜底运行包
 - 如果提示“获取候选失败”，先点程序里的“打开日志文件”，直接看 `PT-BDtool.log`
 
 说明：
