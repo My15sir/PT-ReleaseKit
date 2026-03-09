@@ -3,6 +3,25 @@
 PT-BDtool is a media info packaging tool.  
 It turns videos, audio files, Blu-ray `BDMV` folders, and Blu-ray `ISO` images into a cleaner result package that is easier to organize, share, or archive.
 
+## Current Status (2026-03)
+
+This repository is no longer just the old shell-only version.  
+The current project already includes these newer capabilities:
+
+- **Windows controller**: can be packaged as a standalone single-file `PT-BDtool.exe`
+- **macOS controller**: can be packaged as a standalone `PT-BDtool.app`
+- **Windows portable config**: prefers saving config next to `PT-BDtool.exe`
+- **macOS portable config**: prefers saving config next to `PT-BDtool.app`
+- **GitHub Actions controller builds**: pushing to `main` triggers Windows/macOS controller builds
+- **VPS dependency auto-detect**: `Debian` / `Ubuntu` / `Alpine` are auto-detected first
+- **Remote main flow**: scan → pick item → generate → return to local machine → cleanup on VPS
+
+If you only care whether the project is already usable for non-technical users, read these sections first:
+
+- `4.1) Real standalone Windows / macOS controller`
+- `4.2) How to release Windows / macOS controller builds`
+- `6) Double-click does nothing, or it says bash / ssh / Python is missing`
+
 Typical output looks like this:
 - Video: `mediainfo.txt` + `1.png` to `6.png`
 - Audio: `mediainfo.txt` + `频谱图.png`

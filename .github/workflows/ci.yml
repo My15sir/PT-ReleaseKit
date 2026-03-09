@@ -14,6 +14,15 @@ jobs:
       - name: ShellCheck
         run: shellcheck -x bdtool.sh bdtool install.sh ptbd-start.sh scripts/*.sh
 
+  full-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install runtime commands
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
+      - name: Run full-test.sh
+        run: ./full-test.sh
+
   fetch-deps:
     runs-on: ubuntu-latest
     steps:
