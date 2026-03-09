@@ -1,9 +1,28 @@
 # PT-BDtool
 
-PT-BDtool 是一个“媒体信息打包工具”。  
+PT-BDtool 是一个给 PT 用户整理发种素材用的“媒体信息打包工具”。  
 它会把视频、音频、Blu-ray 原盘目录 `BDMV`、Blu-ray 镜像 `ISO` 处理成一个更适合整理、发帖、保存的结果包。
 
+## 当前最新状态（2026-03）
+
+这不是旧版 README 了，当前项目已经补上了下面这些新能力：
+
+- **Windows 控制端**：支持打成真正免安装的单文件 `PT-BDtool.exe`
+- **macOS 控制端**：支持打成真正免安装的 `PT-BDtool.app`
+- **Windows 便携配置**：优先跟着 `PT-BDtool.exe` 同目录保存
+- **macOS 便携配置**：优先跟着 `PT-BDtool.app` 同级目录保存
+- **GitHub Actions 自动打包**：推送 `main` 后会自动构建 Windows / macOS 控制端产物
+- **VPS 自动依赖检测**：`Debian` / `Ubuntu` / `Alpine` 会优先自动检测并安装依赖
+- **远端主流程**：已支持 扫描 → 选择条目 → 生成 → 下载到本机 → 清理 VPS 输出
+
+如果你现在只关心“这项目到底能不能给小白用”，先看这几段：
+
+- `4.1）Windows / macOS 真正免安装独立版`
+- `4.2）怎么发布 Windows / macOS 控制端`
+- `6）双击后没反应，或者提示缺少 bash / ssh / Python`
+
 处理完成后，常见输出大概是这样：
+
 - 视频：`mediainfo.txt` + `1.png` 到 `6.png`
 - 音频：`mediainfo.txt` + `频谱图.png`
 - 原盘 / ISO：`BDInfo.txt` + `1.png` 到 `6.png`
