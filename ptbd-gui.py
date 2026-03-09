@@ -59,6 +59,7 @@ def find_app_root() -> Path:
 
 
 APP_ROOT = find_app_root()
+PORTABLE_CONFIG_FILENAME = "PT-BDtool-config.json"
 
 
 def windows_roaming_config_path() -> Path:
@@ -67,13 +68,38 @@ def windows_roaming_config_path() -> Path:
     return base / APP_NAME / "gui-config.json"
 
 
+def macos_app_support_config_path() -> Path:
+    home = Path.home()
+    return home / "Library/Application Support" / APP_NAME / "gui-config.json"
+
+
+def find_app_bundle_root(path: Path) -> Path | None:
+    current = path.resolve()
+    for candidate in (current, *current.parents):
+        if candidate.suffix.lower() == ".app":
+            return candidate
+    return None
+
+
 def portable_windows_config_path() -> Path | None:
     if platform.system() != "Windows":
         return None
     if not (getattr(sys, "frozen", False) or os.environ.get("PTBD_PORTABLE_CONFIG") == "1"):
         return None
     base_file = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
-    return base_file.parent / "PT-BDtool-config.json"
+    return base_file.parent / PORTABLE_CONFIG_FILENAME
+
+
+def portable_macos_config_path() -> Path | None:
+    if platform.system() != "Darwin":
+        return None
+    if not (getattr(sys, "frozen", False) or os.environ.get("PTBD_PORTABLE_CONFIG") == "1"):
+        return None
+    base_file = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+    bundle_root = find_app_bundle_root(base_file)
+    if bundle_root is not None:
+        return bundle_root.parent / PORTABLE_CONFIG_FILENAME
+    return base_file.parent / PORTABLE_CONFIG_FILENAME
 
 
 def path_is_writable(target: Path) -> bool:
@@ -93,6 +119,11 @@ def config_storage_mode() -> str:
             return "fallback-appdata"
         return "appdata"
     if system == "Darwin":
+        portable_path = portable_macos_config_path()
+        if portable_path is not None and path_is_writable(portable_path):
+            return "portable-next-to-app"
+        if portable_path is not None:
+            return "fallback-app-support"
         return "macos-app-support"
     return "xdg-config"
 
@@ -106,7 +137,10 @@ def config_path() -> Path:
             return portable_path
         return windows_roaming_config_path()
     if system == "Darwin":
-        return home / "Library/Application Support" / APP_NAME / "gui-config.json"
+        portable_path = portable_macos_config_path()
+        if portable_path is not None and path_is_writable(portable_path):
+            return portable_path
+        return macos_app_support_config_path()
     return home / ".config/ptbd-gui/config.json"
 
 

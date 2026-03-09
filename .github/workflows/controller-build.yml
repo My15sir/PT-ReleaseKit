@@ -1,0 +1,104 @@
+name: Controller Builds
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/controller-build.yml
+      - README.md
+      - PT-BDtool.bat
+      - PT-BDtool.command
+      - bdtool
+      - bdtool.sh
+      - ptbd-gui.py
+      - ptbd_remote_backend.py
+      - lib/**
+      - scripts/build-controller-app.py
+      - scripts/prepare-remote-runtime.sh
+      - scripts/remote-upload-server.py
+      - third_party/bundle/linux-amd64/**
+
+jobs:
+  build-controller:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            built_path: dist/controller-app/windows/PT-BDtool.exe
+            launcher_path: PT-BDtool.bat
+            upload_dir: artifact/PT-BDtool-windows
+            artifact_name: PT-BDtool-windows
+            smoke_path: dist/controller-app/windows/PT-BDtool.exe
+          - os: macos-14
+            label: macOS
+            built_path: dist/controller-app/macos/PT-BDtool.app
+            launcher_path: PT-BDtool.command
+            upload_dir: artifact/PT-BDtool-macos
+            artifact_name: PT-BDtool-macos
+            smoke_path: dist/controller-app/macos/PT-BDtool.app/Contents/MacOS/PT-BDtool
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build standalone controller app
+        shell: bash
+        run: python scripts/build-controller-app.py
+
+      - name: Smoke test built artifact
+        shell: bash
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import Path
+
+          artifact = Path(r"${{ matrix.smoke_path }}")
+          if not artifact.exists():
+              raise SystemExit(f"missing artifact: {artifact}")
+          subprocess.run([str(artifact), "--self-check"], check=True)
+          PY
+
+      - name: Prepare upload package
+        shell: bash
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+
+          built_path = Path(r"${{ matrix.built_path }}")
+          launcher_path = Path(r"${{ matrix.launcher_path }}")
+          upload_dir = Path(r"${{ matrix.upload_dir }}")
+          readme_path = Path("README.md")
+
+          if upload_dir.exists():
+              shutil.rmtree(upload_dir)
+          upload_dir.mkdir(parents=True, exist_ok=True)
+
+          if built_path.is_dir():
+              shutil.copytree(built_path, upload_dir / built_path.name)
+          else:
+              shutil.copy2(built_path, upload_dir / built_path.name)
+
+          if launcher_path.exists():
+              shutil.copy2(launcher_path, upload_dir / launcher_path.name)
+          if readme_path.exists():
+              shutil.copy2(readme_path, upload_dir / readme_path.name)
+          PY
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.upload_dir }}
+          if-no-files-found: error

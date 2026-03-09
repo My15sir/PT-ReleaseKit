@@ -143,7 +143,18 @@ ptbd-start
 - **优先把配置保存到 `PT-BDtool.exe` 同目录**
 - 如果你把 `exe` 放在只读目录，例如 `Program Files`，才会自动回退到 `%APPDATA%`
 
+macOS 独立版现在也做了类似处理：
+
+- **优先把配置保存到 `PT-BDtool.app` 同级目录**
+- 如果你把 `.app` 放在不可写位置，才会自动回退到 `~/Library/Application Support`
+
 所以如果你想要更接近真正绿色便携版，建议把 `PT-BDtool.exe` 放在：
+
+- 你自己建的普通文件夹
+- 移动硬盘
+- U 盘
+
+如果是 macOS，建议把 `PT-BDtool.app` 放在：
 
 - 你自己建的普通文件夹
 - 移动硬盘
@@ -261,6 +272,9 @@ PT-BDtool-macos.zip
 5. macOS 真机双击验证
 6. Debian / Ubuntu / Alpine 各至少一台 VPS 验证
 
+如果你不想每次手工打包，现在仓库也支持 GitHub Actions 自动构建 Windows / macOS 包。
+推到 `main` 或手动触发后，可以直接去 Actions 下载构建产物。
+
 如果你想在 **Windows / macOS / Linux** 上尽量走“图形窗口 + 双击”路线，也可以试试：
 
 ```bash
@@ -291,6 +305,7 @@ ptbd-gui
 - **Windows 独立版**：双击 `PT-BDtool.exe`，不需要再装 Python / Git for Windows
 - **Windows 独立版**：配置默认优先跟着 `PT-BDtool.exe` 走；如果目录不可写，才回退到 `%APPDATA%`
 - **macOS 独立版**：双击 `PT-BDtool.app`，不需要再装 Python / `bash` / `ssh`；如果第一次被系统拦住，先右键“打开”一次
+- **macOS 独立版**：配置默认优先跟着 `PT-BDtool.app` 走；如果目录不可写，才回退到 `~/Library/Application Support`
 - **Windows 源码版**：双击 `PT-BDtool.bat` 前，还是建议先装好 Python 3；如果要回退旧模式，再装 Git for Windows
 - **macOS 源码版**：双击 `PT-BDtool.command` 前，先确认本机有 Python 3、`bash`、`ssh`
 - **Linux**：双击 `PT-BDtool.desktop`，或者在应用菜单里启动安装后的 PT-BDtool
