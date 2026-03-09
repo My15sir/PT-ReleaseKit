@@ -138,6 +138,17 @@ ptbd-start
 - 本机**不需要再装 bash / ssh / scp**
 - 用户打开应用后，直接填 VPS 信息、扫描、双击条目、下载结果
 
+现在 Windows 独立版还额外做了这件事：
+
+- **优先把配置保存到 `PT-BDtool.exe` 同目录**
+- 如果你把 `exe` 放在只读目录，例如 `Program Files`，才会自动回退到 `%APPDATA%`
+
+所以如果你想要更接近真正绿色便携版，建议把 `PT-BDtool.exe` 放在：
+
+- 你自己建的普通文件夹
+- 移动硬盘
+- U 盘
+
 独立版控制端现在内置了 SSH 连接和结果下载逻辑，主流程会这样走：
 
 1. 连接 VPS
@@ -278,6 +289,7 @@ ptbd-gui
 
 推荐理解成这样：
 - **Windows 独立版**：双击 `PT-BDtool.exe`，不需要再装 Python / Git for Windows
+- **Windows 独立版**：配置默认优先跟着 `PT-BDtool.exe` 走；如果目录不可写，才回退到 `%APPDATA%`
 - **macOS 独立版**：双击 `PT-BDtool.app`，不需要再装 Python / `bash` / `ssh`；如果第一次被系统拦住，先右键“打开”一次
 - **Windows 源码版**：双击 `PT-BDtool.bat` 前，还是建议先装好 Python 3；如果要回退旧模式，再装 Git for Windows
 - **macOS 源码版**：双击 `PT-BDtool.command` 前，先确认本机有 Python 3、`bash`、`ssh`

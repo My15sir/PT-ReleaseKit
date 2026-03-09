@@ -61,12 +61,50 @@ def find_app_root() -> Path:
 APP_ROOT = find_app_root()
 
 
+def windows_roaming_config_path() -> Path:
+    home = Path.home()
+    base = Path(os.environ.get("APPDATA", home / "AppData/Roaming"))
+    return base / APP_NAME / "gui-config.json"
+
+
+def portable_windows_config_path() -> Path | None:
+    if platform.system() != "Windows":
+        return None
+    if not (getattr(sys, "frozen", False) or os.environ.get("PTBD_PORTABLE_CONFIG") == "1"):
+        return None
+    base_file = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+    return base_file.parent / "PT-BDtool-config.json"
+
+
+def path_is_writable(target: Path) -> bool:
+    parent = target.parent
+    if target.exists():
+        return os.access(target, os.W_OK)
+    return parent.exists() and os.access(parent, os.W_OK)
+
+
+def config_storage_mode() -> str:
+    system = platform.system()
+    if system == "Windows":
+        portable_path = portable_windows_config_path()
+        if portable_path is not None and path_is_writable(portable_path):
+            return "portable-next-to-exe"
+        if portable_path is not None:
+            return "fallback-appdata"
+        return "appdata"
+    if system == "Darwin":
+        return "macos-app-support"
+    return "xdg-config"
+
+
 def config_path() -> Path:
     system = platform.system()
     home = Path.home()
     if system == "Windows":
-        base = Path(os.environ.get("APPDATA", home / "AppData/Roaming"))
-        return base / APP_NAME / "gui-config.json"
+        portable_path = portable_windows_config_path()
+        if portable_path is not None and path_is_writable(portable_path):
+            return portable_path
+        return windows_roaming_config_path()
     if system == "Darwin":
         return home / "Library/Application Support" / APP_NAME / "gui-config.json"
     return home / ".config/ptbd-gui/config.json"
@@ -252,6 +290,7 @@ class App:
         self.log_view.pack(fill=BOTH, expand=True)
         self.log_view.insert(END, f"App root: {APP_ROOT}\n")
         self.log_view.insert(END, f"Config: {CONFIG_PATH}\n")
+        self.log_view.insert(END, f"Config mode: {config_storage_mode()}\n")
         self.log_view.insert(END, f"Backend: {backend_status()}\n")
         self.log_view.insert(END, "准备完成。\n")
         self.log_view.configure(state="disabled")
@@ -725,6 +764,7 @@ def cli_main() -> int:
         ssh_bin = shutil.which("ssh") or "<missing>"
         print(f"app_root={APP_ROOT}")
         print(f"config={CONFIG_PATH}")
+        print(f"config_mode={config_storage_mode()}")
         print(f"backend={backend_status()}")
         print(f"bash={bash_bin}")
         print(f"ssh={ssh_bin}")
