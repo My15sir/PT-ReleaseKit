@@ -13,6 +13,7 @@ PT-BDtool 是给 PT 用户整理发种素材用的小工具。
 
 - Windows：`PT-BDtool-windows-portable.zip`
 - macOS：`PT-BDtool-macos-portable.zip`
+- Linux：`PT-BDtool-linux-portable.tar.gz`
 
 ## 3 步上手
 
@@ -22,6 +23,7 @@ PT-BDtool 是给 PT 用户整理发种素材用的小工具。
 - 解压
 - Windows 双击 `PT-BDtool.exe`
 - macOS 双击 `PT-BDtool.app`
+- Linux 双击 `启动PT-BDtool.sh`
 
 ### 第 2 步：填信息
 
@@ -53,6 +55,7 @@ VPS 上先放好你要处理的视频 / 音频 / `BDMV` / `ISO`。
 
 - Windows：`更多信息 → 仍要运行`
 - macOS：右键 `PT-BDtool.app` 后点一次 `打开`
+- Linux：如果提示无执行权限，先运行 `chmod +x 启动PT-BDtool.sh PT-BDtool`
 
 说明：
 

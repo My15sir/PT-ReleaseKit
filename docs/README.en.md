@@ -10,9 +10,11 @@ The current project already includes these newer capabilities:
 
 - **Windows controller**: can be packaged as a standalone single-file `PT-BDtool.exe`
 - **macOS controller**: can be packaged as a standalone `PT-BDtool.app`
+- **Linux controller**: can be packaged as a portable `PT-BDtool-linux-portable.tar.gz`
 - **Windows portable config**: prefers saving config next to `PT-BDtool.exe`
 - **macOS portable config**: prefers saving config next to `PT-BDtool.app`
-- **GitHub Releases portable apps**: pushing to `main` refreshes the `portable-latest` Windows/macOS download packages
+- **Linux portable config**: prefers saving config next to the extracted Linux binary
+- **GitHub Releases portable apps**: pushing to `main` refreshes the `portable-latest` Windows/macOS/Linux download packages
 - **VPS dependency auto-detect**: `Debian` / `Ubuntu` / `Alpine` are auto-detected first
 - **Remote main flow**: scan → pick item → generate → return to local machine → cleanup on VPS
 

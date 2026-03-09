@@ -36,7 +36,9 @@ jobs:
             built_path: dist/controller-app/windows/PT-BDtool.exe
             upload_dir: artifact/PT-BDtool-windows-portable
             artifact_name: PT-BDtool-windows-portable
-            release_zip: release-assets/PT-BDtool-windows-portable.zip
+            release_archive: release-assets/PT-BDtool-windows-portable.zip
+            archive_format: zip
+            package_layout: single-file
             smoke_path: dist/controller-app/windows/PT-BDtool.exe
             quick_start_name: 打开前先看.txt
             quick_start_title: PT-BDtool Windows 快速开始
@@ -56,7 +58,9 @@ jobs:
             built_path: dist/controller-app/macos/PT-BDtool.app
             upload_dir: artifact/PT-BDtool-macos-portable
             artifact_name: PT-BDtool-macos-portable
-            release_zip: release-assets/PT-BDtool-macos-portable.zip
+            release_archive: release-assets/PT-BDtool-macos-portable.zip
+            archive_format: zip
+            package_layout: app-bundle
             smoke_path: dist/controller-app/macos/PT-BDtool.app/Contents/MacOS/PT-BDtool
             quick_start_name: 打开前先看.txt
             quick_start_title: PT-BDtool macOS 快速开始
@@ -71,6 +75,28 @@ jobs:
               提醒：
               - 不需要安装 Python
               - 不需要安装 bash / ssh
+          - os: ubuntu-latest
+            label: Linux
+            built_path: dist/controller-app/linux/PT-BDtool
+            upload_dir: artifact/PT-BDtool-linux-portable
+            artifact_name: PT-BDtool-linux-portable
+            release_archive: release-assets/PT-BDtool-linux-portable.tar.gz
+            archive_format: gztar
+            package_layout: flatten-dir
+            smoke_path: dist/controller-app/linux/PT-BDtool/PT-BDtool
+            quick_start_name: 打开前先看.txt
+            quick_start_title: PT-BDtool Linux 快速开始
+            quick_start_body: |
+              1. 解压 PT-BDtool-linux-portable.tar.gz
+              2. 双击“启动PT-BDtool.sh”，或者双击 PT-BDtool
+              3. 填 VPS 地址、端口、密码、本机保存目录
+              4. 点击“扫描 VPS 候选”
+              5. 双击你要处理的条目
+              
+              提醒：
+              - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
+              - 如果系统提示没执行权限，先运行：chmod +x 启动PT-BDtool.sh PT-BDtool
+              - Linux 便携版配置优先保存在程序同目录
 
     steps:
       - name: Checkout
@@ -110,12 +136,20 @@ jobs:
           quick_start_path = upload_dir / r"${{ matrix.quick_start_name }}"
           quick_start_title = r"""${{ matrix.quick_start_title }}"""
           quick_start_body = r"""${{ matrix.quick_start_body }}""".strip()
+          package_layout = r"${{ matrix.package_layout }}"
 
           if upload_dir.exists():
               shutil.rmtree(upload_dir)
           upload_dir.mkdir(parents=True, exist_ok=True)
 
-          if built_path.is_dir():
+          if package_layout == "flatten-dir" and built_path.is_dir():
+              for item in built_path.iterdir():
+                  target = upload_dir / item.name
+                  if item.is_dir():
+                      shutil.copytree(item, target)
+                  else:
+                      shutil.copy2(item, target)
+          elif built_path.is_dir():
               shutil.copytree(built_path, upload_dir / built_path.name)
           else:
               shutil.copy2(built_path, upload_dir / built_path.name)
@@ -124,9 +158,25 @@ jobs:
               quick_start_title + "\n\n" + quick_start_body + "\n",
               encoding="utf-8",
           )
+
+          if package_layout == "flatten-dir":
+              launcher = upload_dir / "启动PT-BDtool.sh"
+              launcher.write_text(
+                  "#!/usr/bin/env bash\n"
+                  "set -euo pipefail\n"
+                  "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
+                  "APP_BIN=\"$SCRIPT_DIR/PT-BDtool\"\n"
+                  "if [[ ! -x \"$APP_BIN\" ]]; then\n"
+                  "  chmod +x \"$APP_BIN\" 2>/dev/null || true\n"
+                  "fi\n"
+                  "export PTBD_PORTABLE_CONFIG=1\n"
+                  "exec \"$APP_BIN\" \"$@\"\n",
+                  encoding="utf-8",
+              )
+              launcher.chmod(0o755)
           PY
 
-      - name: Pack portable zip
+      - name: Pack portable archive
         shell: bash
         run: |
           python - <<'PY'
@@ -134,17 +184,23 @@ jobs:
           from pathlib import Path
 
           upload_dir = Path(r"${{ matrix.upload_dir }}")
-          archive_base = Path(r"${{ matrix.release_zip }}")
+          archive_base = Path(r"${{ matrix.release_archive }}")
+          archive_format = r"${{ matrix.archive_format }}"
           archive_base.parent.mkdir(parents=True, exist_ok=True)
-          zip_path = shutil.make_archive(str(archive_base.with_suffix("")), "zip", root_dir=upload_dir)
-          print(f"created: {zip_path}")
+          base_name = archive_base
+          if archive_format == "gztar" and archive_base.name.endswith(".tar.gz"):
+              base_name = archive_base.parent / archive_base.name[:-7]
+          elif archive_base.suffix:
+              base_name = archive_base.with_suffix("")
+          archive_path = shutil.make_archive(str(base_name), archive_format, root_dir=upload_dir)
+          print(f"created: {archive_path}")
           PY
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.release_zip }}
+          path: ${{ matrix.release_archive }}
           if-no-files-found: error
 
   publish-release:
@@ -152,7 +208,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-controller]
     steps:
-      - name: Download packaged zips
+      - name: Download packaged archives
         uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -161,7 +217,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-dist
-          find release-assets -type f -name '*.zip' -exec cp {} release-dist/ \;
+          find release-assets -type f \( -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} release-dist/ \;
           ls -lh release-dist
 
       - name: Publish release assets
@@ -173,7 +229,7 @@ jobs:
           replacesArtifacts: true
           removeArtifacts: true
           artifactErrorsFailBuild: true
-          artifacts: release-dist/*.zip
+          artifacts: release-dist/*
           body: |
             ## 下载
 
@@ -181,11 +237,12 @@ jobs:
 
             - Windows：`PT-BDtool-windows-portable.zip`
             - macOS：`PT-BDtool-macos-portable.zip`
+            - Linux：`PT-BDtool-linux-portable.tar.gz`
 
             ## 3 步上手
 
             1. 解压
-            2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app`
+            2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app` / Linux 双击 `启动PT-BDtool.sh`
             3. 填 VPS 地址、端口、密码、本机保存目录，然后点 `扫描 VPS 候选` 并双击条目
 
             VPS 上先放好视频 / 音频 / BDMV / ISO。
@@ -202,6 +259,7 @@ jobs:
             如果系统拦住：
             - Windows：`更多信息 -> 仍要运行`
             - macOS：右键应用后点一次 `打开`
+            - Linux：如果提示无执行权限，先运行 `chmod +x 启动PT-BDtool.sh PT-BDtool`
 
             说明：
             - 本项目为 AI 生成项目

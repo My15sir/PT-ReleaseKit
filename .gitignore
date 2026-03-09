@@ -13,6 +13,8 @@ tmp/
 cache/
 dist/
 build/
+artifact/
+release-assets/
 third_party/bundle/linux-amd64/
 
 # Python/Node caches

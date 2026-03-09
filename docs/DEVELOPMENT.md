@@ -67,6 +67,7 @@
 
 - Windows：发 `PT-BDtool.exe` 或 `PT-BDtool-windows-portable.zip`
 - macOS：发 `PT-BDtool.app` 或 `PT-BDtool-macos-portable.zip`
+- Linux：发 `PT-BDtool-linux-portable.tar.gz`
 - 最好直接发 GitHub `portable-latest` Release 页面
 
 也就是：
@@ -156,6 +157,7 @@ dist/controller-app/macos/PT-BDtool.app
 
 - 自动构建 Windows 控制端
 - 自动构建 macOS 控制端
+- 自动构建 Linux 控制端
 - 自动发布到 `portable-latest` Release
 
 ### Linux bundle 资产

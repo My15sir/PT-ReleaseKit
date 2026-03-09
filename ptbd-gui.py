@@ -102,6 +102,15 @@ def portable_macos_config_path() -> Path | None:
     return base_file.parent / PORTABLE_CONFIG_FILENAME
 
 
+def portable_linux_config_path() -> Path | None:
+    if platform.system() != "Linux":
+        return None
+    if not (getattr(sys, "frozen", False) or os.environ.get("PTBD_PORTABLE_CONFIG") == "1"):
+        return None
+    base_file = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+    return base_file.parent / PORTABLE_CONFIG_FILENAME
+
+
 def path_is_writable(target: Path) -> bool:
     parent = target.parent
     if target.exists():
@@ -125,6 +134,11 @@ def config_storage_mode() -> str:
         if portable_path is not None:
             return "fallback-app-support"
         return "macos-app-support"
+    portable_path = portable_linux_config_path()
+    if portable_path is not None and path_is_writable(portable_path):
+        return "portable-next-to-bin"
+    if portable_path is not None:
+        return "fallback-xdg-config"
     return "xdg-config"
 
 
@@ -141,6 +155,9 @@ def config_path() -> Path:
         if portable_path is not None and path_is_writable(portable_path):
             return portable_path
         return macos_app_support_config_path()
+    portable_path = portable_linux_config_path()
+    if portable_path is not None and path_is_writable(portable_path):
+        return portable_path
     return home / ".config/ptbd-gui/config.json"
 
 
