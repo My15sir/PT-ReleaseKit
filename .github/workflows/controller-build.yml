@@ -168,22 +168,61 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: portable-latest
-          name: PT-BDtool Windows/macOS 成品包
+          name: PT-BDtool 直接下载
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
           artifactErrorsFailBuild: true
           artifacts: release-dist/*.zip
           body: |
-            普通用户只下这里，不要下载源码仓库。
+            ## 普通用户直接下载这里
 
-            当前自动产物：
+            不要下载源码，不要看脚本。  
+            你只需要按系统下载一个压缩包。
+
+            ### Windows 用户下载这个
+
             - `PT-BDtool-windows-portable.zip`
+
+            下载后这样用：
+            1. 解压
+            2. 双击 `PT-BDtool.exe`
+            3. 填 VPS 地址、端口、密码、本机保存目录
+            4. 点击“扫描 VPS 候选”
+            5. 双击你要处理的条目
+
+            如果 Windows 拦住你：
+            - 点 `更多信息`
+            - 再点 `仍要运行`
+
+            ### macOS 用户下载这个
+
             - `PT-BDtool-macos-portable.zip`
 
-            Windows：
-            - 解压后双击 `PT-BDtool.exe`
+            下载后这样用：
+            1. 解压
+            2. 双击 `PT-BDtool.app`
+            3. 填 VPS 地址、端口、密码、本机保存目录
+            4. 点击“扫描 VPS 候选”
+            5. 双击你要处理的条目
 
-            macOS：
-            - 解压后双击 `PT-BDtool.app`
-            - 第一次被系统拦住时，右键应用后点“打开”
+            如果第一次被 macOS 拦住：
+            - 右键 `PT-BDtool.app`
+            - 点一次 `打开`
+
+            ### 你需要准备
+
+            - 一台 VPS
+            - VPS 地址
+            - VPS 端口
+            - VPS 密码
+            - VPS 上已经有视频 / 音频 / BDMV / ISO
+
+            ### 程序会自动做什么
+
+            - 扫描 VPS 候选
+            - 生成截图和媒体信息
+            - 下载结果回你的电脑
+            - 清理这次生成的 VPS 输出目录
+
+            不会删你原始源文件。

@@ -7,21 +7,25 @@ PT-BDtool 是给 PT 用户整理发种素材用的小工具。
 
 **如果你只是想用，不要下载这个仓库源码。**
 
-你真正应该拿到的是下面这两种成品之一：
+直接去这里下载：
 
-- **Windows**：`PT-BDtool.exe` 或 `PT-BDtool-windows-portable.zip`
-- **macOS**：`PT-BDtool.app` 或 `PT-BDtool-macos-portable.zip`
+- `https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest`
 
-下载位置：
+然后按你的系统选一个：
 
-- **GitHub Releases**：`portable-latest`
-- 地址：`https://github.com/My15sir/PT-BDtool/releases`
+- **Windows**：`PT-BDtool-windows-portable.zip`
+- **macOS**：`PT-BDtool-macos-portable.zip`
+
+下载后就是这几步：
+
+- 解压
+- 双击打开
+- 填 VPS 信息
+- 开始扫描和处理
+
 - 不要去翻源码目录找可执行文件
 - 也不需要进 Actions 页面手动找构建产物
 
-也就是说：
-
-- **普通用户**：拿成品包，解压或双击直接用
 - **不要**让小白面对源码仓库、脚本、依赖说明
 - **不要**让小白自己看一堆 Shell/Python 文件
 
