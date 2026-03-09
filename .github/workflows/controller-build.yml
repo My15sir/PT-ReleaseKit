@@ -20,6 +20,9 @@ on:
       - scripts/prepare-remote-runtime.sh
       - scripts/remote-upload-server.py
 
+permissions:
+  contents: write
+
 jobs:
   build-controller:
     name: Build ${{ matrix.label }}
@@ -33,6 +36,7 @@ jobs:
             built_path: dist/controller-app/windows/PT-BDtool.exe
             upload_dir: artifact/PT-BDtool-windows-portable
             artifact_name: PT-BDtool-windows-portable
+            release_zip: release-assets/PT-BDtool-windows-portable.zip
             smoke_path: dist/controller-app/windows/PT-BDtool.exe
             quick_start_name: 打开前先看.txt
             quick_start_title: PT-BDtool Windows 快速开始
@@ -52,6 +56,7 @@ jobs:
             built_path: dist/controller-app/macos/PT-BDtool.app
             upload_dir: artifact/PT-BDtool-macos-portable
             artifact_name: PT-BDtool-macos-portable
+            release_zip: release-assets/PT-BDtool-macos-portable.zip
             smoke_path: dist/controller-app/macos/PT-BDtool.app/Contents/MacOS/PT-BDtool
             quick_start_name: 打开前先看.txt
             quick_start_title: PT-BDtool macOS 快速开始
@@ -121,9 +126,64 @@ jobs:
           )
           PY
 
+      - name: Pack portable zip
+        shell: bash
+        run: |
+          python - <<'PY'
+          import shutil
+          from pathlib import Path
+
+          upload_dir = Path(r"${{ matrix.upload_dir }}")
+          archive_base = Path(r"${{ matrix.release_zip }}")
+          archive_base.parent.mkdir(parents=True, exist_ok=True)
+          zip_path = shutil.make_archive(str(archive_base.with_suffix("")), "zip", root_dir=upload_dir)
+          print(f"created: {zip_path}")
+          PY
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.upload_dir }}
+          path: ${{ matrix.release_zip }}
           if-no-files-found: error
+
+  publish-release:
+    name: Publish portable release
+    runs-on: ubuntu-latest
+    needs: [build-controller]
+    steps:
+      - name: Download packaged zips
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten release assets
+        shell: bash
+        run: |
+          mkdir -p release-dist
+          find release-assets -type f -name '*.zip' -exec cp {} release-dist/ \;
+          ls -lh release-dist
+
+      - name: Publish release assets
+        uses: ncipollo/release-action@v1
+        with:
+          tag: portable-latest
+          name: PT-BDtool Windows/macOS 成品包
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          artifactErrorsFailBuild: true
+          artifacts: release-dist/*.zip
+          body: |
+            普通用户只下这里，不要下载源码仓库。
+
+            当前自动产物：
+            - `PT-BDtool-windows-portable.zip`
+            - `PT-BDtool-macos-portable.zip`
+
+            Windows：
+            - 解压后双击 `PT-BDtool.exe`
+
+            macOS：
+            - 解压后双击 `PT-BDtool.app`
+            - 第一次被系统拦住时，右键应用后点“打开”

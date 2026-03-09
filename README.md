@@ -12,6 +12,13 @@ PT-BDtool 是给 PT 用户整理发种素材用的小工具。
 - **Windows**：`PT-BDtool.exe` 或 `PT-BDtool-windows-portable.zip`
 - **macOS**：`PT-BDtool.app` 或 `PT-BDtool-macos-portable.zip`
 
+下载位置：
+
+- **GitHub Releases**：`portable-latest`
+- 地址：`https://github.com/My15sir/PT-BDtool/releases`
+- 不要去翻源码目录找可执行文件
+- 也不需要进 Actions 页面手动找构建产物
+
 也就是说：
 
 - **普通用户**：拿成品包，解压或双击直接用
@@ -154,6 +161,7 @@ PT-BDtool 是给 PT 用户整理发种素材用的小工具。
 
 - `PT-BDtool.exe`
 - 或 `PT-BDtool.app`
+- 或 Releases 里的便携压缩包
 
 **不要让普通用户下载仓库源码 ZIP。**
 
