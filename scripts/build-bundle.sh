@@ -9,10 +9,30 @@ OUT_TAR="$DIST_DIR/PT-BDtool-linux-amd64.tar.gz"
 
 log() { printf '[build-bundle] %s\n' "$*"; }
 
+bundle_ready() {
+  local bundle_root="$ROOT_DIR/third_party/bundle/linux-amd64"
+  local required=""
+  local required_paths=(
+    "$bundle_root/bin/ffmpeg"
+    "$bundle_root/bin/ffprobe"
+    "$bundle_root/bin/mediainfo"
+    "$bundle_root/bin/BDInfo"
+    "$bundle_root/lib"
+  )
+  for required in "${required_paths[@]}"; do
+    [[ -e "$required" ]] || return 1
+  done
+  return 0
+}
+
 rm -rf "$ROOT_DIR/.tmp-dist"
 mkdir -p "$PKG_ROOT" "$DIST_DIR"
 
-bash "$SCRIPT_DIR/fetch-deps.sh"
+if bundle_ready; then
+  log "reuse existing local bundle: $ROOT_DIR/third_party/bundle/linux-amd64"
+else
+  bash "$SCRIPT_DIR/fetch-deps.sh"
+fi
 
 cp -f "$ROOT_DIR/bdtool" "$PKG_ROOT/bdtool"
 cp -f "$ROOT_DIR/bdtool.sh" "$PKG_ROOT/bdtool.sh"

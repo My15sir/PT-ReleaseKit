@@ -1,0 +1,37 @@
+name: Linux Bundle Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/bundle-release.yml
+      - scripts/build-bundle.sh
+      - third_party/bundle/linux-amd64/**
+
+permissions:
+  contents: write
+
+jobs:
+  publish-linux-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build offline linux bundle asset
+        run: bash scripts/build-bundle.sh
+
+      - name: Publish bundle release asset
+        uses: ncipollo/release-action@v1
+        with:
+          tag: bundle-latest
+          name: PT-BDtool Linux Bundle
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          artifacts: dist/PT-BDtool-linux-amd64.tar.gz
+          artifactErrorsFailBuild: true
+          body: |
+            自动更新的 Linux 离线运行包。
+            主要给控制端打包和源码仓库按需下载使用，不建议普通用户直接面对源码仓库。
