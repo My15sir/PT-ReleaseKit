@@ -45,6 +45,7 @@ FULLSCAN_SCP_ROOT="$ROOT_DIR/.full-test-fullscan-scp"
 FULLSCAN_SCP_SRC_DIR="$FULLSCAN_SCP_ROOT/subdir"
 FULLSCAN_SCP_SAMPLE="$FULLSCAN_SCP_SRC_DIR/fullscan.mp4"
 RUNTIME_RENDER_TEST="$TMPDIR_ROOT/test-render-runtime.py"
+PLACEHOLDER_PNG_TEST="$TMPDIR_ROOT/test-placeholder-png.py"
 
 if [[ -z "$CLI_BIN" ]]; then
   if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then
@@ -153,6 +154,49 @@ with tempfile.TemporaryDirectory(prefix="ptbd-runtime-render-") as temp_dir:
         raise SystemExit(f"unexpected PTBDTOOL_ROOT: {output!r}")
 PY
 
+cat > "$PLACEHOLDER_PNG_TEST" <<'PY'
+import base64
+import binascii
+import re
+import struct
+import sys
+from pathlib import Path
+
+pattern = re.compile(r"printf '([^']+)' \| base64 -d")
+
+for rel in ("bdtool", "bdtool.sh"):
+    path = Path(sys.argv[1]) / rel
+    text = path.read_text(encoding="utf-8")
+    match = pattern.search(text)
+    if not match:
+        raise SystemExit(f"placeholder png literal not found in {path}")
+    data = base64.b64decode(match.group(1))
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise SystemExit(f"invalid png signature in {path}")
+    pos = 8
+    seen_iend = False
+    while pos < len(data):
+        if pos + 12 > len(data):
+            raise SystemExit(f"truncated chunk header in {path}")
+        length = struct.unpack(">I", data[pos : pos + 4])[0]
+        chunk_type = data[pos + 4 : pos + 8]
+        end = pos + 12 + length
+        if end > len(data):
+            raise SystemExit(f"truncated chunk payload in {path}")
+        chunk_data = data[pos + 8 : pos + 8 + length]
+        chunk_crc = struct.unpack(">I", data[pos + 8 + length : end])[0]
+        calc_crc = binascii.crc32(chunk_type)
+        calc_crc = binascii.crc32(chunk_data, calc_crc) & 0xFFFFFFFF
+        if calc_crc != chunk_crc:
+            raise SystemExit(f"bad png crc in {path} chunk={chunk_type.decode('ascii', 'replace')}")
+        if chunk_type == b"IEND":
+            seen_iend = True
+            break
+        pos = end
+    if not seen_iend:
+        raise SystemExit(f"missing IEND chunk in {path}")
+PY
+
 write_log() {
   mkdir -p "$LOG_DIR"
   touch "$FULL_LOG" "$TMP_FULL_LOG"
@@ -237,6 +281,7 @@ run_step() {
 
 run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
 run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
+run_step "placeholder-png-valid" success python3 "$PLACEHOLDER_PNG_TEST" "$ROOT_DIR"
 run_step "remote-runtime-render" success python3 "$RUNTIME_RENDER_TEST" "$ROOT_DIR"
 run_step "workflow-ci-markers" success bash -c "grep -q 'name: CI' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Controller Builds' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
 run_step "bdtool-help" success "$CLI_BIN" --help

@@ -501,7 +501,7 @@ bt_finalize_audio_artifacts() {
 bt_create_placeholder_png() {
   local dst="$1"
   if command -v base64 >/dev/null 2>&1; then
-    printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMBAAZ/qT8AAAAASUVORK5CYII=' | base64 -d > "$dst" 2>/dev/null || : > "$dst"
+    printf 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=' | base64 -d > "$dst" 2>/dev/null || : > "$dst"
   else
     : > "$dst"
   fi
