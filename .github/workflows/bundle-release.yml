@@ -7,8 +7,28 @@ on:
       - main
     paths:
       - .github/workflows/bundle-release.yml
+      - README.md
+      - PT-BDtool.bat
+      - PT-BDtool.command
+      - PT-BDtool.desktop
+      - bdtool
+      - bdtool.sh
+      - install.sh
+      - ptbd
+      - ptbd-gui
+      - ptbd-gui.py
+      - ptbd_remote_backend.py
+      - ptbd-remote.sh
+      - ptbd-remote-start.sh
+      - ptbd-start.sh
+      - lib/**
       - scripts/build-bundle.sh
-      - third_party/bundle/linux-amd64/**
+      - scripts/deps.env
+      - scripts/ensure-bundle.py
+      - scripts/fetch-deps.sh
+      - scripts/prepare-remote-runtime.sh
+      - scripts/remote-upload-server.py
+      - scripts/update-deps.sh
 
 permissions:
   contents: write

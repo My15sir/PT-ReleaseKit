@@ -27,6 +27,24 @@ def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
     subprocess.run(command, check=True, env=env)
 
 
+def ensure_linux_bundle() -> None:
+    bundle_root = PROJECT_ROOT / "third_party" / "bundle" / "linux-amd64"
+    required = [
+        bundle_root / "bin" / "ffmpeg",
+        bundle_root / "bin" / "ffprobe",
+        bundle_root / "bin" / "mediainfo",
+        bundle_root / "bin" / "BDInfo",
+        bundle_root / "lib",
+    ]
+    if all(path.exists() for path in required):
+        return
+    ensure_script = PROJECT_ROOT / "scripts" / "ensure-bundle.py"
+    if not ensure_script.exists():
+        raise SystemExit(f"missing bundle helper: {ensure_script}")
+    python_bin = sys.executable or "python3"
+    run([python_bin, str(ensure_script)])
+
+
 def venv_python_path(venv_dir: Path) -> Path:
     if os.name == "nt":
         return venv_dir / "Scripts" / "python.exe"
@@ -155,6 +173,7 @@ def main() -> int:
     if not args.skip_deps:
         install_build_deps(python_bin)
 
+    ensure_linux_bundle()
     artifact = build_artifact(python_bin)
     print(f"[build-controller] artifact={artifact}")
     return 0

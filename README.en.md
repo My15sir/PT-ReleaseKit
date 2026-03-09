@@ -247,7 +247,7 @@ To keep the repository understandable instead of turning into a dumping ground, 
 - **Main entrypoints**: `ptbd`, `ptbd-start.sh`, `ptbd-gui`, `ptbd-remote.sh`
 - **Core processing logic**: `bdtool`, `bdtool.sh`
 - **Shared helpers**: `lib/`
-- **Install and dependency bundling**: `install.sh`, `scripts/`, `third_party/bundle/`
+- **Install and dependency bundling**: `install.sh`, `scripts/`, `scripts/ensure-bundle.py`, `third_party/bundle/` (generated on demand)
 - **Double-click launchers**: `PT-BDtool.bat`, `PT-BDtool.command`, `PT-BDtool.desktop`
 - **CI / regression testing**: `.github/workflows/ci.yml`, `full-test.sh`
 

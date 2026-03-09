@@ -29,17 +29,19 @@ print_bootstrap_commands() {
   cd ~
   git clone https://github.com/My15sir/PT-BDtool.git
   cd PT-BDtool
-  bash scripts/fetch-deps.sh
-  bash scripts/build-bundle.sh
+  python3 scripts/ensure-bundle.py
   bash install.sh --offline
 
 [HINT] Copy-paste (root/sudo):
   cd /opt
   sudo git clone https://github.com/My15sir/PT-BDtool.git
   cd PT-BDtool
-  sudo bash scripts/fetch-deps.sh
-  sudo bash scripts/build-bundle.sh
+  sudo python3 scripts/ensure-bundle.py
   sudo bash install.sh --offline
+
+[HINT] If you want to rebuild the local bundle manually on Linux:
+  bash scripts/fetch-deps.sh
+  bash scripts/build-bundle.sh
 EOF
 }
 
@@ -52,6 +54,7 @@ preflight_install_context() {
     "$SCRIPT_DIR/ptbd"
     "$SCRIPT_DIR/ptbd-gui"
     "$SCRIPT_DIR/ptbd-gui.py"
+    "$SCRIPT_DIR/ptbd_remote_backend.py"
     "$SCRIPT_DIR/ptbd-start.sh"
     "$SCRIPT_DIR/ptbd-remote.sh"
     "$SCRIPT_DIR/ptbd-remote-start.sh"
@@ -62,7 +65,6 @@ preflight_install_context() {
     "$SCRIPT_DIR/scripts/fetch-deps.sh"
     "$SCRIPT_DIR/scripts/build-bundle.sh"
     "$SCRIPT_DIR/scripts/remote-upload-server.py"
-    "$SCRIPT_DIR/third_party/bundle/linux-amd64/bin"
   )
 
   for req in "${required_project_files[@]}"; do
@@ -126,6 +128,24 @@ bundle_dep_status() {
     fi
   done
   return "$missing"
+}
+
+ensure_source_bundle() {
+  local ensure_script="$SCRIPT_DIR/scripts/ensure-bundle.py"
+  local bundle_root="$SCRIPT_DIR/third_party/bundle/linux-amd64"
+  if [[ -x "$bundle_root/bin/ffmpeg" && -x "$bundle_root/bin/ffprobe" && -x "$bundle_root/bin/mediainfo" && -x "$bundle_root/bin/BDInfo" && -d "$bundle_root/lib" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ensure_script" ]] && command -v python3 >/dev/null 2>&1; then
+    log "offline bundle missing; trying GitHub Release asset"
+    if python3 "$ensure_script"; then
+      return 0
+    fi
+    err "auto-download bundle failed: $ensure_script"
+  fi
+
+  return 1
 }
 
 resolve_effective_home() {
@@ -245,6 +265,7 @@ post_install_self_check() {
     "$install_root/ptbd"
     "$install_root/ptbd-gui"
     "$install_root/ptbd-gui.py"
+    "$install_root/ptbd_remote_backend.py"
     "$install_root/ptbd-start.sh"
     "$install_root/ptbd-remote.sh"
     "$install_root/ptbd-remote-start.sh"
@@ -503,13 +524,15 @@ required_bundle_files=(
 
 PRECHECK_TS="$(date +%s)"
 log "precheck start"
-if ! bundle_dep_status "${required_bundle_files[@]}"; then
+if ! ensure_source_bundle; then
   err "offline bundle dependencies are incomplete."
-  err "Fix option A (if ffmpeg/ffprobe/mediainfo/BDInfo already installed):"
+  err "Fix option A (recommended): python3 scripts/ensure-bundle.py"
+  err "Fix option B (if ffmpeg/ffprobe/mediainfo/BDInfo already installed):"
   err "  bash scripts/fetch-deps.sh && bash scripts/build-bundle.sh"
-  err "Fix option B (if they are NOT installed): use official release tarball then run install.sh --offline."
+  err "Fix option C (if they are NOT installed): use official release tarball then run install.sh --offline."
   exit 1
 fi
+bundle_dep_status "${required_bundle_files[@]}"
 log "precheck done (elapsed=$(elapsed_since "$PRECHECK_TS"))"
 
 if [[ -w "/opt" || ${EUID:-$(id -u)} -eq 0 ]]; then
@@ -526,6 +549,7 @@ copy_if_changed "$SCRIPT_DIR/bdtool.sh" "$INSTALL_ROOT/bdtool.sh" "bdtool.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd" "$INSTALL_ROOT/ptbd" "ptbd"
 copy_if_changed "$SCRIPT_DIR/ptbd-gui" "$INSTALL_ROOT/ptbd-gui" "ptbd-gui"
 copy_if_changed "$SCRIPT_DIR/ptbd-gui.py" "$INSTALL_ROOT/ptbd-gui.py" "ptbd-gui.py"
+copy_if_changed "$SCRIPT_DIR/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "ptbd_remote_backend.py"
 copy_if_changed "$SCRIPT_DIR/ptbd-start.sh" "$INSTALL_ROOT/ptbd-start.sh" "ptbd-start.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote.sh" "ptbd-remote.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote-start.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "ptbd-remote-start.sh"
@@ -538,12 +562,18 @@ else
   log "skip (missing optional file): README.md"
   SKIPPED_COUNT=$((SKIPPED_COUNT + 1))
 fi
-  copy_if_changed "$SCRIPT_DIR/lib/ui.sh" "$INSTALL_ROOT/lib/ui.sh" "lib/ui.sh"
+copy_if_changed "$SCRIPT_DIR/lib/ui.sh" "$INSTALL_ROOT/lib/ui.sh" "lib/ui.sh"
 mkdir -p "$INSTALL_ROOT/scripts"
+if [[ -f "$SCRIPT_DIR/scripts/ensure-bundle.py" ]]; then
+  copy_if_changed "$SCRIPT_DIR/scripts/ensure-bundle.py" "$INSTALL_ROOT/scripts/ensure-bundle.py" "scripts/ensure-bundle.py"
+fi
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
 copy_if_changed "$SCRIPT_DIR/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "scripts/prepare-remote-runtime.sh"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/PT-BDtool.command"
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/PT-BDtool.command" 2>/dev/null || true
+if [[ -f "$INSTALL_ROOT/scripts/ensure-bundle.py" ]]; then
+  chmod +x "$INSTALL_ROOT/scripts/ensure-bundle.py"
+fi
 
 install_desktop_launcher() {
   local install_root="$1"

@@ -5,13 +5,17 @@
 
 ---
 
-## 1. 仓库为什么看起来文件多
+## 1. 仓库现在为什么轻了一些
 
 源码本身并不算特别多。  
-让仓库显得“臃肿”的主要原因，是这里带了一整套离线运行包：
+之前最占体积的是整套 Linux 离线运行包。
 
-- `third_party/bundle/linux-amd64/bin`
-- `third_party/bundle/linux-amd64/lib`
+现在它不再长期跟踪进源码仓库，而是改成：
+
+- 默认从 GitHub Release 资产自动拉取
+- 本地缓存到 `third_party/bundle/linux-amd64`
+- 继续给 Windows / macOS 控制端打包使用
+- 继续给远端空白 VPS 回退运行使用
 
 它的作用是：
 
@@ -19,7 +23,7 @@
 - 支持空白 VPS 回退运行
 - 减少目标机手动装依赖
 
-所以大部分“文件很多”的感觉，其实来自离线 bundle，不是业务逻辑碎成了一堆小文件。
+所以现在主分支里看起来会干净很多，`third_party/bundle/linux-amd64` 只是按需生成目录，不是常驻源码。
 
 ---
 
@@ -97,8 +101,11 @@ ptbd-gui --self-check
 ### 控制端打包
 
 ```bash
+python3 scripts/ensure-bundle.py
 python3 scripts/build-controller-app.py
 ```
+
+如果本地已经有 `third_party/bundle/linux-amd64`，`ensure-bundle.py` 会直接复用，不会重复下载。
 
 ---
 
@@ -150,6 +157,18 @@ dist/controller-app/macos/PT-BDtool.app
 - 自动构建 macOS 控制端
 - 自动上传可分发产物
 
+### Linux bundle 资产
+
+工作流：
+
+- `.github/workflows/bundle-release.yml`
+
+作用：
+
+- 生成 `PT-BDtool-linux-amd64.tar.gz`
+- 发布 / 更新 `bundle-latest` Release 资产
+- 供源码仓库按需下载和控制端打包复用
+
 ### 常规回归
 
 工作流：
@@ -183,9 +202,9 @@ dist/controller-app/macos/PT-BDtool.app
 
 ## 8. 维护建议
 
-如果后面还想继续瘦身，优先做这两件事：
+如果后面还想继续维护这个思路，优先记住这两件事：
 
-1. 把离线 bundle 从源码仓库搬到 Release 资产
-2. 继续保持 `README.md` 只写给普通用户看
+1. `README.md` 继续只写给普通用户看
+2. Linux bundle 通过 Release 资产更新，不要再把 200MB+ 二进制直接塞回主分支
 
 不要再把开发说明塞回 `README.md`，不然小白还是会看懵。

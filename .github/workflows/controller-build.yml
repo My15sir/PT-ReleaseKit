@@ -16,9 +16,9 @@ on:
       - ptbd_remote_backend.py
       - lib/**
       - scripts/build-controller-app.py
+      - scripts/ensure-bundle.py
       - scripts/prepare-remote-runtime.sh
       - scripts/remote-upload-server.py
-      - third_party/bundle/linux-amd64/**
 
 jobs:
   build-controller:

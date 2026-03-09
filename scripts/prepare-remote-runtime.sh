@@ -159,6 +159,18 @@ normalize_remote_arch() {
   esac
 }
 
+ensure_local_bundle() {
+  local bundle_root="$APP_ROOT/third_party/bundle/linux-amd64"
+  if [[ -x "$bundle_root/bin/ffmpeg" && -x "$bundle_root/bin/ffprobe" && -x "$bundle_root/bin/mediainfo" && -x "$bundle_root/bin/BDInfo" && -d "$bundle_root/lib" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$APP_ROOT/scripts/ensure-bundle.py" ]] && command -v python3 >/dev/null 2>&1; then
+    log "local linux bundle missing; trying GitHub Release asset"
+    python3 "$APP_ROOT/scripts/ensure-bundle.py"
+  fi
+}
+
 require_local_files() {
   local archive_mode="$1"
   local path=""
@@ -168,6 +180,7 @@ require_local_files() {
     "$APP_ROOT/lib/ui.sh"
   )
   if [[ "$archive_mode" == "bundle" ]]; then
+    ensure_local_bundle || true
     required+=(
       "$APP_ROOT/third_party/bundle/linux-amd64/bin"
       "$APP_ROOT/third_party/bundle/linux-amd64/lib"

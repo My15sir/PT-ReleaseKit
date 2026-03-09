@@ -4,6 +4,8 @@ import hashlib
 import io
 import os
 import stat
+import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -485,6 +487,40 @@ class PTBDRemoteBackend:
         )
         return result.output.strip() == "ready"
 
+    def local_bundle_ready(self) -> bool:
+        bundle_root = self.app_root / "third_party" / "bundle" / "linux-amd64"
+        required = [
+            bundle_root / "bin" / "ffmpeg",
+            bundle_root / "bin" / "ffprobe",
+            bundle_root / "bin" / "mediainfo",
+            bundle_root / "bin" / "BDInfo",
+            bundle_root / "lib",
+        ]
+        return all(path.exists() for path in required)
+
+    def ensure_local_bundle(self) -> None:
+        if self.local_bundle_ready():
+            return
+        ensure_script = self.app_root / "scripts" / "ensure-bundle.py"
+        if not ensure_script.exists():
+            raise RemoteCommandError(f"缺少本地 bundle 拉取脚本：{ensure_script}")
+        python_bin = sys.executable or "python3"
+        self.log("[gui] 本地 linux bundle 缺失，尝试自动拉取 Release 资产")
+        result = subprocess.run(
+            [python_bin, str(ensure_script)],
+            cwd=str(self.app_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        for line in result.stdout.splitlines():
+            self.log(line)
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or f"退出码：{result.returncode}"
+            raise RemoteCommandError(f"本地 bundle 自动拉取失败：{message}")
+        if not self.local_bundle_ready():
+            raise RemoteCommandError("本地 bundle 拉取结束，但文件仍不完整。")
+
     def require_local_runtime_files(self, archive_mode: str) -> None:
         required = [
             self.app_root / "bdtool",
@@ -492,6 +528,7 @@ class PTBDRemoteBackend:
             self.app_root / "lib" / "ui.sh",
         ]
         if archive_mode == "bundle":
+            self.ensure_local_bundle()
             required.extend(
                 [
                     self.app_root / "third_party" / "bundle" / "linux-amd64" / "bin",
