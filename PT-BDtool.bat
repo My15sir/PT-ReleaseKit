@@ -1,7 +1,13 @@
 @echo off
 setlocal EnableExtensions
 set "SCRIPT_DIR=%~dp0"
+set "APP_EXE=%SCRIPT_DIR%PT-BDtool.exe"
 set "GUI_SCRIPT=%SCRIPT_DIR%ptbd-gui.py"
+
+if exist "%APP_EXE%" (
+  start "" "%APP_EXE%" %*
+  exit /b 0
+)
 
 if not exist "%GUI_SCRIPT%" goto :missing_gui
 
@@ -31,7 +37,7 @@ if not errorlevel 1 (
 
 echo [ERROR] Cannot find a usable Python launcher.
 echo [HINT] Please install Python 3 first.
-echo [HINT] For password mode and one-click remote start, install Git for Windows too.
+echo [HINT] Or use the packaged standalone PT-BDtool.exe instead.
 pause
 exit /b 1
 

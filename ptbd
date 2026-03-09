@@ -107,12 +107,14 @@ write_remote_config() {
   local scan_include="$5"
   local scan_exclude="$6"
   local auto_cleanup="$7"
+  local auto_bootstrap="$8"
   mkdir -p "$(dirname "$PTBD_REMOTE_CONFIG_FILE")"
   cat > "$PTBD_REMOTE_CONFIG_FILE" <<EOF
 PTBD_REMOTE_HOST=$(quote_sh "$host")
 PTBD_REMOTE_PORT=$(quote_sh "$port")
 PTBD_REMOTE_PASSWORD=$(quote_sh "$password")
 PTBD_REMOTE_PT_CMD='pt'
+PTBD_REMOTE_BOOTSTRAP=$(quote_sh "$auto_bootstrap")
 PTBD_LOCAL_SAVE_DIR=$(quote_sh "$save_dir")
 PTBD_SCAN_INCLUDE_ROOTS=$(quote_sh "$scan_include")
 PTBD_SCAN_EXCLUDE_ROOTS=$(quote_sh "$scan_exclude")
@@ -171,7 +173,7 @@ run_setup() {
       ;;
     2|remote|REMOTE|vps|VPS)
       PTBD_MODE="remote"
-      local host="" port="" auth_mode="" password="" scan_include="" scan_exclude="" save_dir="" auto_cleanup=""
+      local host="" port="" auth_mode="" password="" scan_include="" scan_exclude="" save_dir="" auto_cleanup="" auto_bootstrap=""
       host="$(prompt_value "VPS 地址（如 root@1.2.3.4）: " "${PTBD_REMOTE_HOST:-root@your-vps}")"
       port="$(prompt_value "SSH 端口 [22]: " "22")"
       auth_mode="$(prompt_value "认证方式 key / password [password]: " "password")"
@@ -180,11 +182,12 @@ run_setup() {
       else
         password=""
       fi
-      scan_include="$(prompt_value "默认扫描目录 [${PTBD_SCAN_INCLUDE_ROOTS:-/home/admin/Downloads}]: " "${PTBD_SCAN_INCLUDE_ROOTS:-/home/admin/Downloads}")"
+      auto_bootstrap="$(prompt_value "空白 VPS 自动自举？1=是 0=否 [1]: " "1")"
+      scan_include="$(prompt_value "默认扫描目录（留空=智能扫描常见目录） [${PTBD_SCAN_INCLUDE_ROOTS:-}]: " "${PTBD_SCAN_INCLUDE_ROOTS:-}")"
       scan_exclude="$(prompt_value "额外排除目录（可留空） []: " "${PTBD_SCAN_EXCLUDE_ROOTS:-}")"
       save_dir="$(prompt_value "本机保存目录 [$default_save_dir]: " "$default_save_dir")"
       auto_cleanup="$(prompt_value "处理后自动清理 VPS 生成目录？1=是 0=否 [1]: " "1")"
-      write_remote_config "$host" "$port" "$password" "$save_dir" "$scan_include" "$scan_exclude" "$auto_cleanup"
+      write_remote_config "$host" "$port" "$password" "$save_dir" "$scan_include" "$scan_exclude" "$auto_cleanup" "$auto_bootstrap"
       write_easy_config
       echo "已保存为 VPS 模式。以后直接运行：ptbd"
       ;;

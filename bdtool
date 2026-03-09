@@ -977,16 +977,16 @@ generate_item() {
     finalize_audio_output "$out" || hard_fail=1
   else
     screen "生成进度: 10% (BDInfo 生成中)"
+    local bd_source="$src"
+    local bd_stdout_tmp=""
+    local bd_report=""
+    local bd_attempt=0
+    local disc_probe_video=""
+    bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
+    find "$out" -maxdepth 1 -type f \( -name '.bdinfo_stdout_*.txt' -o -name 'BDInfo.txt' \) -delete 2>/dev/null || true
+    rm -f "$bd_stdout_tmp"
+    disc_probe_video="$(pick_disc_probe_video "$src" || true)"
     if require_runtime_cmd BDInfo; then
-      local bd_source="$src"
-      local bd_stdout_tmp=""
-      local bd_report=""
-      local bd_attempt=0
-      bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
-      find "$out" -maxdepth 1 -type f \( -name '.bdinfo_stdout_*.txt' -o -name 'BDInfo.txt' \) -delete 2>/dev/null || true
-      rm -f "$bd_stdout_tmp"
-      local disc_probe_video=""
-      disc_probe_video="$(pick_disc_probe_video "$src" || true)"
       if ! bdinfo_write_report "$bd_source" "$out" "$bd_stdout_tmp"; then
         screen_error "BDInfo 执行失败，改用降级报告继续导出：$bd_source"
         if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "BDInfo 执行失败或崩溃" "$disc_probe_video"; then
@@ -1020,16 +1020,19 @@ generate_item() {
           find "$out" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo.txt' -delete
         fi
       fi
-      rm -f "$bd_stdout_tmp"
-      if [[ "$hard_fail" -eq 0 ]]; then
-        screen "生成进度: 55% (BDInfo 生成完成)"
-        screen "生成进度: 60% (截图生成准备)"
-        make_disc_screenshots "$src" "$out" 60 6
-        screen "生成进度: 96% (生成结果校验中)"
-        finalize_disc_output "$out" || hard_fail=1
-      fi
     else
-      hard_fail=1
+      screen_error "缺少 BDInfo，改用降级报告继续导出：$bd_source"
+      if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "缺少 BDInfo 命令" "$disc_probe_video"; then
+        hard_fail=1
+      fi
+    fi
+    rm -f "$bd_stdout_tmp"
+    if [[ "$hard_fail" -eq 0 ]]; then
+      screen "生成进度: 55% (BDInfo 生成完成)"
+      screen "生成进度: 60% (截图生成准备)"
+      make_disc_screenshots "$src" "$out" 60 6
+      screen "生成进度: 96% (生成结果校验中)"
+      finalize_disc_output "$out" || hard_fail=1
     fi
   fi
 

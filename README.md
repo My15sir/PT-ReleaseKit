@@ -36,6 +36,13 @@ hash -r
 - `export PATH=...`：让当前终端立刻能找到新装好的命令
 - `hash -r`：让当前 shell 刷新命令缓存，避免还指向旧版
 
+补充说明：
+- **这套 `install.sh` 主要面向 Linux 本机处理 / Linux VPS**
+- **如果你是 Windows 或 macOS，只想“本机控制 VPS → 结果回到本机”，更建议直接看下面的 GUI / 双击用法**
+- **现在已经支持把控制端打成真正免安装的独立应用**：Windows 用 `PT-BDtool.exe`，macOS 用 `PT-BDtool.app`
+- Windows / macOS 当前更适合当“控制端”；真正的媒体处理更推荐放在 Debian / Ubuntu / Alpine VPS 上
+- 现在空白 VPS 会优先尝试**自动检测系统并自动安装依赖**，推荐系统是：`Debian`、`Ubuntu`、`Alpine`
+
 安装完成后，先检查下面两个命令：
 
 ```bash
@@ -89,8 +96,13 @@ ptbd --setup
 - VPS 地址
 - SSH 端口
 - 密码或密钥模式
-- 默认扫描目录
+- 默认扫描目录（**不确定就留空**）
 - 本机保存目录
+
+说明：
+- 默认扫描目录留空时，会自动优先扫描这些常见目录：`/home /root /data /mnt /media /srv`
+- 只有你明确知道媒体都在某个目录时，才建议手动填白名单
+- 如果 VPS 是 `Debian` / `Ubuntu` / `Alpine`，空白机首次启动会先尝试自动安装 `bash`、`python3`、`curl`、`ffmpeg`、`mediainfo` 等依赖
 
 配置完成后，以后直接运行：
 
@@ -112,6 +124,47 @@ ptbd-start
 - 处理完成后自动回传到你本机桌面
 - 默认自动清理 VPS 上本次生成目录
 
+### 4.1）Windows / macOS 真正免安装独立版
+
+如果你是给别人发“控制端成品”，现在推荐直接发：
+
+- **Windows**：`PT-BDtool.exe`
+- **macOS**：`PT-BDtool.app`
+
+这两个独立包的目标就是：
+
+- 本机**不需要再装 Python**
+- 本机**不需要再装 Git for Windows**
+- 本机**不需要再装 bash / ssh / scp**
+- 用户打开应用后，直接填 VPS 信息、扫描、双击条目、下载结果
+
+独立版控制端现在内置了 SSH 连接和结果下载逻辑，主流程会这样走：
+
+1. 连接 VPS
+2. 扫描候选媒体
+3. 你双击一个条目
+4. 远端自动生成信息图 / 媒体信息
+5. 结果自动下载回你本机选定目录
+6. 默认自动清理 VPS 上这次生成的输出目录
+
+如果你要自己构建独立版，请在**对应系统本机**执行：
+
+```bash
+python3 scripts/build-controller-app.py
+```
+
+构建结果默认在：
+
+- Windows：`dist/controller-app/windows/PT-BDtool.exe`
+- macOS：`dist/controller-app/macos/PT-BDtool.app`
+
+补充说明：
+
+- **Windows 的 `.exe` 需要在 Windows 上构建**
+- **macOS 的 `.app` 需要在 macOS 上构建**
+- Linux 机器**不能直接交叉打出真正可用的 macOS `.app`**
+- 第一次打开时，Windows 可能弹出 SmartScreen，macOS 可能弹出 Gatekeeper；这是系统拦截，不是程序没打包成功
+
 如果你想在 **Windows / macOS / Linux** 上尽量走“图形窗口 + 双击”路线，也可以试试：
 
 ```bash
@@ -120,22 +173,29 @@ ptbd-gui
 
 这是当前的跨平台 GUI MVP，主要做这几件事：
 - 先填 VPS 地址、密码、本机保存目录
+- 扫描目录留空时，自动优先扫描常见媒体目录
 - 可以直接从 VPS 拉候选列表到图形界面里看
 - 扫描后可以直接双击候选条目，自动执行“生成 → 回传 → 清理”
 - 如果当前只扫到 1 个候选，点击“一步到位启动”会先自动扫描，再直接开跑
 - 如果当前有多个候选，“一步到位启动”会先选中第一项，等你双击确认，避免误处理
-- 密码模式现在优先走 SSH askpass，不再强依赖本机安装 `sshpass`
+- 独立版现在内置 SSH 客户端；源码直接跑时，才会回退系统 `ssh` / `bash` 模式
+- 空白 VPS 会优先尝试 **Debian / Ubuntu / Alpine 自动装依赖**
+- 只有系统依赖还不够时，才会回退到“上传内置运行包”
+- 真走回退上传时，第一次可能要传几百 MB；慢的时候等 1～3 分钟都算正常
+- 如果日志里出现 `GLIBC_xxx not found` 或 `bundle runtime check failed`，说明这台 VPS 系统太老或和离线包不兼容；这时要么手动在 VPS 安装系统 `ffmpeg` / `mediainfo`，要么换更新的 Linux 发行版
 
 仓库里也附带了几个双击文件：
 - `PT-BDtool.bat`：更适合 Windows
 - `PT-BDtool.command`：更适合 macOS
 - `PT-BDtool.desktop`：更适合 Linux
 
-这 3 个双击文件现在都会优先打开 `ptbd-gui` 图形界面，而不是直接把你扔进旧菜单。
+这 3 个双击文件现在会优先尝试打开已经打好的独立应用；如果旁边没有独立应用，才会回退打开源码版 `ptbd-gui`。
 
 推荐理解成这样：
-- **Windows**：双击 `PT-BDtool.bat`，建议先装好 Python 3 和 Git for Windows
-- **macOS**：双击 `PT-BDtool.command`；如果第一次被系统拦住，先右键“打开”一次
+- **Windows 独立版**：双击 `PT-BDtool.exe`，不需要再装 Python / Git for Windows
+- **macOS 独立版**：双击 `PT-BDtool.app`，不需要再装 Python / `bash` / `ssh`；如果第一次被系统拦住，先右键“打开”一次
+- **Windows 源码版**：双击 `PT-BDtool.bat` 前，还是建议先装好 Python 3；如果要回退旧模式，再装 Git for Windows
+- **macOS 源码版**：双击 `PT-BDtool.command` 前，先确认本机有 Python 3、`bash`、`ssh`
 - **Linux**：双击 `PT-BDtool.desktop`，或者在应用菜单里启动安装后的 PT-BDtool
 
 双击后的推荐顺序：
@@ -218,6 +278,7 @@ bdtool ~/Videos/test.mp4 --out ~/PT-output
 - `ptbd --setup`：首次配置
 - `ptbd-start`：双击友好入口
 - `ptbd-gui`：跨平台图形启动器 MVP
+- `scripts/build-controller-app.py`：把 Windows / macOS 控制端打成独立应用
 - `pt` / `bdtool`：旧入口和高级入口
 - `bdtool <文件或目录>`：直接走命令模式
 
@@ -269,6 +330,30 @@ pt
 - 出问题时更容易定位
 - 对新手最友好
 
+### VPS 自动装依赖说明
+
+现在 `ptbd` / `ptbd-remote` / `ptbd-gui` 在空白 VPS 上会优先做这件事：
+
+1. 自动识别系统类型
+2. 如果是 `Debian` / `Ubuntu` / `Alpine`，先尝试自动安装依赖
+3. 依赖够了就直接用系统命令跑
+4. 只有系统依赖不够时，才回退上传项目自带运行包
+
+当前自动安装优先补这些：
+
+- `bash`
+- `python3`
+- `curl`
+- `ffmpeg`
+- `mediainfo`
+- `zip`
+
+说明：
+
+- `ffprobe` 一般跟着 `ffmpeg` 一起提供
+- 原盘 / ISO 需要的 `BDInfo` 会尽量复用系统里的 `bd_info`；如果系统里没有，也会尽量降级生成可用报告，而不是直接整单卡死
+- 如果 VPS 登录用户既不是 `root`，也没有免密码 `sudo`，那“自动安装依赖”这一步就可能做不到完全自动
+
 ### VPS 扫描建议
 
 现在开始，`pt` 在 **SSH / VPS 环境下执行“全盘扫描”** 时，会默认优先只扫描这些目录：
@@ -287,7 +372,7 @@ pt
 如果你想自己指定“只扫哪些目录”，可以这样写：
 
 ```bash
-export BDTOOL_SCAN_INCLUDE_ROOTS="/home/admin/Downloads /data/media"
+export BDTOOL_SCAN_INCLUDE_ROOTS="/home/your-user/Downloads /data/media"
 pt
 ```
 
@@ -301,6 +386,7 @@ pt
 说明：
 - `BDTOOL_SCAN_INCLUDE_ROOTS`：白名单，多个目录用空格或逗号分隔
 - `BDTOOL_SCAN_EXCLUDE_ROOTS`：额外排除目录，多个目录用空格或逗号分隔
+- 如果你**不确定**该填什么，直接留空即可，让程序自动优先扫描常见目录
 - 如果你已经明确知道媒体都在 `~/Downloads`，强烈建议直接用白名单，速度和结果都会更干净
 
 ### 一步到位：本机控制 VPS，自动回传桌面
@@ -349,7 +435,7 @@ ptbd --setup
 如果你不想进向导，也仍然可以直接一次性写参数：
 
 ```bash
-ptbd-remote --host root@你的VPSIP --password '你的密码' --scan-include "/home/admin/Downloads" --save-dir /你的/保存目录
+ptbd-remote --host root@你的VPSIP --password '你的密码' --scan-include "/home/your-user/Downloads /data/media" --save-dir /你的/保存目录
 ```
 
 ---
@@ -540,6 +626,57 @@ pt
 ```
 
 这样结果就统一在 `$HOME/PT-BDtool-downloads` 里。
+
+### 6）双击后没反应，或者提示缺少 `bash` / `ssh` / Python
+
+先分清你打开的是哪一种：
+
+- **独立版**：`PT-BDtool.exe` / `PT-BDtool.app`
+- **源码版**：`PT-BDtool.bat` / `PT-BDtool.command` / `ptbd-gui`
+
+如果你用的是 **独立版**：
+
+- 正常情况下**不需要**再装 `bash` / `ssh` / Python
+- Windows 第一次可能被 SmartScreen 拦一下
+- macOS 第一次可能被 Gatekeeper 拦一下，需要右键“打开”一次
+
+如果你用的是 **源码版**，这通常不是项目本身坏了，而是**控制端前置条件不够**：
+
+- **Windows**：先装 Python 3；如果还在走旧 shell 模式，再装 Git for Windows
+- **macOS / Linux**：先确认 `python3`、`bash`、`ssh` 都能在终端里执行
+
+你也可以先跑一次：
+
+```bash
+ptbd-gui --self-check
+```
+
+先看 `backend=`、`bash=`、`ssh=`、`remote_script=` 这些项是不是正常。
+
+### 7）空白 VPS 自举后，日志里出现 `GLIBC_xxx not found` 或 `bundle runtime check failed`
+
+这不一定是你填错了，而更像是 **VPS 系统版本太老**，和仓库里这份离线运行包不兼容。
+
+先按下面两种思路选一个：
+
+- **稳一点**：直接在 VPS 安装系统依赖，比如 `ffmpeg`、`mediainfo`
+- **省事一点**：换一台更新的 Linux x86_64 VPS 再试
+
+如果你当前 VPS 本身已经装好了系统 `ffmpeg` / `mediainfo`，项目会优先回退到系统依赖继续跑。
+
+### 8）为什么它没有自动装好 VPS 依赖
+
+最常见是这几种：
+
+- 这台 VPS 不是 `Debian` / `Ubuntu` / `Alpine`
+- 你登录的不是 `root`，而且也没有免密码 `sudo`
+- VPS 本身没有网络，或者软件源不可用
+
+这时候项目还是会尽量继续：
+
+- 能用系统现有依赖就继续用
+- 不行再尝试回退到内置运行包
+- 如果两条路都不通，才会明确报错
 
 ---
 

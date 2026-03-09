@@ -30,7 +30,13 @@ show_error() {
 
 SCRIPT_PATH="$(resolve_script_path "$0")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+APP_BUNDLE="$SCRIPT_DIR/PT-BDtool.app"
 LAUNCHER="$SCRIPT_DIR/ptbd-gui"
+
+if [[ -d "$APP_BUNDLE" ]]; then
+  open "$APP_BUNDLE" >/dev/null 2>&1 || true
+  exit 0
+fi
 
 if [[ ! -x "$LAUNCHER" ]]; then
   show_error "找不到 ptbd-gui。请确认你是在完整的 PT-BDtool 目录里双击这个文件。"

@@ -172,6 +172,7 @@ setup_bundle_runtime() {
   local bundle_dir="${PTBD_BUNDLE_DIR:-}"
   local bundle_bin=""
   local bundle_lib=""
+  local wrapper_dir=""
   if [[ -z "$bundle_dir" && -n "$app_root" ]]; then
     bundle_dir="$app_root/third_party/bundle/linux-amd64"
   fi
@@ -187,10 +188,16 @@ setup_bundle_runtime() {
       PATH="$bundle_bin:$PATH"
       export PATH
     else
-      if system_media_runtime_healthy; then
+      wrapper_dir="$(ensure_bundle_wrapper_dir "$bundle_dir" "$bundle_bin" "$bundle_lib" || true)"
+      if [[ -n "$wrapper_dir" ]] && bundle_runtime_healthy "$wrapper_dir" "$bundle_lib"; then
+        PATH="$wrapper_dir:$PATH"
+        export PATH
+        log_info "bundle runtime check passed via wrapper dir"
+      elif system_media_runtime_healthy; then
         log_info "bundle runtime check failed, use system ffmpeg/ffprobe/mediainfo"
       else
         log_warn "bundle runtime check failed, skip bundle/bin PATH injection"
+        log_warn "current bundle may require a newer glibc/system runtime on this VPS"
         log_warn "install system deps: apt-get update && apt-get install -y ffmpeg mediainfo"
       fi
     fi
@@ -201,6 +208,34 @@ setup_bundle_runtime() {
     BDTOOL_BUNDLE_DIR="$bundle_dir"
     export BDTOOL_BUNDLE_DIR
   fi
+}
+
+ensure_bundle_wrapper_dir() {
+  local bundle_dir="$1"
+  local bundle_bin="$2"
+  local bundle_lib="$3"
+  local wrapper_dir="$bundle_dir/.wrappers"
+  local cmd=""
+  local target=""
+  local escaped_target=""
+  local escaped_lib=""
+  mkdir -p "$wrapper_dir"
+
+  for cmd in ffmpeg ffprobe mediainfo BDInfo; do
+    target="$bundle_bin/$cmd"
+    [[ -x "$target" ]] || continue
+    escaped_target="$(printf '%q' "$target")"
+    escaped_lib="$(printf '%q' "$bundle_lib")"
+    cat > "$wrapper_dir/$cmd" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+export LD_LIBRARY_PATH=$escaped_lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
+exec $escaped_target "\$@"
+EOF
+    chmod +x "$wrapper_dir/$cmd"
+  done
+
+  printf '%s' "$wrapper_dir"
 }
 
 bundle_runtime_healthy() {

@@ -5,6 +5,7 @@ PTBD_REMOTE_HOST="${PTBD_REMOTE_HOST:-}"
 PTBD_REMOTE_PORT="${PTBD_REMOTE_PORT:-22}"
 PTBD_REMOTE_PASSWORD="${PTBD_REMOTE_PASSWORD:-}"
 PTBD_REMOTE_PT_CMD="${PTBD_REMOTE_PT_CMD:-pt}"
+PTBD_REMOTE_BOOTSTRAP="${PTBD_REMOTE_BOOTSTRAP:-1}"
 PTBD_REMOTE_RETURN_PORT="${PTBD_REMOTE_RETURN_PORT:-18080}"
 PTBD_LOCAL_HTTP_PORT="${PTBD_LOCAL_HTTP_PORT:-18080}"
 PTBD_LOCAL_SAVE_DIR="${PTBD_LOCAL_SAVE_DIR:-}"
@@ -15,9 +16,29 @@ PTBD_KEEP_BRIDGE="${PTBD_KEEP_BRIDGE:-0}"
 PTBD_REMOTE_TARGET_PATH="${PTBD_REMOTE_TARGET_PATH:-}"
 PTBD_REMOTE_CONFIG_FILE="${PTBD_REMOTE_CONFIG_FILE:-$HOME/.config/ptbd-remote/config.env}"
 
-SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+resolve_script_path() {
+  local src="$1"
+  if command -v readlink >/dev/null 2>&1; then
+    local resolved=""
+    resolved="$(readlink -f "$src" 2>/dev/null || true)"
+    if [[ -n "$resolved" ]]; then
+      echo "$resolved"
+      return 0
+    fi
+  fi
+  local dir=""
+  while [[ -L "$src" ]]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ "$src" != /* ]] && src="$dir/$src"
+  done
+  echo "$src"
+}
+
+SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 UPLOAD_SERVER_SCRIPT="${SCRIPT_DIR}/scripts/remote-upload-server.py"
+REMOTE_PREPARE_SCRIPT="${SCRIPT_DIR}/scripts/prepare-remote-runtime.sh"
 
 UPLOAD_SERVER_PID=""
 TUNNEL_PID=""
@@ -60,7 +81,8 @@ Options:
   --host user@server        Remote SSH target
   --port N                  Remote SSH port (default: 22)
   --password TEXT           SSH password; if omitted, use SSH keys
-  --remote-cmd CMD          Remote command to launch (default: pt)
+  --remote-cmd CMD          Remote command to launch when bootstrap is off (default: pt)
+  --bootstrap 0|1           Auto upload runtime to blank VPS first (default: 1)
   --save-dir DIR            Local receive directory (default: Desktop)
   --local-port N            Local HTTP server port (default: 18080)
   --remote-return-port N    Remote reverse tunnel port (default: 18080)
@@ -78,6 +100,7 @@ Environment variables:
   PTBD_REMOTE_PORT
   PTBD_REMOTE_PASSWORD
   PTBD_REMOTE_PT_CMD
+  PTBD_REMOTE_BOOTSTRAP
   PTBD_LOCAL_SAVE_DIR
   PTBD_SCAN_INCLUDE_ROOTS
   PTBD_SCAN_EXCLUDE_ROOTS
@@ -88,6 +111,14 @@ EOF
 
 quote_sh() {
   printf "'%s'" "$(printf '%s' "${1:-}" | sed "s/'/'\\\\''/g")"
+}
+
+normalize_bool() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) printf '1' ;;
+    0|false|FALSE|no|NO|off|OFF) printf '0' ;;
+    *) return 1 ;;
+  esac
 }
 
 resolve_save_dir() {
@@ -123,6 +154,7 @@ PTBD_REMOTE_HOST=$(quote_sh "$PTBD_REMOTE_HOST")
 PTBD_REMOTE_PORT=$(quote_sh "$PTBD_REMOTE_PORT")
 PTBD_REMOTE_PASSWORD=$(quote_sh "$PTBD_REMOTE_PASSWORD")
 PTBD_REMOTE_PT_CMD=$(quote_sh "$PTBD_REMOTE_PT_CMD")
+PTBD_REMOTE_BOOTSTRAP=$(quote_sh "$PTBD_REMOTE_BOOTSTRAP")
 PTBD_LOCAL_SAVE_DIR=$(quote_sh "$PTBD_LOCAL_SAVE_DIR")
 PTBD_SCAN_INCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS")
 PTBD_SCAN_EXCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS")
@@ -152,6 +184,7 @@ run_setup() {
 
   echo "PT-BDtool 远端一步到位配置向导"
   echo "配置文件：$PTBD_REMOTE_CONFIG_FILE"
+  echo "说明：会先检测 Debian / Ubuntu / Alpine 依赖并尽量自动安装；只有系统依赖不够时，才回退上传内置运行包。"
 
   PTBD_REMOTE_HOST="$(prompt_value "VPS 地址 (如 root@1.2.3.4) [${PTBD_REMOTE_HOST:-root@your-vps}]: " "${PTBD_REMOTE_HOST:-root@your-vps}")"
   PTBD_REMOTE_PORT="$(prompt_value "SSH 端口 [${PTBD_REMOTE_PORT:-22}]: " "${PTBD_REMOTE_PORT:-22}")"
@@ -162,7 +195,8 @@ run_setup() {
   else
     PTBD_REMOTE_PASSWORD=""
   fi
-  PTBD_SCAN_INCLUDE_ROOTS="$(prompt_value "默认扫描目录白名单 [${PTBD_SCAN_INCLUDE_ROOTS:-/home/admin/Downloads}]: " "${PTBD_SCAN_INCLUDE_ROOTS:-/home/admin/Downloads}")"
+  PTBD_REMOTE_BOOTSTRAP="$(prompt_value "空白 VPS 自动自举？1=是 0=否 [${PTBD_REMOTE_BOOTSTRAP:-1}]: " "${PTBD_REMOTE_BOOTSTRAP:-1}")"
+  PTBD_SCAN_INCLUDE_ROOTS="$(prompt_value "默认扫描目录白名单（留空=智能扫描常见目录） [${PTBD_SCAN_INCLUDE_ROOTS:-}]: " "${PTBD_SCAN_INCLUDE_ROOTS:-}")"
   PTBD_SCAN_EXCLUDE_ROOTS="$(prompt_value "额外排除目录（可留空） [${PTBD_SCAN_EXCLUDE_ROOTS:-}]: " "${PTBD_SCAN_EXCLUDE_ROOTS:-}")"
   PTBD_LOCAL_SAVE_DIR="$(prompt_value "本机保存目录 [${PTBD_LOCAL_SAVE_DIR:-$current_save_dir}]: " "${PTBD_LOCAL_SAVE_DIR:-$current_save_dir}")"
   PTBD_AUTO_CLEANUP="$(prompt_value "处理完成后自动清理 VPS 生成目录？1=是 0=否 [${PTBD_AUTO_CLEANUP:-1}]: " "${PTBD_AUTO_CLEANUP:-1}")"
@@ -184,6 +218,7 @@ Current config
   remote port:      ${PTBD_REMOTE_PORT:-22}
   auth mode:        $( [[ -n "$PTBD_REMOTE_PASSWORD" ]] && echo password || echo key )
   remote command:   ${PTBD_REMOTE_PT_CMD:-pt}
+  auto bootstrap:   ${PTBD_REMOTE_BOOTSTRAP:-1}
   local save dir:   ${save_dir}
   scan include:     ${PTBD_SCAN_INCLUDE_ROOTS:-<unset>}
   scan exclude:     ${PTBD_SCAN_EXCLUDE_ROOTS:-<unset>}
@@ -217,6 +252,7 @@ while [[ $# -gt 0 ]]; do
     --port) PTBD_REMOTE_PORT="${2:-}"; shift 2 ;;
     --password) PTBD_REMOTE_PASSWORD="${2:-}"; shift 2 ;;
     --remote-cmd) PTBD_REMOTE_PT_CMD="${2:-}"; shift 2 ;;
+    --bootstrap) PTBD_REMOTE_BOOTSTRAP="${2:-}"; shift 2 ;;
     --save-dir) PTBD_LOCAL_SAVE_DIR="${2:-}"; shift 2 ;;
     --local-port) PTBD_LOCAL_HTTP_PORT="${2:-}"; shift 2 ;;
     --remote-return-port) PTBD_REMOTE_RETURN_PORT="${2:-}"; shift 2 ;;
@@ -241,6 +277,25 @@ fi
 [[ -f "$UPLOAD_SERVER_SCRIPT" ]] || { err "missing upload server script: $UPLOAD_SERVER_SCRIPT"; exit 1; }
 command -v ssh >/dev/null 2>&1 || { err "missing ssh"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { err "missing python3"; exit 1; }
+PTBD_REMOTE_BOOTSTRAP="$(normalize_bool "$PTBD_REMOTE_BOOTSTRAP" 2>/dev/null || true)"
+[[ -n "$PTBD_REMOTE_BOOTSTRAP" ]] || { err "invalid --bootstrap value, expected 0 or 1"; exit 2; }
+if [[ "$PTBD_REMOTE_BOOTSTRAP" == "1" && ! -f "$REMOTE_PREPARE_SCRIPT" ]]; then
+  err "missing remote bootstrap helper: $REMOTE_PREPARE_SCRIPT"
+  exit 1
+fi
+
+EFFECTIVE_REMOTE_CMD="$PTBD_REMOTE_PT_CMD"
+if [[ "$PTBD_REMOTE_BOOTSTRAP" == "1" ]]; then
+  log "bootstrapping remote runtime for blank VPS"
+  log "bootstrap now prefers remote auto-install on Debian/Ubuntu/Alpine; only fallback bundle uploads may reach about 300MB"
+  PREPARE_CMD=("$REMOTE_PREPARE_SCRIPT" --host "$PTBD_REMOTE_HOST" --port "$PTBD_REMOTE_PORT")
+  if [[ -n "$PTBD_REMOTE_PASSWORD" ]]; then
+    PREPARE_CMD+=(--password "$PTBD_REMOTE_PASSWORD")
+  fi
+  EFFECTIVE_REMOTE_CMD="$("${PREPARE_CMD[@]}")"
+  [[ -n "$EFFECTIVE_REMOTE_CMD" ]] || { err "remote bootstrap returned empty command"; exit 1; }
+  log "remote runtime ready: $EFFECTIVE_REMOTE_CMD"
+fi
 
 LOCAL_SAVE_DIR="$(resolve_save_dir)"
 show_config
@@ -269,10 +324,10 @@ if [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_EXCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS");"
 fi
 if [[ -n "$PTBD_REMOTE_TARGET_PATH" ]]; then
-  REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$PTBD_REMOTE_PT_CMD") generate-path --path $(quote_sh "$PTBD_REMOTE_TARGET_PATH") --lang zh"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$EFFECTIVE_REMOTE_CMD") generate-path --path $(quote_sh "$PTBD_REMOTE_TARGET_PATH") --lang zh"
   log "processing remote path directly: $PTBD_REMOTE_TARGET_PATH"
 else
-  REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$PTBD_REMOTE_PT_CMD")"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$EFFECTIVE_REMOTE_CMD")"
   log "opening remote menu; select an item and the rest runs automatically"
 fi
 

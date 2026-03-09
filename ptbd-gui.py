@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import queue
+import shlex
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,13 @@ from tkinter import BOTH, END, LEFT, W, X, filedialog, messagebox, ttk
 import tkinter as tk
 from tkinter.scrolledtext import ScrolledText
 
+from ptbd_remote_backend import (
+    PTBDRemoteBackend,
+    TaskCancelledError,
+    backend_available,
+    backend_status,
+)
+
 
 APP_NAME = "PT-BDtool"
 
@@ -22,10 +30,19 @@ def resolve_script_path(path: str) -> Path:
     return Path(path).expanduser().resolve()
 
 
+def is_app_root(candidate: Path) -> bool:
+    return (
+        (candidate / "bdtool").is_file()
+        and (candidate / "bdtool.sh").is_file()
+        and (candidate / "lib" / "ui.sh").is_file()
+    )
+
+
 def find_app_root() -> Path:
     script_path = resolve_script_path(__file__)
     script_dir = script_path.parent
     candidates = [
+        Path(getattr(sys, "_MEIPASS", "")),
         Path(os.environ.get("PTBDTOOL_ROOT", "")),
         Path(os.environ.get("PTBD_INSTALL_ROOT", "")),
         script_dir,
@@ -36,7 +53,7 @@ def find_app_root() -> Path:
     for candidate in candidates:
         if not str(candidate):
             continue
-        if (candidate / "ptbd-remote.sh").is_file() and (candidate / "scripts/remote-upload-server.py").is_file():
+        if is_app_root(candidate):
             return candidate.resolve()
     return script_dir
 
@@ -76,8 +93,9 @@ DEFAULT_CONFIG = {
     "remote_port": "22",
     "remote_password": "",
     "remote_cmd": "pt",
+    "remote_bootstrap": True,
     "save_dir": default_save_dir(),
-    "scan_include": "/home/admin/Downloads",
+    "scan_include": "",
     "scan_exclude": "",
     "auto_cleanup": True,
 }
@@ -120,6 +138,14 @@ def shell_script_path() -> Path:
     return APP_ROOT / "ptbd-remote.sh"
 
 
+def bootstrap_script_path() -> Path:
+    return APP_ROOT / "scripts/prepare-remote-runtime.sh"
+
+
+def standalone_backend_label() -> str:
+    return "内置独立控制后端" if backend_available() else "旧版 shell 回退后端"
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -127,6 +153,8 @@ class App:
         self.root.geometry("920x720")
         self.process: subprocess.Popen[str] | None = None
         self.reader_threads: list[threading.Thread] = []
+        self.backend: PTBDRemoteBackend | None = None
+        self.backend_thread: threading.Thread | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.status_var = tk.StringVar(value="就绪：先填 VPS，扫描候选后双击条目或点“一步到位启动”")
         self.selected_path_var = tk.StringVar(value="")
@@ -151,7 +179,7 @@ class App:
 
         subtitle = ttk.Label(
             container,
-            text="第一次填好 VPS 和保存目录。扫描到候选后，双击条目或点按钮即可自动生成、回传并清理。",
+            text="第一次填好 VPS 和保存目录。扫描目录留空时，会自动优先扫常见媒体目录；扫到候选后可直接双击开跑。",
         )
         subtitle.pack(anchor=W, pady=(4, 12))
 
@@ -161,8 +189,8 @@ class App:
         self._add_entry(form, "VPS 地址", "remote_host", 0, "例如：root@1.2.3.4")
         self._add_entry(form, "SSH 端口", "remote_port", 1, "默认 22")
         self._add_entry(form, "SSH 密码", "remote_password", 2, "留空表示走密钥", show="*")
-        self._add_entry(form, "远端命令", "remote_cmd", 3, "默认 pt")
-        self._add_entry(form, "扫描白名单", "scan_include", 4, "默认 /home/admin/Downloads")
+        self._add_entry(form, "远端命令", "remote_cmd", 3, "源码旧模式才需要，一般别改")
+        self._add_entry(form, "扫描白名单", "scan_include", 4, "留空=自动扫描 /home /root /data /mnt /media /srv")
         self._add_entry(form, "额外排除", "scan_exclude", 5, "可留空")
         self._add_entry(form, "本机保存目录", "save_dir", 6, "结果回到本机这里")
 
@@ -175,12 +203,22 @@ class App:
             text="成功后自动清理 VPS 生成目录",
             variable=self.config_vars["auto_cleanup"],
         ).pack(side=LEFT, padx=(12, 0))
+        self.config_vars["remote_bootstrap"] = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            save_row,
+            text="空白 VPS 自动上传运行包（推荐）",
+            variable=self.config_vars["remote_bootstrap"],
+        ).pack(side=LEFT, padx=(12, 0))
 
         form.columnconfigure(1, weight=1)
 
         tips = ttk.Label(
             container,
-            text="说明：Windows 目前建议安装 Git for Windows；macOS / Linux 需要本机有 bash、ssh、python3。",
+            text=(
+                f"说明：当前优先走 {standalone_backend_label()}。打包后的 Windows / macOS 独立版不再依赖本机 Python、Git、bash、ssh；"
+                "源码直跑时若缺少内置后端，才会回退旧版 shell 模式。空白 VPS 会优先尝试 Debian / Ubuntu / Alpine 自动装依赖，"
+                "只有不够时才回退内置运行包。"
+            ),
         )
         tips.pack(anchor=W, pady=(0, 12))
 
@@ -214,6 +252,7 @@ class App:
         self.log_view.pack(fill=BOTH, expand=True)
         self.log_view.insert(END, f"App root: {APP_ROOT}\n")
         self.log_view.insert(END, f"Config: {CONFIG_PATH}\n")
+        self.log_view.insert(END, f"Backend: {backend_status()}\n")
         self.log_view.insert(END, "准备完成。\n")
         self.log_view.configure(state="disabled")
 
@@ -239,8 +278,9 @@ class App:
             "remote_port": self.config_vars["remote_port"].get().strip() or "22",
             "remote_password": self.config_vars["remote_password"].get(),
             "remote_cmd": self.config_vars["remote_cmd"].get().strip() or "pt",
+            "remote_bootstrap": bool(self.config_vars["remote_bootstrap"].get()),
             "save_dir": self.config_vars["save_dir"].get().strip() or default_save_dir(),
-            "scan_include": self.config_vars["scan_include"].get().strip() or "/home/admin/Downloads",
+            "scan_include": self.config_vars["scan_include"].get().strip(),
             "scan_exclude": self.config_vars["scan_exclude"].get().strip(),
             "auto_cleanup": bool(self.config_vars["auto_cleanup"].get()),
         }
@@ -277,24 +317,54 @@ class App:
         except Exception as exc:
             messagebox.showinfo("配置目录", f"{target}\n\n无法自动打开：{exc}")
 
+    def task_running(self) -> bool:
+        legacy_running = self.process is not None and self.process.poll() is None
+        backend_running = self.backend_thread is not None and self.backend_thread.is_alive()
+        return legacy_running or backend_running
+
+    def clear_backend_task(self, backend: PTBDRemoteBackend) -> None:
+        backend.close()
+        if self.backend is backend:
+            self.backend = None
+        self.root.after(0, self.clear_backend_thread_if_idle)
+
+    def clear_backend_thread_if_idle(self) -> None:
+        if self.backend_thread and not self.backend_thread.is_alive():
+            self.backend_thread = None
+
+    def start_remote_with_backend(self, data: dict, save_dir: Path, selected_path: str) -> None:
+        backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
+        self.backend = backend
+        self.append_log("")
+        self.append_log("[gui] 启动方式：内置独立控制后端（本机不再依赖 bash / ssh / scp）")
+        self.append_log(f"[gui] 本机保存目录：{save_dir}")
+        self.append_log(f"[gui] 自动处理选中候选：{selected_path}")
+        if data["remote_bootstrap"]:
+            self.append_log("[gui] 空白 VPS 自举已开启：先尝试系统依赖自动安装，不够时才回退上传内置运行包")
+        self.status_var.set("运行中：已直接下发生成/下载/清理任务")
+
+        def worker() -> None:
+            try:
+                local_path = backend.process_selected_path(selected_path, save_dir)
+                self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{local_path.parent}")
+                self.log_queue.put("[gui] 任务结束，退出码：0")
+            except TaskCancelledError:
+                self.log_queue.put("[gui] 任务已取消")
+                self.log_queue.put("[gui] 任务结束，退出码：130")
+            except Exception as exc:
+                self.log_queue.put(f"[gui] 任务失败：{exc}")
+                self.log_queue.put("[gui] 任务结束，退出码：1")
+            finally:
+                self.clear_backend_task(backend)
+
+        self.backend_thread = threading.Thread(target=worker, daemon=True)
+        self.backend_thread.start()
+
     def start_remote(self) -> None:
-        if self.process and self.process.poll() is None:
+        if self.task_running():
             messagebox.showinfo("任务进行中", "当前已经有任务在运行。")
             return
         if not self.save_form():
-            return
-
-        bash_bin = find_bash()
-        if not bash_bin:
-            messagebox.showerror(
-                "缺少 bash",
-                "当前机器没有找到 bash。\n\nWindows 请先安装 Git for Windows；macOS / Linux 请确认 bash 可用。",
-            )
-            return
-
-        remote_script = shell_script_path()
-        if not remote_script.is_file():
-            messagebox.showerror("缺少脚本", f"找不到远端入口：{remote_script}")
             return
 
         data = self.form_data()
@@ -307,6 +377,35 @@ class App:
             self.scan_remote(auto_start=True)
             return
 
+        if backend_available():
+            if not selected_path:
+                messagebox.showinfo("先选条目", "请先在候选列表里选中或双击一个条目，再点“一步到位启动”。")
+                self.status_var.set("等待选择：先在候选列表里选中要处理的条目")
+                return
+            self.start_remote_with_backend(data, save_dir, selected_path)
+            return
+
+        bash_bin = find_bash()
+        if not bash_bin:
+            messagebox.showerror(
+                "缺少 bash",
+                "当前机器没有找到 bash。\n\n当前也没有可用的内置独立控制后端，所以没法继续。\n"
+                "Windows 请先安装 Git for Windows，或直接使用打包后的独立版应用。",
+            )
+            return
+        if not shutil.which("ssh"):
+            messagebox.showerror(
+                "缺少 ssh",
+                "当前机器没有找到 ssh。\n\n当前也没有可用的内置独立控制后端，所以没法继续。\n"
+                "Windows 请先安装 Git for Windows，或直接使用打包后的独立版应用。",
+            )
+            return
+
+        remote_script = shell_script_path()
+        if not remote_script.is_file():
+            messagebox.showerror("缺少脚本", f"找不到远端入口：{remote_script}")
+            return
+
         env = os.environ.copy()
         env.update(
             {
@@ -314,6 +413,7 @@ class App:
                 "PTBD_REMOTE_PORT": data["remote_port"],
                 "PTBD_REMOTE_PASSWORD": data["remote_password"],
                 "PTBD_REMOTE_PT_CMD": data["remote_cmd"],
+                "PTBD_REMOTE_BOOTSTRAP": "1" if data["remote_bootstrap"] else "0",
                 "PTBD_LOCAL_SAVE_DIR": str(save_dir),
                 "PTBD_SCAN_INCLUDE_ROOTS": data["scan_include"],
                 "PTBD_SCAN_EXCLUDE_ROOTS": data["scan_exclude"],
@@ -390,14 +490,49 @@ class App:
             env.setdefault("DISPLAY", "ptbd-askpass:0")
         return env, askpass_path
 
-    def build_scan_command(self, data: dict) -> list[str]:
+    def prepare_remote_runtime(self, data: dict) -> str:
+        bash_bin = find_bash()
+        if not bash_bin:
+            raise RuntimeError("本机缺少 bash。")
+        helper_script = bootstrap_script_path()
+        if not helper_script.is_file():
+            raise RuntimeError(f"找不到自举脚本：{helper_script}")
+        helper_env = os.environ.copy()
+        helper_env.update(
+            {
+                "PTBD_REMOTE_HOST": data["remote_host"],
+                "PTBD_REMOTE_PORT": data["remote_port"],
+                "PTBD_REMOTE_PASSWORD": data["remote_password"],
+            }
+        )
+        result = subprocess.run(
+            [bash_bin, str(helper_script), "--host", data["remote_host"], "--port", data["remote_port"]],
+            cwd=str(APP_ROOT),
+            env=helper_env,
+            text=True,
+            capture_output=True,
+            timeout=1800,
+            check=False,
+            stdin=subprocess.DEVNULL,
+        )
+        if result.stderr.strip():
+            for line in result.stderr.strip().splitlines():
+                self.log_queue.put(line)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"bootstrap rc={result.returncode}")
+        remote_cmd = result.stdout.strip()
+        if not remote_cmd:
+            raise RuntimeError("远端自举成功了，但没有拿到远端 bdtool 路径。")
+        return remote_cmd
+
+    def build_scan_command(self, data: dict, remote_cmd: str) -> list[str]:
         ssh_bin = shutil.which("ssh")
         if not ssh_bin:
             raise RuntimeError("本机缺少 ssh。")
         remote_script = [
-            f"export BDTOOL_SCAN_INCLUDE_ROOTS={sh_quote(data['scan_include'])};",
-            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={sh_quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
-            "exec bdtool scan-json --full --lang zh",
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(data['scan_include'])};" if data["scan_include"] else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
+            f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
         ]
         return [
             ssh_bin,
@@ -414,15 +549,47 @@ class App:
     def scan_remote(self, auto_start: bool = False) -> None:
         if not self.save_form():
             return
+        if self.task_running():
+            messagebox.showinfo("任务进行中", "请先等当前任务结束，或点“停止当前任务”。")
+            return
         self.auto_start_after_scan = auto_start
         data = self.form_data()
         self.status_var.set("扫描中：正在从 VPS 获取候选列表")
         self.append_log("[gui] 开始通过 scan-json 获取 VPS 候选列表")
 
+        if backend_available():
+            backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
+            self.backend = backend
+
+            def worker() -> None:
+                try:
+                    if data["remote_bootstrap"]:
+                        self.log_queue.put("[gui] 空白 VPS 自举已开启：先尝试系统依赖自动安装，不够时才回退上传内置运行包")
+                    self.scan_items = backend.scan_items()
+                    self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
+                    self.root.after(0, lambda: self.refresh_scan_items(auto_start=auto_start))
+                except TaskCancelledError:
+                    self.log_queue.put("[gui] 扫描已取消")
+                    self.root.after(0, lambda: self.status_var.set("扫描已取消"))
+                except Exception as exc:
+                    self.log_queue.put(f"[gui] 获取候选失败：{exc}")
+                    self.root.after(0, lambda: self.status_var.set("获取候选失败，请看日志"))
+                finally:
+                    self.clear_backend_task(backend)
+
+            self.backend_thread = threading.Thread(target=worker, daemon=True)
+            self.backend_thread.start()
+            return
+
         def worker() -> None:
             askpass_path = None
             try:
-                cmd = self.build_scan_command(data)
+                remote_cmd = "bdtool"
+                if data["remote_bootstrap"]:
+                    self.log_queue.put("[gui] 空白 VPS 自举已开启：会先尝试系统依赖自动安装；只有回退内置运行包时才可能上传约 300MB")
+                    remote_cmd = self.prepare_remote_runtime(data)
+                    self.log_queue.put(f"[gui] 远端运行包就绪：{remote_cmd}")
+                cmd = self.build_scan_command(data, remote_cmd)
                 env, askpass_path = self.build_ssh_env(data)
                 result = subprocess.run(
                     cmd,
@@ -508,15 +675,20 @@ class App:
         self.reader_threads.append(thread)
 
     def stop_remote(self) -> None:
-        if not self.process or self.process.poll() is not None:
-            self.status_var.set("当前没有运行中的任务。")
-            return
-        try:
-            self.process.terminate()
-            self.append_log("[gui] 已请求停止当前任务")
+        if self.backend_thread and self.backend_thread.is_alive() and self.backend is not None:
+            self.backend.cancel()
+            self.append_log("[gui] 已请求停止当前独立后端任务")
             self.status_var.set("已请求停止，请稍等。")
-        except Exception as exc:
-            messagebox.showerror("停止失败", str(exc))
+            return
+        if self.process and self.process.poll() is None:
+            try:
+                self.process.terminate()
+                self.append_log("[gui] 已请求停止当前任务")
+                self.status_var.set("已请求停止，请稍等。")
+            except Exception as exc:
+                messagebox.showerror("停止失败", str(exc))
+            return
+        self.status_var.set("当前没有运行中的任务。")
 
     def append_log(self, text: str) -> None:
         self.log_view.configure(state="normal")
@@ -536,7 +708,7 @@ class App:
         self.root.after(150, self._poll_logs)
 
     def on_close(self) -> None:
-        if self.process and self.process.poll() is None:
+        if self.task_running():
             if not messagebox.askyesno("退出", "当前任务还在运行。确定要退出并停止它吗？"):
                 return
             self.stop_remote()
@@ -550,10 +722,14 @@ def cli_main() -> int:
         return 0
     if "--self-check" in sys.argv:
         bash_bin = find_bash() or "<missing>"
+        ssh_bin = shutil.which("ssh") or "<missing>"
         print(f"app_root={APP_ROOT}")
         print(f"config={CONFIG_PATH}")
+        print(f"backend={backend_status()}")
         print(f"bash={bash_bin}")
+        print(f"ssh={ssh_bin}")
         print(f"remote_script={shell_script_path()}")
+        print(f"bootstrap_script={bootstrap_script_path()}")
         return 0
 
     root = tk.Tk()
@@ -567,7 +743,3 @@ def cli_main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(cli_main())
-
-
-def sh_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\\''") + "'"
