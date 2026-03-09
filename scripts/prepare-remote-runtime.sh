@@ -634,10 +634,10 @@ EOS
   chmod +x "\$work_dir/bin/BDInfo"
 fi
 
-cat > "\$work_dir/ptbd-runtime" <<EOS
+cat > "\$work_dir/ptbd-runtime" <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
-RUNTIME_DIR=\$runtime_dir
+RUNTIME_DIR=$(quote_sh "$REMOTE_RUNTIME_DIR")
 export PTBDTOOL_ROOT="\\\$RUNTIME_DIR"
 export PTBD_INSTALL_ROOT="\\\$RUNTIME_DIR"
 export PATH="\\\$RUNTIME_DIR/bin:\\\$PATH"

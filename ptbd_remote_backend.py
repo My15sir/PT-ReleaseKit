@@ -723,6 +723,7 @@ class PTBDRemoteBackend:
         remote_tmp_dir: str,
         archive_mode: str,
     ) -> str:
+        runtime_dir_literal = quote_sh(remote_runtime_dir)
         return f"""
 set -eu
 
@@ -761,10 +762,10 @@ EOS
   chmod +x "$work_dir/bin/BDInfo"
 fi
 
-cat > "$work_dir/ptbd-runtime" <<EOS
+cat > "$work_dir/ptbd-runtime" <<'EOS'
 #!/usr/bin/env bash
 set -euo pipefail
-RUNTIME_DIR=$runtime_dir
+RUNTIME_DIR={runtime_dir_literal}
 export PTBDTOOL_ROOT="$RUNTIME_DIR"
 export PTBD_INSTALL_ROOT="$RUNTIME_DIR"
 export PATH="$RUNTIME_DIR/bin:$PATH"

@@ -44,6 +44,7 @@ FULLSCAN_SSH_SAMPLE="$FULLSCAN_SSH_SRC_DIR/fullscan.mp4"
 FULLSCAN_SCP_ROOT="$ROOT_DIR/.full-test-fullscan-scp"
 FULLSCAN_SCP_SRC_DIR="$FULLSCAN_SCP_ROOT/subdir"
 FULLSCAN_SCP_SAMPLE="$FULLSCAN_SCP_SRC_DIR/fullscan.mp4"
+RUNTIME_RENDER_TEST="$TMPDIR_ROOT/test-render-runtime.py"
 
 if [[ -z "$CLI_BIN" ]]; then
   if [[ -x "$ROOT_DIR/bdtool.sh" ]]; then
@@ -108,6 +109,49 @@ mkdir -p "$(dirname "$dst")"
 cp -f "$src" "$dst"
 SH
 chmod +x "$SCP_TEST_BIN/scp"
+
+cat > "$RUNTIME_RENDER_TEST" <<'PY'
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+sys.path.insert(0, sys.argv[1])
+
+from ptbd_remote_backend import PTBDRemoteBackend
+
+
+with tempfile.TemporaryDirectory(prefix="ptbd-runtime-render-") as temp_dir:
+    temp_path = Path(temp_dir)
+    runtime_dir = temp_path / "runtime with spaces"
+    runtime_dir.mkdir()
+
+    bdtool_path = runtime_dir / "bdtool"
+    bdtool_path.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s\\n' \"$PTBDTOOL_ROOT\"\n",
+        encoding="utf-8",
+    )
+    bdtool_path.chmod(0o755)
+
+    bdtool_sh_path = runtime_dir / "bdtool.sh"
+    bdtool_sh_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    bdtool_sh_path.chmod(0o755)
+
+    backend = PTBDRemoteBackend(temp_path, {}, logger=None)
+    script = backend.render_prepare_runtime_script(
+        remote_runtime_dir=str(runtime_dir),
+        remote_launcher=str(runtime_dir / "ptbd-runtime"),
+        remote_archive=str(temp_path / "missing.tar.gz"),
+        remote_tmp_dir=str(temp_path / "tmp"),
+        archive_mode="minimal",
+    )
+
+    subprocess.run(["sh", "-lc", script], check=True)
+    output = subprocess.check_output([str(runtime_dir / "ptbd-runtime")], text=True).strip()
+    if output != str(runtime_dir):
+        raise SystemExit(f"unexpected PTBDTOOL_ROOT: {output!r}")
+PY
 
 write_log() {
   mkdir -p "$LOG_DIR"
@@ -193,6 +237,7 @@ run_step() {
 
 run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
 run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
+run_step "remote-runtime-render" success python3 "$RUNTIME_RENDER_TEST" "$ROOT_DIR"
 run_step "workflow-ci-markers" success bash -c "grep -q 'name: CI' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Controller Builds' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
 run_step "bdtool-help" success "$CLI_BIN" --help
 run_step "bdtool-version" success "$CLI_BIN" --version
