@@ -88,14 +88,14 @@ jobs:
             quick_start_title: PT-BDtool Linux 快速开始
             quick_start_body: |
               1. 解压 PT-BDtool-linux-portable.tar.gz
-              2. 双击“启动PT-BDtool.sh”，或者双击 PT-BDtool
+              2. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击“启动PT-BDtool.sh”
               3. 填 VPS 地址、端口、密码、本机保存目录
               4. 点击“扫描 VPS 候选”
               5. 双击你要处理的条目
               
               提醒：
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
-              - 如果系统提示没执行权限，先运行：chmod +x 启动PT-BDtool.sh PT-BDtool
+              - 如果系统提示没执行权限，先运行：chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool
               - Linux 便携版配置优先保存在程序同目录
 
     steps:
@@ -174,6 +174,21 @@ jobs:
                   encoding="utf-8",
               )
               launcher.chmod(0o755)
+              desktop_file = upload_dir / "PT-BDtool.desktop"
+              desktop_file.write_text(
+                  "[Desktop Entry]\n"
+                  "Version=1.0\n"
+                  "Type=Application\n"
+                  "Name=PT-BDtool\n"
+                  "Comment=Portable PT-BDtool Linux launcher\n"
+                  "Exec=bash -lc 'SCRIPT_DIR=\"$(cd -P \"$(dirname \"$1\")\" && pwd)\"; export PTBD_PORTABLE_CONFIG=1; if [[ -x \"$SCRIPT_DIR/启动PT-BDtool.sh\" ]]; then exec \"$SCRIPT_DIR/启动PT-BDtool.sh\"; fi; exec \"$SCRIPT_DIR/PT-BDtool\"' dummy %k\n"
+                  "Terminal=false\n"
+                  "StartupNotify=true\n"
+                  "Categories=Utility;AudioVideo;\n"
+                  "Icon=applications-multimedia\n",
+                  encoding="utf-8",
+              )
+              desktop_file.chmod(0o755)
           PY
 
       - name: Pack portable archive
@@ -242,7 +257,7 @@ jobs:
             ## 3 步上手
 
             1. 解压
-            2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app` / Linux 双击 `启动PT-BDtool.sh`
+            2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app` / Linux 优先双击 `PT-BDtool.desktop`
             3. 填 VPS 地址、端口、密码、本机保存目录，然后点 `扫描 VPS 候选` 并双击条目
 
             VPS 上先放好视频 / 音频 / BDMV / ISO。
@@ -259,7 +274,8 @@ jobs:
             如果系统拦住：
             - Windows：`更多信息 -> 仍要运行`
             - macOS：右键应用后点一次 `打开`
-            - Linux：如果提示无执行权限，先运行 `chmod +x 启动PT-BDtool.sh PT-BDtool`
+            - Linux：如果桌面文件不生效，就改双击 `启动PT-BDtool.sh`
+            - Linux：如果提示无执行权限，先运行 `chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool`
 
             说明：
             - 本项目为 AI 生成项目
