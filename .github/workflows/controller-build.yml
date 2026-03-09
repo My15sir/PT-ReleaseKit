@@ -31,17 +31,41 @@ jobs:
           - os: windows-latest
             label: Windows
             built_path: dist/controller-app/windows/PT-BDtool.exe
-            launcher_path: PT-BDtool.bat
-            upload_dir: artifact/PT-BDtool-windows
-            artifact_name: PT-BDtool-windows
+            upload_dir: artifact/PT-BDtool-windows-portable
+            artifact_name: PT-BDtool-windows-portable
             smoke_path: dist/controller-app/windows/PT-BDtool.exe
+            quick_start_name: 打开前先看.txt
+            quick_start_title: PT-BDtool Windows 快速开始
+            quick_start_body: |
+              1. 双击 PT-BDtool.exe
+              2. 填 VPS 地址、端口、密码、本机保存目录
+              3. 点击“扫描 VPS 候选”
+              4. 双击你要处理的条目
+              5. 等待结果自动下载回本机
+              
+              提醒：
+              - 如果 Windows 拦截，请点“更多信息 -> 仍要运行”
+              - 不需要安装 Python
+              - 不需要安装 Git for Windows
           - os: macos-14
             label: macOS
             built_path: dist/controller-app/macos/PT-BDtool.app
-            launcher_path: PT-BDtool.command
-            upload_dir: artifact/PT-BDtool-macos
-            artifact_name: PT-BDtool-macos
+            upload_dir: artifact/PT-BDtool-macos-portable
+            artifact_name: PT-BDtool-macos-portable
             smoke_path: dist/controller-app/macos/PT-BDtool.app/Contents/MacOS/PT-BDtool
+            quick_start_name: 打开前先看.txt
+            quick_start_title: PT-BDtool macOS 快速开始
+            quick_start_body: |
+              1. 双击 PT-BDtool.app
+              2. 如果第一次被系统拦住，请右键应用，点“打开”
+              3. 填 VPS 地址、端口、密码、本机保存目录
+              4. 点击“扫描 VPS 候选”
+              5. 双击你要处理的条目
+              6. 等待结果自动下载回本机
+              
+              提醒：
+              - 不需要安装 Python
+              - 不需要安装 bash / ssh
 
     steps:
       - name: Checkout
@@ -77,9 +101,10 @@ jobs:
           from pathlib import Path
 
           built_path = Path(r"${{ matrix.built_path }}")
-          launcher_path = Path(r"${{ matrix.launcher_path }}")
           upload_dir = Path(r"${{ matrix.upload_dir }}")
-          readme_path = Path("README.md")
+          quick_start_path = upload_dir / r"${{ matrix.quick_start_name }}"
+          quick_start_title = r"""${{ matrix.quick_start_title }}"""
+          quick_start_body = r"""${{ matrix.quick_start_body }}""".strip()
 
           if upload_dir.exists():
               shutil.rmtree(upload_dir)
@@ -90,10 +115,10 @@ jobs:
           else:
               shutil.copy2(built_path, upload_dir / built_path.name)
 
-          if launcher_path.exists():
-              shutil.copy2(launcher_path, upload_dir / launcher_path.name)
-          if readme_path.exists():
-              shutil.copy2(readme_path, upload_dir / readme_path.name)
+          quick_start_path.write_text(
+              quick_start_title + "\n\n" + quick_start_body + "\n",
+              encoding="utf-8",
+          )
           PY
 
       - name: Upload build artifact
