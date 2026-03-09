@@ -13,10 +13,13 @@ from pathlib import Path
 
 APP_NAME = "PT-BDtool"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-REQUIREMENTS_FILE = PROJECT_ROOT / "requirements-controller-build.txt"
 VENV_DIR = PROJECT_ROOT / "build" / "controller-build-venv"
 BUILD_ROOT = PROJECT_ROOT / "build" / "controller-app"
 DIST_ROOT = PROJECT_ROOT / "dist" / "controller-app"
+BUILD_REQUIREMENTS = [
+    "paramiko>=3.5,<4",
+    "PyInstaller>=6.6,<7",
+]
 
 
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
@@ -46,7 +49,7 @@ def ensure_build_venv() -> Path:
 
 def install_build_deps(python_bin: Path) -> None:
     run([str(python_bin), "-m", "pip", "install", "--upgrade", "pip"])
-    run([str(python_bin), "-m", "pip", "install", "-r", str(REQUIREMENTS_FILE)])
+    run([str(python_bin), "-m", "pip", "install", *BUILD_REQUIREMENTS])
 
 
 def add_data_sep() -> str:
@@ -147,9 +150,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Build standalone PT-BDtool controller app")
     parser.add_argument("--skip-deps", action="store_true", help="Skip pip install inside build venv")
     args = parser.parse_args()
-
-    if not REQUIREMENTS_FILE.is_file():
-        raise SystemExit(f"requirements file missing: {REQUIREMENTS_FILE}")
 
     python_bin = ensure_build_venv()
     if not args.skip_deps:

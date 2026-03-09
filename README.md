@@ -165,6 +165,91 @@ python3 scripts/build-controller-app.py
 - Linux 机器**不能直接交叉打出真正可用的 macOS `.app`**
 - 第一次打开时，Windows 可能弹出 SmartScreen，macOS 可能弹出 Gatekeeper；这是系统拦截，不是程序没打包成功
 
+### 4.2）怎么发布 Windows / macOS 控制端
+
+如果你现在要给别人发独立控制端，按这个最短流程走：
+
+#### Windows 发布
+
+在 **Windows 本机** 运行：
+
+```bash
+python -m pip install --upgrade pip
+python scripts/build-controller-app.py
+```
+
+产物默认在：
+
+```text
+dist/controller-app/windows/PT-BDtool.exe
+```
+
+发包前至少确认：
+
+1. 双击 `PT-BDtool.exe` 能打开
+2. 能保存配置
+3. 能连接 VPS
+4. 能扫出候选
+5. 能处理一个样本
+6. 结果能回到本机保存目录
+
+建议最终发一个压缩包，例如：
+
+```text
+PT-BDtool-windows-x64.zip
+```
+
+里面至少放：
+
+- `PT-BDtool.exe`
+- `README.md`
+
+#### macOS 发布
+
+在 **macOS 本机** 运行：
+
+```bash
+python3 -m pip install --upgrade pip
+python3 scripts/build-controller-app.py
+```
+
+产物默认在：
+
+```text
+dist/controller-app/macos/PT-BDtool.app
+```
+
+发包前至少确认：
+
+1. 双击 `PT-BDtool.app` 能打开
+2. 第一次被系统拦住时，右键“打开”后能进去
+3. 能保存配置
+4. 能连接 VPS
+5. 能扫出候选
+6. 能处理一个样本并把结果拉回本机
+
+建议最终发一个压缩包，例如：
+
+```text
+PT-BDtool-macos.zip
+```
+
+里面至少放：
+
+- `PT-BDtool.app`
+- `README.md`
+
+#### 发版前统一检查
+
+每次准备发版，建议至少过这几项：
+
+1. `./full-test.sh`
+2. `python3 ptbd-gui.py --self-check`
+3. `python3 scripts/build-controller-app.py`
+4. Windows 真机双击验证
+5. macOS 真机双击验证
+6. Debian / Ubuntu / Alpine 各至少一台 VPS 验证
+
 如果你想在 **Windows / macOS / Linux** 上尽量走“图形窗口 + 双击”路线，也可以试试：
 
 ```bash

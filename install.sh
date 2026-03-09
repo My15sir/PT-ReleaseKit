@@ -541,8 +541,9 @@ fi
   copy_if_changed "$SCRIPT_DIR/lib/ui.sh" "$INSTALL_ROOT/lib/ui.sh" "lib/ui.sh"
 mkdir -p "$INSTALL_ROOT/scripts"
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
+copy_if_changed "$SCRIPT_DIR/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "scripts/prepare-remote-runtime.sh"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/PT-BDtool.command"
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/PT-BDtool.command"
 
 install_desktop_launcher() {
   local install_root="$1"

@@ -1,2 +1,0 @@
-paramiko>=3.5,<4
-PyInstaller>=6.6,<7
