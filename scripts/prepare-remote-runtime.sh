@@ -23,8 +23,6 @@ REMOTE_HAS_CURL="0"
 REMOTE_HAS_FFMPEG="0"
 REMOTE_HAS_FFPROBE="0"
 REMOTE_HAS_MEDIAINFO="0"
-REMOTE_HAS_BDINFO="0"
-REMOTE_HAS_BD_INFO="0"
 
 log() { printf '[ptbd-bootstrap] %s\n' "$*" >&2; }
 err() { printf '[ptbd-bootstrap][ERROR] %s\n' "$*" >&2; }
@@ -322,8 +320,6 @@ parse_remote_info() {
   REMOTE_HAS_FFMPEG="0"
   REMOTE_HAS_FFPROBE="0"
   REMOTE_HAS_MEDIAINFO="0"
-  REMOTE_HAS_BDINFO="0"
-  REMOTE_HAS_BD_INFO="0"
 
   while IFS='=' read -r key value; do
     case "$key" in
@@ -340,8 +336,6 @@ parse_remote_info() {
       REMOTE_HAS_FFMPEG) REMOTE_HAS_FFMPEG="$value" ;;
       REMOTE_HAS_FFPROBE) REMOTE_HAS_FFPROBE="$value" ;;
       REMOTE_HAS_MEDIAINFO) REMOTE_HAS_MEDIAINFO="$value" ;;
-      REMOTE_HAS_BDINFO) REMOTE_HAS_BDINFO="$value" ;;
-      REMOTE_HAS_BD_INFO) REMOTE_HAS_BD_INFO="$value" ;;
     esac
   done <<< "$raw"
 }
