@@ -175,31 +175,20 @@ jobs:
           artifactErrorsFailBuild: true
           artifacts: release-dist/*.zip
           body: |
-            ## 普通用户直接下载这里
+            ## 下载
 
-            不要下载源码。  
-            按你的系统下载一个压缩包就行。
-
-            ## 第 1 步：下载
+            不要下载源码，按系统下载一个压缩包就行。
 
             - Windows：`PT-BDtool-windows-portable.zip`
             - macOS：`PT-BDtool-macos-portable.zip`
 
-            ## 第 2 步：准备
-
-            - 一台 VPS
-            - VPS 地址
-            - VPS 端口
-            - VPS 密码
-            - VPS 上已经有视频 / 音频 / BDMV / ISO
-
-            ## 第 3 步：打开后直接用
+            ## 3 步上手
 
             1. 解压
             2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app`
-            3. 填 VPS 地址、端口、密码、本机保存目录
-            4. 点 `扫描 VPS 候选`
-            5. 双击你要处理的条目
+            3. 填 VPS 地址、端口、密码、本机保存目录，然后点 `扫描 VPS 候选` 并双击条目
+
+            VPS 上先放好视频 / 音频 / BDMV / ISO。
 
             程序会自动：
 
@@ -213,3 +202,7 @@ jobs:
             如果系统拦住：
             - Windows：`更多信息 -> 仍要运行`
             - macOS：右键应用后点一次 `打开`
+
+            说明：
+            - 本项目为 AI 生成项目
+            - 不接受反馈，不做答疑，不单独适配个别环境
