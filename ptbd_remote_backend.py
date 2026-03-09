@@ -3,14 +3,16 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import shutil
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
+import urllib.request
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Callable
 
 try:
@@ -23,6 +25,11 @@ else:  # pragma: no cover
 
 
 LogFunc = Callable[[str], None]
+BUNDLE_DOWNLOAD_URL = os.environ.get(
+    "PTBD_BUNDLE_URL",
+    "https://github.com/My15sir/PT-BDtool/releases/download/bundle-latest/PT-BDtool-linux-amd64.tar.gz",
+)
+BUNDLE_MARKER_PARTS = ("third_party", "bundle", "linux-amd64")
 
 
 def backend_available() -> bool:
@@ -67,6 +74,17 @@ def unique_local_path(directory: Path, filename: str) -> Path:
         if not trial.exists():
             return trial
         index += 1
+
+
+def bundle_member_relative_path(member_name: str) -> Path | None:
+    parts = PurePosixPath(member_name).parts
+    for index in range(len(parts) - len(BUNDLE_MARKER_PARTS) + 1):
+        if parts[index : index + len(BUNDLE_MARKER_PARTS)] == BUNDLE_MARKER_PARTS:
+            remainder = parts[index + len(BUNDLE_MARKER_PARTS) :]
+            if not remainder:
+                return None
+            return Path(*remainder)
+    return None
 
 
 @dataclass
@@ -498,26 +516,59 @@ class PTBDRemoteBackend:
         ]
         return all(path.exists() for path in required)
 
+    def download_local_bundle(self) -> None:
+        bundle_root = self.app_root / "third_party" / "bundle" / "linux-amd64"
+        self.log(f"[gui] 本地 linux bundle 缺失，尝试下载：{BUNDLE_DOWNLOAD_URL}")
+        with tempfile.TemporaryDirectory(prefix="ptbd-bundle-download-") as temp_dir:
+            archive_path = Path(temp_dir) / "PT-BDtool-linux-amd64.tar.gz"
+            with urllib.request.urlopen(BUNDLE_DOWNLOAD_URL, timeout=120) as response, archive_path.open("wb") as handle:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+
+            stage_root = Path(temp_dir) / "linux-amd64"
+            with tarfile.open(archive_path, "r:gz") as archive:
+                extracted = 0
+                for member in archive.getmembers():
+                    relative_path = bundle_member_relative_path(member.name)
+                    if relative_path is None:
+                        continue
+                    target_path = stage_root / relative_path
+                    if member.isdir():
+                        target_path.mkdir(parents=True, exist_ok=True)
+                        extracted += 1
+                        continue
+                    if not member.isfile():
+                        continue
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    source_handle = archive.extractfile(member)
+                    if source_handle is None:
+                        raise RemoteCommandError(f"bundle 资产内容损坏：{member.name}")
+                    with source_handle, target_path.open("wb") as output_handle:
+                        while True:
+                            chunk = source_handle.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            output_handle.write(chunk)
+                    try:
+                        os.chmod(target_path, member.mode)
+                    except OSError:
+                        pass
+                    extracted += 1
+            if extracted == 0:
+                raise RemoteCommandError("bundle 资产里没有 third_party/bundle/linux-amd64")
+            bundle_root.parent.mkdir(parents=True, exist_ok=True)
+            if bundle_root.exists():
+                shutil.rmtree(bundle_root, ignore_errors=True)
+            stage_root.rename(bundle_root)
+        self.log(f"[gui] 本地 linux bundle 已就绪：{bundle_root}")
+
     def ensure_local_bundle(self) -> None:
         if self.local_bundle_ready():
             return
-        ensure_script = self.app_root / "scripts" / "ensure-bundle.py"
-        if not ensure_script.exists():
-            raise RemoteCommandError(f"缺少本地 bundle 拉取脚本：{ensure_script}")
-        python_bin = sys.executable or "python3"
-        self.log("[gui] 本地 linux bundle 缺失，尝试自动拉取 Release 资产")
-        result = subprocess.run(
-            [python_bin, str(ensure_script)],
-            cwd=str(self.app_root),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        for line in result.stdout.splitlines():
-            self.log(line)
-        if result.returncode != 0:
-            message = result.stderr.strip() or result.stdout.strip() or f"退出码：{result.returncode}"
-            raise RemoteCommandError(f"本地 bundle 自动拉取失败：{message}")
+        self.download_local_bundle()
         if not self.local_bundle_ready():
             raise RemoteCommandError("本地 bundle 拉取结束，但文件仍不完整。")
 
@@ -757,7 +808,17 @@ rm -f "$archive_path"
         )
         import json
 
-        payload = json.loads(result.output)
+        if not result.output.strip():
+            raise RemoteCommandError("scan-json 没有返回任何内容。")
+        try:
+            payload = json.loads(result.output)
+        except json.JSONDecodeError as exc:
+            preview = result.output.strip().splitlines()[:20]
+            if preview:
+                self.log("[gui] scan-json 原始输出预览：")
+                for line in preview:
+                    self.log(line)
+            raise RemoteCommandError(f"scan-json 返回的不是合法 JSON：{exc}") from exc
         return payload.get("items", [])
 
     def extract_download_path(self, output: str) -> str | None:

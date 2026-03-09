@@ -162,6 +162,7 @@ def config_path() -> Path:
 
 
 CONFIG_PATH = config_path()
+LOG_PATH = CONFIG_PATH.parent / "PT-BDtool.log"
 
 
 def default_save_dir() -> str:
@@ -205,6 +206,12 @@ def load_config() -> dict:
 def save_config(data: dict) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def append_gui_log_line(text: str) -> None:
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with LOG_PATH.open("a", encoding="utf-8") as handle:
+        handle.write(text + "\n")
 
 
 def find_bash() -> str | None:
@@ -315,6 +322,7 @@ class App:
         actions.pack(fill=X, pady=(0, 8))
         ttk.Button(actions, text="保存配置", command=self.save_form).pack(side=LEFT)
         ttk.Button(actions, text="打开配置目录", command=self.open_config_dir).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(actions, text="打开日志文件", command=self.open_log_file).pack(side=LEFT, padx=(8, 0))
         ttk.Button(actions, text="扫描 VPS 候选", command=self.scan_remote).pack(side=LEFT, padx=(8, 0))
         ttk.Button(actions, text="一步到位启动", command=self.start_remote).pack(side=LEFT, padx=(8, 0))
         ttk.Button(actions, text="停止当前任务", command=self.stop_remote).pack(side=LEFT, padx=(8, 0))
@@ -341,10 +349,20 @@ class App:
         self.log_view.pack(fill=BOTH, expand=True)
         self.log_view.insert(END, f"App root: {APP_ROOT}\n")
         self.log_view.insert(END, f"Config: {CONFIG_PATH}\n")
+        self.log_view.insert(END, f"Log: {LOG_PATH}\n")
         self.log_view.insert(END, f"Config mode: {config_storage_mode()}\n")
         self.log_view.insert(END, f"Backend: {backend_status()}\n")
         self.log_view.insert(END, "准备完成。\n")
         self.log_view.configure(state="disabled")
+        for line in (
+            f"App root: {APP_ROOT}",
+            f"Config: {CONFIG_PATH}",
+            f"Log: {LOG_PATH}",
+            f"Config mode: {config_storage_mode()}",
+            f"Backend: {backend_status()}",
+            "准备完成。",
+        ):
+            append_gui_log_line(line)
 
     def _add_entry(self, parent, label_text: str, key: str, row: int, hint: str, show: str | None = None) -> None:
         ttk.Label(parent, text=label_text).grid(row=row, column=0, sticky=W, padx=(0, 10), pady=4)
@@ -406,6 +424,21 @@ class App:
                 subprocess.Popen(["xdg-open", target])
         except Exception as exc:
             messagebox.showinfo("配置目录", f"{target}\n\n无法自动打开：{exc}")
+
+    def open_log_file(self) -> None:
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if not LOG_PATH.exists():
+            append_gui_log_line("日志文件已创建。")
+        target = str(LOG_PATH)
+        try:
+            if platform.system() == "Windows":
+                os.startfile(target)
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", target])
+            else:
+                subprocess.Popen(["xdg-open", target])
+        except Exception as exc:
+            messagebox.showinfo("日志文件", f"{target}\n\n无法自动打开：{exc}")
 
     def task_running(self) -> bool:
         legacy_running = self.process is not None and self.process.poll() is None
@@ -619,11 +652,13 @@ class App:
         ssh_bin = shutil.which("ssh")
         if not ssh_bin:
             raise RuntimeError("本机缺少 ssh。")
-        remote_script = [
+        remote_script = " ".join(
+            [
             f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(data['scan_include'])};" if data["scan_include"] else "",
             f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
             f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
-        ]
+            ]
+        ).strip()
         return [
             ssh_bin,
             "-p",
@@ -631,9 +666,7 @@ class App:
             "-o",
             "StrictHostKeyChecking=accept-new",
             data["remote_host"],
-            "bash",
-            "-lc",
-            " ".join([part for part in remote_script if part]),
+            f"bash -lc {shlex.quote(remote_script)}",
         ]
 
     def scan_remote(self, auto_start: bool = False) -> None:
@@ -663,7 +696,7 @@ class App:
                     self.root.after(0, lambda: self.status_var.set("扫描已取消"))
                 except Exception as exc:
                     self.log_queue.put(f"[gui] 获取候选失败：{exc}")
-                    self.root.after(0, lambda: self.status_var.set("获取候选失败，请看日志"))
+                    self.root.after(0, lambda: self.status_var.set("获取候选失败：请看下方日志或打开日志文件"))
                 finally:
                     self.clear_backend_task(backend)
 
@@ -692,14 +725,28 @@ class App:
                     stdin=subprocess.DEVNULL,
                 )
                 if result.returncode != 0:
+                    if result.stdout.strip():
+                        self.log_queue.put("[gui] scan-json stdout:")
+                        for line in result.stdout.strip().splitlines():
+                            self.log_queue.put(line)
+                    if result.stderr.strip():
+                        self.log_queue.put("[gui] scan-json stderr:")
+                        for line in result.stderr.strip().splitlines():
+                            self.log_queue.put(line)
                     raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"ssh rc={result.returncode}")
+                if not result.stdout.strip():
+                    if result.stderr.strip():
+                        self.log_queue.put("[gui] scan-json stderr:")
+                        for line in result.stderr.strip().splitlines():
+                            self.log_queue.put(line)
+                    raise RuntimeError("scan-json 没有返回任何内容，通常是远端命令没有真正执行。")
                 payload = json.loads(result.stdout)
                 self.scan_items = payload.get("items", [])
                 self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
                 self.root.after(0, lambda: self.refresh_scan_items(auto_start=auto_start))
             except Exception as exc:
                 self.log_queue.put(f"[gui] 获取候选失败：{exc}")
-                self.root.after(0, lambda: self.status_var.set("获取候选失败，请看日志"))
+                self.root.after(0, lambda: self.status_var.set("获取候选失败：请看下方日志或打开日志文件"))
             finally:
                 if askpass_path:
                     try:
@@ -781,6 +828,7 @@ class App:
         self.status_var.set("当前没有运行中的任务。")
 
     def append_log(self, text: str) -> None:
+        append_gui_log_line(text)
         self.log_view.configure(state="normal")
         self.log_view.insert(END, text + "\n")
         self.log_view.see(END)
@@ -815,6 +863,7 @@ def cli_main() -> int:
         ssh_bin = shutil.which("ssh") or "<missing>"
         print(f"app_root={APP_ROOT}")
         print(f"config={CONFIG_PATH}")
+        print(f"log={LOG_PATH}")
         print(f"config_mode={config_storage_mode()}")
         print(f"backend={backend_status()}")
         print(f"bash={bash_bin}")
