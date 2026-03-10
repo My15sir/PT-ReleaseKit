@@ -27,7 +27,7 @@ from ptbd_remote_backend import (
 
 APP_NAME = "PT-BDtool"
 CONTENT_INSET_X = 14
-HEADER_TEXT_INSET_X = 14
+HEADER_TEXT_INSET_X = 16
 
 
 def resolve_script_path(path: str) -> Path:
@@ -550,7 +550,7 @@ class App:
 
         self.hero_canvas = tk.Canvas(
             container,
-            height=84,
+            height=76,
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
@@ -812,43 +812,22 @@ class App:
             x0 = width * index / steps
             x1 = width * (index + 1) / steps
             self.hero_canvas.create_rectangle(x0, 0, x1 + 1, height, outline="", fill=color)
-        self.hero_canvas.create_rectangle(0, height - 22, width, height, outline="", fill="#edf4ff")
         self.hero_canvas.create_text(
             HEADER_TEXT_INSET_X,
-            12,
+            14,
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
             fill="#ffffff",
-            font=("Arial", 14, "bold"),
+            font=("Arial", 15, "bold"),
         )
         self.hero_canvas.create_text(
             HEADER_TEXT_INSET_X,
-            44,
+            46,
             anchor="nw",
-            width=max(width - 170, 180),
+            width=max(width - HEADER_TEXT_INSET_X * 2, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
             fill="#18305f",
-            font=("Arial", 9, "bold"),
-        )
-        badge_x0 = width - 106
-        badge_y0 = 12
-        badge_x1 = width - 12
-        badge_y1 = 30
-        self.hero_canvas.create_rectangle(
-            badge_x0,
-            badge_y0,
-            badge_x1,
-            badge_y1,
-            outline="#a9c8ff",
-            fill="#edf4ff",
-        )
-        self.hero_canvas.create_text(
-            (badge_x0 + badge_x1) / 2,
-            (badge_y0 + badge_y1) / 2,
-            anchor="c",
-            text="紧凑布局已启用",
-            fill="#3557c7",
-            font=("Arial", 9, "bold"),
+            font=("Arial", 10),
         )
 
     def _on_hero_resize(self, event) -> None:
