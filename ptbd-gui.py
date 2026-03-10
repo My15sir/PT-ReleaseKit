@@ -322,6 +322,12 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         font=("Arial", 9),
     )
     style.configure(
+        "PanelHint.TLabel",
+        background=colors["panel_alt"],
+        foreground=colors["muted"],
+        font=("Arial", 9),
+    )
+    style.configure(
         "Tips.TLabel",
         background=colors["panel"],
         foreground=colors["text"],
@@ -384,6 +390,31 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         background=[("active", colors["panel"]), ("!disabled", colors["panel"])],
     )
     style.configure(
+        "HeroNote.TLabel",
+        background=colors["bg"],
+        foreground=colors["accent_deep"],
+        font=("Arial", 9, "bold"),
+        padding=(10, 4),
+    )
+    style.configure(
+        "Primary.TButton",
+        background=colors["accent_deep"],
+        foreground="#ffffff",
+        bordercolor=colors["accent_deep"],
+        lightcolor=colors["accent_deep"],
+        darkcolor=colors["accent_deep"],
+        padding=(14, 9),
+        font=("Arial", 10, "bold"),
+    )
+    style.map(
+        "Primary.TButton",
+        background=[
+            ("pressed", "#2747b5"),
+            ("active", colors["accent"]),
+        ],
+        foreground=[("!disabled", "#ffffff")],
+    )
+    style.configure(
         "Action.TButton",
         background=colors["button"],
         foreground=colors["accent_deep"],
@@ -422,6 +453,10 @@ def configure_gradient_theme(root: tk.Tk) -> None:
             ("active", "#6d96ff"),
         ],
         foreground=[("!disabled", "#ffffff")],
+    )
+    style.configure(
+        "Toolbar.TFrame",
+        background=colors["bg"],
     )
     style.configure(
         "Danger.TButton",
@@ -519,31 +554,52 @@ class App:
         form.pack(fill=X)
 
         self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4 或 ssh root@1.2.3.4")
-        self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 3, "默认 22")
+        self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 1, "默认 22")
         self._add_compact_entry(form, "SSH 密码", "remote_password", 1, 0, "留空表示走密钥", show="*")
-        self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 3, "源码旧模式才需要")
-        self._add_compact_entry(form, "扫描白名单", "scan_include", 2, 0, "留空=自动扫描常见媒体目录")
-        self._add_compact_entry(form, "额外排除", "scan_exclude", 2, 3, "可留空")
-        self._add_wide_entry(form, "本机保存目录", "save_dir", 3, "结果回到本机这里")
+        self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 1, "只有源码旧模式才需要")
+        self._add_compact_entry(form, "扫描白名单", "scan_include", 2, 0, "留空时自动扫描常见媒体目录")
+        self._add_compact_entry(form, "额外排除", "scan_exclude", 2, 1, "可留空")
 
-        save_row = ttk.Frame(form, style="Panel.TFrame")
-        save_row.grid(row=4, column=1, columnspan=5, sticky="ew", pady=(2, 0))
-        ttk.Button(save_row, text="选择目录", command=self.pick_save_dir, style="Action.TButton").pack(side=LEFT)
+        save_group = ttk.Frame(form, style="Panel.TFrame")
+        save_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        save_group.columnconfigure(0, weight=1)
+        ttk.Label(save_group, text="本机保存目录", style="Field.TLabel").grid(row=0, column=0, sticky=W)
+        ttk.Label(save_group, text="生成完成后，结果会回到这个目录", style="PanelHint.TLabel").grid(
+            row=1, column=0, sticky=W, pady=(2, 6)
+        )
+        save_path_row = ttk.Frame(save_group, style="Panel.TFrame")
+        save_path_row.grid(row=2, column=0, sticky="ew")
+        save_path_row.columnconfigure(0, weight=1)
+        variable = tk.StringVar()
+        self.config_vars["save_dir"] = variable
+        entry = ttk.Entry(save_path_row, textvariable=variable, style="Cyber.TEntry")
+        entry.grid(row=0, column=0, sticky="ew")
+        ttk.Button(save_path_row, text="选择目录", command=self.pick_save_dir, style="Action.TButton").grid(
+            row=0, column=1, padx=(8, 0)
+        )
+
+        option_group = ttk.Frame(form, style="Panel.TFrame", padding=(12, 10))
+        option_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        option_group.columnconfigure(0, weight=1)
+        ttk.Label(option_group, text="运行选项", style="Field.TLabel").grid(row=0, column=0, sticky=W)
+        ttk.Label(option_group, text="这些设置会影响回传和远端清理行为", style="PanelHint.TLabel").grid(
+            row=1, column=0, sticky=W, pady=(2, 8)
+        )
         self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            save_row,
+            option_group,
             text="成功后自动清理 VPS 生成目录",
             variable=self.config_vars["auto_cleanup"],
-        ).pack(side=LEFT, padx=(10, 0))
+        ).grid(row=2, column=0, sticky=W, pady=(0, 6))
         self.config_vars["remote_bootstrap"] = tk.BooleanVar(value=True)
         ttk.Checkbutton(
-            save_row,
+            option_group,
             text="空白 VPS 自动上传运行包（推荐）",
             variable=self.config_vars["remote_bootstrap"],
-        ).pack(side=LEFT, padx=(10, 0))
+        ).grid(row=3, column=0, sticky=W)
 
-        form.columnconfigure(1, weight=3)
-        form.columnconfigure(4, weight=2)
+        form.columnconfigure(0, weight=1, uniform="form")
+        form.columnconfigure(1, weight=1, uniform="form")
 
         tips = ttk.Label(
             container,
@@ -556,38 +612,47 @@ class App:
         )
         tips.pack(anchor=W, pady=(0, 8))
 
-        actions = ttk.Frame(container, style="Panel.TFrame", padding=10)
+        actions = ttk.Frame(container, style="Toolbar.TFrame")
         actions.pack(fill=X, pady=(0, 8))
-        ttk.Button(actions, text="保存配置", command=self.save_form, style="Action.TButton").pack(side=LEFT)
+        primary_actions = ttk.Frame(actions, style="Panel.TFrame", padding=10)
+        primary_actions.pack(side=LEFT, fill=X, expand=True)
+        secondary_actions = ttk.Frame(actions, style="Panel.TFrame", padding=10)
+        secondary_actions.pack(side=LEFT, padx=(10, 0))
         ttk.Button(
-            actions,
+            primary_actions,
+            text="先扫描 VPS 候选",
+            command=self.scan_remote,
+            style="Primary.TButton",
+        ).pack(side=LEFT)
+        ttk.Button(
+            primary_actions,
+            text="直接启动所选条目",
+            command=self.start_remote,
+            style="Accent.TButton",
+        ).pack(side=LEFT, padx=(10, 0))
+        ttk.Button(
+            primary_actions,
+            text="停止当前任务",
+            command=self.stop_remote,
+            style="Danger.TButton",
+        ).pack(side=LEFT, padx=(10, 0))
+        ttk.Button(
+            secondary_actions,
+            text="保存配置",
+            command=self.save_form,
+            style="Action.TButton",
+        ).pack(side=LEFT)
+        ttk.Button(
+            secondary_actions,
             text="打开配置目录",
             command=self.open_config_dir,
             style="Action.TButton",
         ).pack(side=LEFT, padx=(8, 0))
         ttk.Button(
-            actions,
+            secondary_actions,
             text="打开日志文件",
             command=self.open_log_file,
             style="Action.TButton",
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(
-            actions,
-            text="扫描 VPS 候选",
-            command=self.scan_remote,
-            style="Accent.TButton",
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(
-            actions,
-            text="一步到位启动",
-            command=self.start_remote,
-            style="Accent.TButton",
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(
-            actions,
-            text="停止当前任务",
-            command=self.stop_remote,
-            style="Danger.TButton",
         ).pack(side=LEFT, padx=(8, 0))
 
         status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
@@ -605,15 +670,22 @@ class App:
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
         self.scan_tree.column("index", width=56, anchor="center")
-        self.scan_tree.column("type", width=90, anchor="center")
-        self.scan_tree.column("path", width=720, anchor="w")
+        self.scan_tree.column("type", width=100, anchor="center")
+        self.scan_tree.column("path", width=980, minwidth=560, anchor="w", stretch=True)
         scan_scrollbar = ttk.Scrollbar(scan_list, orient="vertical", command=self.scan_tree.yview)
-        self.scan_tree.configure(yscrollcommand=scan_scrollbar.set)
+        scan_scrollbar_x = ttk.Scrollbar(scan_body, orient="horizontal", command=self.scan_tree.xview)
+        self.scan_tree.configure(yscrollcommand=scan_scrollbar.set, xscrollcommand=scan_scrollbar_x.set)
         self.scan_tree.pack(side=LEFT, fill=BOTH, expand=True)
         scan_scrollbar.pack(side=LEFT, fill="y", padx=(6, 0))
+        scan_scrollbar_x.pack(fill=X, pady=(8, 0))
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
         self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
-        ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(6, 0))
+        ttk.Label(
+            scan_body,
+            text="路径列支持横向滚动。双击条目可直接启动处理。",
+            style="PanelHint.TLabel",
+        ).pack(anchor=W, pady=(6, 2))
+        ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
 
         log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
         log_panel.pack(fill=BOTH, expand=False)
@@ -670,27 +742,39 @@ class App:
         self.hero_canvas.create_rectangle(0, height - 22, width, height, outline="", fill="#edf4ff")
         self.hero_canvas.create_text(
             18,
-            14,
+            12,
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
             fill="#ffffff",
-            font=("Arial", 14, "bold"),
+            font=("Arial", 15, "bold"),
         )
         self.hero_canvas.create_text(
             18,
             38,
             anchor="nw",
             width=max(width - 36, 180),
-            text="先填 VPS 和保存目录，再扫描候选。列表区已放大，优先双击条目直接开跑。",
-            fill="#eef5ff",
-            font=("Arial", 9),
+            text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
+            fill="#f7fbff",
+            font=("Arial", 10, "bold"),
+        )
+        badge_x0 = width - 122
+        badge_y0 = height - 30
+        badge_x1 = width - 18
+        badge_y1 = height - 8
+        self.hero_canvas.create_rectangle(
+            badge_x0,
+            badge_y0,
+            badge_x1,
+            badge_y1,
+            outline="#a9c8ff",
+            fill="#edf4ff",
         )
         self.hero_canvas.create_text(
-            width - 18,
-            height - 11,
-            anchor="e",
-            text="紧凑布局",
-            fill="#4c6dcf",
+            (badge_x0 + badge_x1) / 2,
+            (badge_y0 + badge_y1) / 2,
+            anchor="c",
+            text="紧凑布局已启用",
+            fill="#3557c7",
             font=("Arial", 9, "bold"),
         )
 
@@ -705,34 +789,22 @@ class App:
         entry.grid(row=row, column=1, sticky="ew", pady=4)
         ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
 
-    def _add_compact_entry(
-        self,
-        parent,
-        label_text: str,
-        key: str,
-        row: int,
-        column: int,
-        hint: str,
-        show: str | None = None,
-    ) -> None:
-        ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=column, sticky=W, padx=(0, 8), pady=3)
+    def _add_compact_entry(self, parent, label_text: str, key: str, row: int, column: int, hint: str, show: str | None = None) -> None:
+        field = ttk.Frame(parent, style="Panel.TFrame", padding=(0, 0, 14 if column == 0 else 0, 0))
+        field.grid(row=row, column=column, sticky="nsew", padx=(0, 10 if column == 0 else 0), pady=3)
+        field.columnconfigure(0, weight=1)
+        ttk.Label(field, text=label_text, style="Field.TLabel").grid(row=0, column=0, sticky=W)
         variable = tk.StringVar()
         self.config_vars[key] = variable
-        entry = ttk.Entry(parent, textvariable=variable, show=show or "", style="Cyber.TEntry")
-        entry.grid(row=row, column=column + 1, sticky="ew", pady=3)
+        entry = ttk.Entry(field, textvariable=variable, show=show or "", style="Cyber.TEntry")
+        entry.grid(row=1, column=0, sticky="ew", pady=(4, 2))
         ttk.Label(
-            parent,
+            field,
             text=hint,
-            style="Hint.TLabel",
-        ).grid(row=row, column=column + 2, sticky=W, padx=(8, 12 if column == 0 else 0), pady=3)
-
-    def _add_wide_entry(self, parent, label_text: str, key: str, row: int, hint: str) -> None:
-        ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 8), pady=3)
-        variable = tk.StringVar()
-        self.config_vars[key] = variable
-        entry = ttk.Entry(parent, textvariable=variable, style="Cyber.TEntry")
-        entry.grid(row=row, column=1, columnspan=4, sticky="ew", pady=3)
-        ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=5, sticky=W, padx=(8, 0), pady=3)
+            style="PanelHint.TLabel",
+            wraplength=320,
+            justify="left",
+        ).grid(row=2, column=0, sticky=W)
 
     def _load_into_form(self, data: dict) -> None:
         for key, value in data.items():
