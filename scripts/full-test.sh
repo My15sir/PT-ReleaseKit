@@ -204,6 +204,34 @@ write_log() {
   cp -f "$TMP_FULL_LOG" "$FULL_LOG"
 }
 
+record_assertion() {
+  local name="$1"
+  local status="$2"
+  local detail="$3"
+  write_log "ASSERT: $name status=$status detail=$detail"
+  printf '%s\t%s\t%s\n' "$name" "$status" "$detail" >> "$TMP_RESULTS_TSV"
+  cp -f "$TMP_RESULTS_TSV" "$RESULTS_TSV"
+}
+
+wait_for_match() {
+  local name="$1"
+  local command_str="$2"
+  local timeout_seconds="${3:-12}"
+  local attempt=0
+
+  while (( attempt < timeout_seconds )); do
+    if bash -lc "$command_str"; then
+      record_assertion "$name" "PASS" "match-ready"
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+
+  record_assertion "$name" "FAIL" "timeout"
+  return 1
+}
+
 run_step() {
   local name="$1"
   local expect_mode="${2:-success}"
@@ -302,32 +330,32 @@ run_step "fullscan-confirm-enters-flow" success env TMPDIR="$TMPDIR_ROOT" BDTOOL
 run_step "fullscan-ssh-fallback-download" success env -u BDTOOL_DOWNLOAD_DIR HOME="$SSH_TEST_HOME" TMPDIR="$TMPDIR_ROOT" SSH_CONNECTION="127.0.0.1 10022 127.0.0.1 22" BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_SSH_ROOT" bash -c "printf '1\n1\n1\n1\n0\n3\n' | '$MENU_BIN'"
 run_step "fullscan-scp-return" success env HOME="$SCP_TEST_HOME" PATH="$SCP_TEST_BIN:$PATH" TMPDIR="$TMPDIR_ROOT" SSH_CONNECTION="127.0.0.1 10022 127.0.0.1 22" BDTOOL_RETURN_MODE="scp" BDTOOL_RETURN_SCP_HOST="127.0.0.1" BDTOOL_RETURN_SCP_USER="receiver" BDTOOL_RETURN_SCP_REMOTE_DIR="$SCP_TEST_REMOTE_DIR" BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_SCP_ROOT" bash -c "printf '1\n1\n1\n1\n0\n3\n' | '$MENU_BIN'"
 
-if ! find "$NOEMPTY_OUT" -type f -name 'README.txt' 2>/dev/null | grep -q .; then
+if ! wait_for_match "assert-bdtool-dry-readme" "find \"$NOEMPTY_OUT\" -type f -name 'README.txt' 2>/dev/null | grep -q ."; then
   write_log "FULL TEST RESULT: FAIL (no output artifact for bdtool-dry-noempty)"
   exit 1
 fi
 
-if ! find "$PATHRULE_ROOT/信息/srcdir" -type f -name 'mediainfo.txt' 2>/dev/null | grep -q .; then
+if ! wait_for_match "assert-pathrule-mediainfo" "find \"$PATHRULE_ROOT/信息/srcdir\" -type f -name 'mediainfo.txt' 2>/dev/null | grep -q ."; then
   write_log "FULL TEST RESULT: FAIL (default output path rule mismatch for video)"
   exit 1
 fi
 
-if ! find "$PATHRULE_ROOT/信息/srcdir" -type f -name '1.png' 2>/dev/null | grep -q .; then
+if ! wait_for_match "assert-pathrule-shot" "find \"$PATHRULE_ROOT/信息/srcdir\" -type f -name '1.png' 2>/dev/null | grep -q ."; then
   write_log "FULL TEST RESULT: FAIL (default output artifact missing screenshot)"
   exit 1
 fi
 
-if ! find "$FULLSCAN_ROOT/信息/subdir" -type f -name 'mediainfo.txt' 2>/dev/null | grep -q .; then
+if ! wait_for_match "assert-fullscan-mediainfo" "find \"$FULLSCAN_ROOT/信息/subdir\" -type f -name 'mediainfo.txt' 2>/dev/null | grep -q ."; then
   write_log "FULL TEST RESULT: FAIL (full scan confirm did not enter scan_flow)"
   exit 1
 fi
 
-if [[ ! -f "$SSH_TEST_DOWNLOAD_DIR/subdir.zip" && ! -f "$SSH_TEST_DOWNLOAD_DIR/subdir.tar.gz" ]]; then
+if ! wait_for_match "assert-ssh-download-package" "[[ -f \"$SSH_TEST_DOWNLOAD_DIR/subdir.zip\" || -f \"$SSH_TEST_DOWNLOAD_DIR/subdir.tar.gz\" ]]"; then
   write_log "FULL TEST RESULT: FAIL (ssh session did not fallback to VPS local download dir)"
   exit 1
 fi
 
-if [[ ! -f "$SCP_TEST_REMOTE_DIR/subdir.zip" && ! -f "$SCP_TEST_REMOTE_DIR/subdir.tar.gz" ]]; then
+if ! wait_for_match "assert-scp-upload-package" "[[ -f \"$SCP_TEST_REMOTE_DIR/subdir.zip\" || -f \"$SCP_TEST_REMOTE_DIR/subdir.tar.gz\" ]]"; then
   write_log "FULL TEST RESULT: FAIL (scp return mode did not upload package to remote dir)"
   exit 1
 fi
