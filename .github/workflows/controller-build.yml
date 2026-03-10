@@ -10,10 +10,14 @@ on:
       - README.md
       - PT-BDtool.bat
       - PT-BDtool.command
+      - PT-BDtool.desktop
+      - PT-BDtool.sh
       - bdtool
       - bdtool.sh
+      - ptbd-gui
       - ptbd-gui.py
       - ptbd_remote_backend.py
+      - docs/README.en.md
       - lib/**
       - scripts/build-controller-app.py
       - scripts/ensure-bundle.py

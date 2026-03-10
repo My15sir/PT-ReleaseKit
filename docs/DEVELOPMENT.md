@@ -59,7 +59,61 @@
 
 ---
 
-## 3. 普通用户交付原则
+## 3. 仓库目录怎么分
+
+仓库现在建议按下面这个理解来维护，不要再把“源码入口”“发布入口”“测试产物”混在一起看。
+
+### 根目录里真正重要的入口
+
+- `PT-BDtool.bat`
+- `PT-BDtool.command`
+- `PT-BDtool.desktop`
+- `PT-BDtool.sh`
+- `ptbd-gui`
+- `ptbd-gui.py`
+- `ptbd`
+- `ptbd-remote.sh`
+- `ptbd-start.sh`
+
+说明：
+
+- `PT-BDtool.sh` 是 Linux 现在统一的双击启动脚本名
+- GitHub Release 里的 Linux 便携包也应该统一用这个名字
+- 不要再把旧名字 `启动PT-BDtool.sh` 加回来
+
+### 文档
+
+- `README.md`
+  - 只写给普通用户
+- `docs/README.en.md`
+  - 英文说明
+- `docs/DEVELOPMENT.md`
+  - 给维护者看
+
+### GitHub 配置
+
+- `.github/workflows/controller-build.yml`
+  - 构建 Windows / macOS / Linux 便携包并发布到 `portable-latest`
+- `.github/workflows/bundle-release.yml`
+  - 生成 Linux bundle 资产
+- `.github/workflows/ci.yml`
+  - 语法、回归、离线安装检查
+
+### 本地产物
+
+下面这些都应该继续视为本地产物，不要当源码：
+
+- `bdtool-output/`
+- `.tmp/`
+- `.full-test*`
+- `dist/`
+- `build/`
+- `artifact/`
+- `release-assets/`
+
+---
+
+## 4. 普通用户交付原则
 
 不要把源码仓库直接发给小白。
 
@@ -80,7 +134,7 @@
 
 ---
 
-## 4. 本地开发常用命令
+## 5. 本地开发常用命令
 
 ### 语法与基础检查
 
@@ -111,7 +165,7 @@ python3 scripts/build-controller-app.py
 
 ---
 
-## 5. Windows / macOS 成品打包
+## 6. Windows / macOS 成品打包
 
 ### Windows
 
@@ -145,7 +199,7 @@ dist/controller-app/macos/PT-BDtool.app
 
 ---
 
-## 6. GitHub Actions
+## 7. GitHub Actions
 
 ### 控制端构建
 
@@ -187,7 +241,7 @@ dist/controller-app/macos/PT-BDtool.app
 
 ---
 
-## 7. 目前还没解决到 100% 的点
+## 8. 目前还没解决到 100% 的点
 
 下面这些目前仍然不能承诺 100%：
 
@@ -203,7 +257,7 @@ dist/controller-app/macos/PT-BDtool.app
 
 ---
 
-## 8. 维护建议
+## 9. 维护建议
 
 如果后面还想继续维护这个思路，优先记住这两件事：
 

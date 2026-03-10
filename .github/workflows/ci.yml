@@ -12,7 +12,7 @@ jobs:
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
       - name: ShellCheck
-        run: shellcheck -x bdtool.sh bdtool install.sh ptbd-start.sh scripts/*.sh
+        run: shellcheck -x bdtool.sh bdtool install.sh ptbd ptbd-gui ptbd-start.sh ptbd-remote.sh ptbd-remote-start.sh PT-BDtool.sh PT-BDtool.command scripts/*.sh
 
   full-regression:
     runs-on: ubuntu-latest
