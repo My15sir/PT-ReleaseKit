@@ -533,6 +533,7 @@ class App:
         self.tooltip_item: str | None = None
         self.tooltip_after_id: str | None = None
         self.tree_font = tkfont.nametofont("TkDefaultFont")
+        self.scan_context_menu: tk.Menu | None = None
         self._build_ui()
         self._load_into_form(load_config())
         self._poll_logs()
@@ -689,12 +690,17 @@ class App:
         self.scan_tree.bind("<Motion>", self.on_scan_tree_hover)
         self.scan_tree.bind("<Leave>", self.hide_path_tooltip)
         self.scan_tree.bind("<ButtonPress-1>", self.hide_path_tooltip)
+        self.scan_tree.bind("<Button-3>", self.on_scan_right_click)
+        self.scan_tree.bind("<Control-Button-1>", self.on_scan_right_click)
         ttk.Label(
             scan_body,
             text="路径列支持横向滚动。悬停可预览完整路径，双击会弹窗显示完整路径。",
             style="PanelHint.TLabel",
         ).pack(anchor=W, pady=(6, 2))
         ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
+        self.scan_context_menu = tk.Menu(self.root, tearoff=0)
+        self.scan_context_menu.add_command(label="复制路径", command=self.copy_selected_scan_path)
+        self.scan_context_menu.add_command(label="查看完整路径", command=self.show_selected_scan_path_dialog)
 
         log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
         log_panel.pack(fill=BOTH, expand=False)
@@ -900,6 +906,17 @@ class App:
                 subprocess.Popen(["xdg-open", target])
         except Exception as exc:
             messagebox.showinfo("日志文件", f"{target}\n\n无法自动打开：{exc}")
+
+    def open_in_file_manager(self, target: str) -> None:
+        try:
+            if platform.system() == "Windows":
+                os.startfile(target)
+            elif platform.system() == "Darwin":
+                subprocess.Popen(["open", target])
+            else:
+                subprocess.Popen(["xdg-open", target])
+        except Exception as exc:
+            messagebox.showinfo("打开目录失败", f"{target}\n\n无法自动打开：{exc}")
 
     def task_running(self) -> bool:
         legacy_running = self.process is not None and self.process.poll() is None
@@ -1255,6 +1272,25 @@ class App:
             return ""
         return str(values[2]).strip()
 
+    def selected_scan_item_path(self) -> str:
+        return self.current_selected_path()
+
+    def copy_selected_scan_path(self) -> None:
+        selected_path = self.selected_scan_item_path()
+        if not selected_path:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(selected_path)
+        self.root.update_idletasks()
+        self.status_var.set("已复制候选路径到剪贴板")
+        self.append_log(f"[gui] 已复制候选路径：{selected_path}")
+
+    def show_selected_scan_path_dialog(self) -> None:
+        selected_path = self.selected_scan_item_path()
+        if not selected_path:
+            return
+        self.show_full_path_dialog(selected_path)
+
     def hide_path_tooltip(self, _event=None) -> None:
         if self.tooltip_after_id:
             self.root.after_cancel(self.tooltip_after_id)
@@ -1327,11 +1363,30 @@ class App:
             self.hide_path_tooltip()
             self.show_full_path_dialog(selected_path)
 
+    def on_scan_right_click(self, event) -> None:
+        item_id = self.scan_tree.identify_row(event.y)
+        if not item_id or self.scan_context_menu is None:
+            return
+        self.hide_path_tooltip()
+        self.scan_tree.selection_set(item_id)
+        self.scan_tree.focus(item_id)
+        self.on_scan_select()
+        self.scan_context_menu.tk_popup(event.x_root, event.y_root)
+
     def copy_full_path(self, path: str, status_var: tk.StringVar) -> None:
         self.root.clipboard_clear()
         self.root.clipboard_append(path)
         self.root.update_idletasks()
         status_var.set("已复制到剪贴板")
+
+    def open_parent_dir_for_path(self, path: str, status_var: tk.StringVar) -> None:
+        target = Path(path).expanduser()
+        parent = target if target.is_dir() else target.parent
+        if not parent.exists():
+            status_var.set("目录不存在，无法打开")
+            return
+        self.open_in_file_manager(str(parent))
+        status_var.set(f"已尝试打开目录：{parent}")
 
     def show_full_path_dialog(self, path: str) -> None:
         dialog = tk.Toplevel(self.root)
@@ -1379,10 +1434,16 @@ class App:
         ).grid(row=0, column=1, padx=(10, 0))
         ttk.Button(
             footer,
+            text="打开所在目录",
+            command=lambda: self.open_parent_dir_for_path(path, copy_status),
+            style="Action.TButton",
+        ).grid(row=0, column=2, padx=(8, 0))
+        ttk.Button(
+            footer,
             text="关闭",
             command=dialog.destroy,
             style="Action.TButton",
-        ).grid(row=0, column=2, padx=(8, 0))
+        ).grid(row=0, column=3, padx=(8, 0))
 
         dialog.grab_set()
         dialog.focus_set()
