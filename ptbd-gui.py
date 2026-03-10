@@ -596,29 +596,18 @@ class App:
         )
         summary_actions = ttk.Frame(form_summary, style="Panel.TFrame")
         summary_actions.grid(row=0, column=1, rowspan=2, padx=(10, 0), sticky="e")
-        ttk.Button(summary_actions, text="▣ 保存", command=self.save_form, style="Action.TButton", width=8).pack(side=LEFT)
-        ttk.Button(
-            summary_actions,
-            text="⌂ 配置",
-            command=self.open_config_dir,
-            style="Action.TButton",
-            width=8,
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(
-            summary_actions,
-            text="≡ 日志",
-            command=self.open_log_file,
-            style="Action.TButton",
-            width=8,
-        ).pack(side=LEFT, padx=(8, 0))
-        self.form_toggle_button = ttk.Button(
-            form_summary,
-            text="▾ 设置",
-            command=self.toggle_form_panel,
-            style="Action.TButton",
+        self._pack_round_button(summary_actions, "▣ 保存", self.save_form, variant="action", width=8)
+        self._pack_round_button(summary_actions, "⌂ 配置", self.open_config_dir, variant="action", width=8, padx=(8, 0))
+        self._pack_round_button(summary_actions, "≡ 日志", self.open_log_file, variant="action", width=8, padx=(8, 0))
+        self.form_toggle_button_shell = tk.Frame(form_summary, bg="#ffffff")
+        self.form_toggle_button_shell.grid(row=0, column=2, rowspan=2, padx=(10, 0))
+        self.form_toggle_button = self._pack_round_button(
+            self.form_toggle_button_shell,
+            "▾ 设置",
+            self.toggle_form_panel,
+            variant="action",
             width=8,
         )
-        self.form_toggle_button.grid(row=0, column=2, rowspan=2, padx=(10, 0))
 
         self.form_details = ttk.Frame(
             form_body,
@@ -649,9 +638,9 @@ class App:
         self.config_vars["save_dir"] = variable
         entry = ttk.Entry(save_path_row, textvariable=variable, style="Cyber.TEntry")
         entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(save_path_row, text="⌂ 选择", command=self.pick_save_dir, style="Action.TButton", width=8).grid(
-            row=0, column=1, padx=(8, 0)
-        )
+        save_button_shell = tk.Frame(save_path_row, bg="#ffffff")
+        save_button_shell.grid(row=0, column=1, padx=(8, 0))
+        self._pack_round_button(save_button_shell, "⌂ 选择", self.pick_save_dir, variant="action", width=8)
 
         option_group = ttk.Frame(form, style="Panel.TFrame", padding=(0, 12, 0, 0))
         option_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
@@ -704,27 +693,9 @@ class App:
         actions = self._build_pill_group(scan_body, pady=(0, 10))
         primary_actions = ttk.Frame(actions, style="Soft.TFrame")
         primary_actions.pack(fill=X, expand=True)
-        ttk.Button(
-            primary_actions,
-            text="⌕ 扫描",
-            command=self.scan_remote,
-            style="Primary.TButton",
-            width=8,
-        ).pack(side=LEFT)
-        ttk.Button(
-            primary_actions,
-            text="▷ 启动",
-            command=self.start_remote,
-            style="Accent.TButton",
-            width=8,
-        ).pack(side=LEFT, padx=(10, 0))
-        ttk.Button(
-            primary_actions,
-            text="□ 停止",
-            command=self.stop_remote,
-            style="Danger.TButton",
-            width=8,
-        ).pack(side=LEFT, padx=(10, 0))
+        self._pack_round_button(primary_actions, "⌕ 扫描", self.scan_remote, variant="primary", width=8)
+        self._pack_round_button(primary_actions, "▷ 启动", self.start_remote, variant="accent", width=8, padx=(10, 0))
+        self._pack_round_button(primary_actions, "□ 停止", self.stop_remote, variant="danger", width=8, padx=(10, 0))
         ttk.Label(
             primary_actions,
             text="提示：左侧勾选即可多选",
@@ -744,9 +715,7 @@ class App:
         keyword_entry = ttk.Entry(filter_bar, textvariable=self.filter_keyword_var, style="Cyber.TEntry")
         keyword_entry.pack(side=LEFT, fill=X, expand=True)
         keyword_entry.bind("<KeyRelease>", lambda _event: self.apply_scan_filters())
-        ttk.Button(filter_bar, text="× 清空", command=self.clear_scan_filters, style="Action.TButton", width=7).pack(
-            side=LEFT, padx=(8, 0)
-        )
+        self._pack_round_button(filter_bar, "× 清空", self.clear_scan_filters, variant="action", width=7, padx=(8, 0))
         scan_list = ttk.Frame(scan_body, style="Soft.TFrame", padding=(10, 10, 10, 10))
         scan_list.pack(fill=BOTH, expand=True)
         columns = ("pick", "index", "type", "path")
@@ -983,6 +952,106 @@ class App:
         shell.after_idle(redraw)
         return body
 
+    def _button_palette(self, variant: str) -> tuple[str, str, str, str]:
+        palettes = {
+            "primary": ("#365ad6", "#2747b5", "#ffffff", "#365ad6"),
+            "accent": ("#4f7cff", "#365ad6", "#ffffff", "#4f7cff"),
+            "danger": ("#fdeeee", "#f8dede", "#d96d6d", "#f3caca"),
+            "action": ("#eef4ff", "#e2ebff", "#365ad6", "#dfe7f6"),
+        }
+        return palettes.get(variant, palettes["action"])
+
+    def _pack_round_button(
+        self,
+        parent,
+        text: str,
+        command,
+        variant: str = "action",
+        width: int = 8,
+        padx: tuple[int, int] | None = None,
+    ):
+        fill, hover, fg, outline = self._button_palette(variant)
+        shell = tk.Canvas(
+            parent,
+            highlightthickness=0,
+            borderwidth=0,
+            relief="flat",
+            background=parent.cget("background"),
+            width=width * 16 + 12,
+            height=38,
+        )
+        pack_kwargs = {"side": LEFT}
+        if padx is not None:
+            pack_kwargs["padx"] = padx
+        shell.pack(**pack_kwargs)
+
+        button = tk.Button(
+            shell,
+            text=text,
+            command=command,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            background=fill,
+            activebackground=hover,
+            foreground=fg,
+            activeforeground=fg,
+            font=("Arial", 9, "bold"),
+            anchor="w",
+            justify="left",
+            padx=14,
+            pady=6,
+            cursor="hand2",
+        )
+        window_id = shell.create_window(0, 0, anchor="nw", window=button)
+
+        def redraw(_event=None) -> None:
+            width_px = max(shell.winfo_width(), 80)
+            height_px = max(shell.winfo_height(), 32)
+            shell.delete("btn-bg")
+            self._create_rounded_rect(
+                shell,
+                1,
+                1,
+                width_px - 1,
+                height_px - 1,
+                radius=16,
+                fill=fill,
+                outline=outline,
+                width=1,
+                tags="btn-bg",
+            )
+            shell.tag_lower("btn-bg")
+            shell.itemconfigure(window_id, width=width_px - 2, height=height_px - 2)
+            shell.coords(window_id, 1, 1)
+
+        def on_enter(_event=None) -> None:
+            button.configure(background=hover, activebackground=hover)
+            shell.delete("btn-bg")
+            self._create_rounded_rect(
+                shell,
+                1,
+                1,
+                max(shell.winfo_width(), 80) - 1,
+                max(shell.winfo_height(), 32) - 1,
+                radius=16,
+                fill=hover,
+                outline=outline,
+                width=1,
+                tags="btn-bg",
+            )
+            shell.tag_lower("btn-bg")
+
+        def on_leave(_event=None) -> None:
+            button.configure(background=fill, activebackground=hover)
+            redraw()
+
+        shell.bind("<Configure>", redraw)
+        button.bind("<Enter>", on_enter)
+        button.bind("<Leave>", on_leave)
+        shell.after_idle(redraw)
+        return button
+
     def _render_hero_banner(self, width: int) -> None:
         width = max(width, 420)
         height = int(self.hero_canvas.cget("height"))
@@ -1004,6 +1073,7 @@ class App:
             x0 = 8 + (width - 16) * index / steps
             x1 = 8 + (width - 16) * (index + 1) / steps
             self.hero_canvas.create_rectangle(x0, 10, x1 + 1, height - 6, outline="", fill=color)
+        self._mask_rounded_corner_overdraw(8, 10, width - 8, height - 6, 30, "#eef3ff")
         self._create_rounded_rect(
             self.hero_canvas,
             2,
@@ -1032,6 +1102,23 @@ class App:
             fill="#eaf2ff",
             font=("Arial", 10),
         )
+
+    def _mask_rounded_corner_overdraw(self, x1: float, y1: float, x2: float, y2: float, radius: float, color: str) -> None:
+        def arc_points(cx: float, cy: float, start_deg: float, end_deg: float, steps: int = 12) -> list[float]:
+            import math
+
+            points: list[float] = []
+            for index in range(steps + 1):
+                angle = math.radians(start_deg + (end_deg - start_deg) * index / steps)
+                points.extend([cx + radius * math.cos(angle), cy + radius * math.sin(angle)])
+            return points
+
+        tl = [x1, y1, x1 + radius, y1, *arc_points(x1 + radius, y1 + radius, 270, 180), x1, y1 + radius]
+        tr = [x2 - radius, y1, x2, y1, x2, y1 + radius, *arc_points(x2 - radius, y1 + radius, 0, -90)]
+        bl = [x1, y2 - radius, *arc_points(x1 + radius, y2 - radius, 180, 90), x1 + radius, y2, x1, y2]
+        br = [x2, y2 - radius, x2, y2, x2 - radius, y2, *arc_points(x2 - radius, y2 - radius, 90, 0)]
+        for points in (tl, tr, bl, br):
+            self.hero_canvas.create_polygon(points, fill=color, outline=color)
 
     def _on_hero_resize(self, event) -> None:
         self._render_hero_banner(event.width)
@@ -1844,27 +1931,15 @@ class App:
         footer.columnconfigure(0, weight=1)
         copy_status = tk.StringVar(value="可复制后粘贴到终端、文件管理器或 SSH 命令中")
         ttk.Label(footer, textvariable=copy_status, style="PanelHint.TLabel").grid(row=0, column=0, sticky=W)
-        ttk.Button(
-            footer,
-            text="⧉ 复制",
-            command=lambda: self.copy_full_path(path, copy_status),
-            style="Action.TButton",
-            width=7,
-        ).grid(row=0, column=1, padx=(10, 0))
-        ttk.Button(
-            footer,
-            text="⌂ 目录",
-            command=lambda: self.open_parent_dir_for_path(path, copy_status),
-            style="Action.TButton",
-            width=7,
-        ).grid(row=0, column=2, padx=(8, 0))
-        ttk.Button(
-            footer,
-            text="× 关闭",
-            command=dialog.destroy,
-            style="Action.TButton",
-            width=7,
-        ).grid(row=0, column=3, padx=(8, 0))
+        footer_btn_1 = tk.Frame(footer, bg="#ffffff")
+        footer_btn_1.grid(row=0, column=1, padx=(10, 0))
+        self._pack_round_button(footer_btn_1, "⧉ 复制", lambda: self.copy_full_path(path, copy_status), variant="action", width=7)
+        footer_btn_2 = tk.Frame(footer, bg="#ffffff")
+        footer_btn_2.grid(row=0, column=2, padx=(8, 0))
+        self._pack_round_button(footer_btn_2, "⌂ 目录", lambda: self.open_parent_dir_for_path(path, copy_status), variant="action", width=7)
+        footer_btn_3 = tk.Frame(footer, bg="#ffffff")
+        footer_btn_3.grid(row=0, column=3, padx=(8, 0))
+        self._pack_round_button(footer_btn_3, "× 关闭", dialog.destroy, variant="action", width=7)
 
         dialog.grab_set()
         dialog.focus_set()
