@@ -254,8 +254,8 @@ def blend_hex_color(start: str, end: str, ratio: float) -> str:
 
 def hero_gradient_color(ratio: float) -> str:
     if ratio <= 0.55:
-        return blend_hex_color("#5b7cff", "#57b8ff", ratio / 0.55 if ratio else 0.0)
-    return blend_hex_color("#57b8ff", "#95d8ff", (ratio - 0.55) / 0.45)
+        return blend_hex_color("#5678f0", "#4f99ef", ratio / 0.55 if ratio else 0.0)
+    return blend_hex_color("#4f99ef", "#79b5f4", (ratio - 0.55) / 0.45)
 
 
 def configure_gradient_theme(root: tk.Tk) -> None:
@@ -268,7 +268,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "bg_alt": "#f6f9ff",
         "panel": "#ffffff",
         "panel_alt": "#f4f8ff",
-        "panel_edge": "#d7e1f3",
+        "panel_edge": "#e0e0e0",
         "entry": "#ffffff",
         "text": "#23314d",
         "muted": "#6c7a96",
@@ -682,6 +682,11 @@ class App:
             command=self.stop_remote,
             style="Danger.TButton",
         ).pack(side=LEFT, padx=(10, 0))
+        ttk.Label(
+            primary_actions,
+            text="提示：左侧勾选即可多选，无需按 Ctrl / Shift",
+            style="PanelHint.TLabel",
+        ).pack(side=LEFT, padx=(12, 0))
         filter_bar = ttk.Frame(scan_body, style="Panel.TFrame")
         filter_bar.pack(fill=X, pady=(0, 8))
         ttk.Label(filter_bar, text="过滤", style="Field.TLabel").pack(side=LEFT)
@@ -735,7 +740,7 @@ class App:
         self.scan_tree.bind("<Control-Button-1>", self.on_scan_right_click)
         ttk.Label(
             scan_body,
-            text="左侧勾选列用于批量启动；单击可勾选，双击路径会弹窗显示完整路径，路径列支持横向滚动。",
+            text="左侧勾选列用于批量启动；单击勾选，双击路径看完整内容，路径列支持横向滚动。",
             style="PanelHint.TLabel",
         ).pack(anchor=W, pady=(6, 2))
         ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
