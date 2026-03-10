@@ -570,9 +570,8 @@ class App:
         self.hero_canvas.bind("<Configure>", self._on_hero_resize)
         self._render_hero_banner(888)
 
-        form_panel = ttk.LabelFrame(container, text="连接与保存设置", style="Section.TLabelframe", padding=0)
-        form_panel.pack(fill=X, pady=(0, 6))
-        form_summary = ttk.Frame(form_panel, style="Panel.TFrame", padding=(CONTENT_INSET_X, 12))
+        form_panel, form_body = self._build_rounded_section(container, "连接与保存设置", pady=(0, 6))
+        form_summary = ttk.Frame(form_body, style="Panel.TFrame", padding=(CONTENT_INSET_X, 12))
         form_summary.pack(fill=X)
         form_summary.columnconfigure(0, weight=1)
         ttk.Label(form_summary, textvariable=self.summary_host_var, style="Field.TLabel").grid(row=0, column=0, sticky=W)
@@ -603,7 +602,7 @@ class App:
         self.form_toggle_button.grid(row=0, column=2, rowspan=2, padx=(10, 0))
 
         self.form_details = ttk.Frame(
-            form_panel,
+            form_body,
             style="Panel.TFrame",
             padding=(CONTENT_INSET_X, 6, CONTENT_INSET_X, 14),
         )
@@ -673,14 +672,16 @@ class App:
         status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
         status.pack(anchor=W, pady=(2, 12))
 
-        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=0)
-        scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
-        scan_body = ttk.Frame(
-            scan_panel,
+        scan_panel, scan_body = self._build_rounded_section(
+            container,
+            "VPS 候选列表（新接口预览）",
+            pady=(0, 8),
+            expand=True,
+        )
+        scan_body.configure(
             style="Panel.TFrame",
             padding=(CONTENT_INSET_X, 12, CONTENT_INSET_X, 12),
         )
-        scan_body.pack(fill=BOTH, expand=True)
         actions = ttk.Frame(scan_body, style="Toolbar.TFrame")
         actions.pack(fill=X, pady=(0, 8))
         primary_actions = ttk.Frame(actions, style="Panel.TFrame")
@@ -770,10 +771,7 @@ class App:
         self.scan_context_menu.add_command(label="⌕ 查看完整路径", command=self.show_selected_scan_path_dialog)
         self.scan_context_menu.add_command(label="▷ 直接启动", command=self.start_selected_scan_item)
 
-        log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
-        log_panel.pack(fill=BOTH, expand=False)
-        log_body = ttk.Frame(log_panel, style="Panel.TFrame", padding=8)
-        log_body.pack(fill=BOTH, expand=True)
+        log_panel, log_body = self._build_rounded_section(container, "运行日志", body_padding=(8, 8, 8, 8))
 
         self.log_view = ScrolledText(
             log_body,
@@ -810,6 +808,103 @@ class App:
             "准备完成。",
         ):
             append_gui_log_line(line)
+
+    def _create_rounded_rect(
+        self,
+        canvas: tk.Canvas,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        radius: float,
+        **kwargs,
+    ) -> int:
+        radius = max(0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
+        points = [
+            x1 + radius,
+            y1,
+            x2 - radius,
+            y1,
+            x2,
+            y1,
+            x2,
+            y1 + radius,
+            x2,
+            y2 - radius,
+            x2,
+            y2,
+            x2 - radius,
+            y2,
+            x1 + radius,
+            y2,
+            x1,
+            y2,
+            x1,
+            y2 - radius,
+            x1,
+            y1 + radius,
+            x1,
+            y1,
+        ]
+        return canvas.create_polygon(points, smooth=True, splinesteps=24, **kwargs)
+
+    def _build_rounded_section(
+        self,
+        parent,
+        title: str,
+        pady: tuple[int, int] = (0, 6),
+        expand: bool = False,
+        body_padding: tuple[int, int, int, int] = (0, 0, 0, 0),
+    ) -> tuple[tk.Canvas, ttk.Frame]:
+        card = tk.Canvas(
+            parent,
+            highlightthickness=0,
+            borderwidth=0,
+            relief="flat",
+            background="#eef3ff",
+            height=120,
+        )
+        card.pack(fill=BOTH if expand else X, expand=expand, pady=pady)
+        body = ttk.Frame(card, style="Panel.TFrame", padding=body_padding)
+        title_id = card.create_text(
+            CONTENT_INSET_X + 12,
+            18,
+            anchor="w",
+            text=title,
+            fill="#365ad6",
+            font=("Arial", 10, "bold"),
+        )
+        window_id = card.create_window(CONTENT_INSET_X, 40, anchor="nw", window=body)
+
+        def redraw(_event=None) -> None:
+            width = max(card.winfo_width(), 320)
+            body_width = max(width - CONTENT_INSET_X * 2, 120)
+            card.itemconfigure(window_id, width=body_width)
+            card.update_idletasks()
+            body_height = body.winfo_reqheight()
+            total_height = max(72, body_height + 52)
+            card.configure(height=total_height)
+            card.delete("card-bg")
+            self._create_rounded_rect(
+                card,
+                2,
+                4,
+                width - 2,
+                total_height - 2,
+                radius=18,
+                fill="#ffffff",
+                outline="#dfe6f4",
+                width=1,
+                tags="card-bg",
+            )
+            card.tag_lower("card-bg")
+            card.coords(title_id, CONTENT_INSET_X + 12, 18)
+            card.coords(window_id, CONTENT_INSET_X, 40)
+
+        card.bind("<Configure>", redraw)
+        body.bind("<Configure>", redraw)
+        card.after_idle(redraw)
+        return card, body
 
     def _render_hero_banner(self, width: int) -> None:
         width = max(width, 420)
