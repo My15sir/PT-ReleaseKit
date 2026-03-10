@@ -256,8 +256,8 @@ def blend_hex_color(start: str, end: str, ratio: float) -> str:
 
 def hero_gradient_color(ratio: float) -> str:
     if ratio <= 0.55:
-        return blend_hex_color("#f08d6f", "#e66b52", ratio / 0.55 if ratio else 0.0)
-    return blend_hex_color("#e66b52", "#bf3f30", (ratio - 0.55) / 0.45)
+        return blend_hex_color("#5678f0", "#4f99ef", ratio / 0.55 if ratio else 0.0)
+    return blend_hex_color("#4f99ef", "#79b5f4", (ratio - 0.55) / 0.45)
 
 
 def configure_gradient_theme(root: tk.Tk) -> None:
@@ -266,26 +266,26 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         style.theme_use("clam")
 
     colors = {
-        "bg": "#f8f2ed",
-        "bg_alt": "#fdf7f2",
+        "bg": "#eef3ff",
+        "bg_alt": "#f6f9ff",
         "panel": "#ffffff",
-        "panel_alt": "#f7efe9",
-        "panel_edge": "#ead9ce",
+        "panel_alt": "#f4f8ff",
+        "panel_edge": "#dfe7f6",
         "entry": "#ffffff",
-        "text": "#2a1f19",
-        "muted": "#6b5549",
-        "accent": "#e65c46",
-        "accent_soft": "#ffd8cc",
-        "accent_deep": "#bf3f30",
-        "warning": "#bf3f30",
-        "danger": "#c94e45",
-        "danger_soft": "#fff0ec",
-        "button": "#fff7f2",
-        "button_hover": "#fdece3",
-        "button_pressed": "#f8dfd3",
-        "tree_select": "#fff0e8",
-        "tree_header": "#fbf3ee",
-        "log_bg": "#fffaf7",
+        "text": "#23314d",
+        "muted": "#6c7a96",
+        "accent": "#4f7cff",
+        "accent_soft": "#b9d8ff",
+        "accent_deep": "#365ad6",
+        "warning": "#4b64b8",
+        "danger": "#d96d6d",
+        "danger_soft": "#fdeeee",
+        "button": "#eef4ff",
+        "button_hover": "#e2ebff",
+        "button_pressed": "#d5e2ff",
+        "tree_select": "#dce8ff",
+        "tree_header": "#edf4ff",
+        "log_bg": "#f8fbff",
     }
 
     root.configure(bg=colors["bg"])
@@ -294,9 +294,9 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         ".",
         background=colors["bg"],
         foreground=colors["text"],
-        bordercolor=colors["panel_edge"],
+        bordercolor=colors["accent_soft"],
         darkcolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
+        lightcolor=colors["accent_soft"],
         troughcolor=colors["panel_alt"],
         fieldbackground=colors["entry"],
         focuscolor=colors["accent"],
@@ -313,32 +313,32 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "Field.TLabel",
         background=colors["panel"],
         foreground=colors["accent_deep"],
-        font=("Segoe UI", 10, "bold"),
+        font=("Arial", 10, "bold"),
     )
     style.configure(
         "Hint.TLabel",
         background=colors["panel"],
         foreground=colors["muted"],
-        font=("Segoe UI", 9),
+        font=("Arial", 9),
     )
     style.configure(
         "PanelHint.TLabel",
         background=colors["panel_alt"],
         foreground=colors["muted"],
-        font=("Segoe UI", 9),
+        font=("Arial", 9),
         padding=(0, 2),
     )
     style.configure(
         "Tips.TLabel",
         background=colors["panel"],
         foreground=colors["text"],
-        font=("Segoe UI", 10),
+        font=("Arial", 10),
     )
     style.configure(
         "Status.TLabel",
         background=colors["panel_alt"],
         foreground=colors["warning"],
-        font=("Segoe UI", 10, "bold"),
+        font=("Arial", 10, "bold"),
         padding=(0, 8),
     )
     style.configure(
@@ -357,22 +357,24 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "Section.TLabelframe.Label",
         background=colors["bg"],
         foreground=colors["accent_deep"],
-        font=("Segoe UI", 10, "bold"),
+        font=("Arial", 10, "bold"),
         padding=(0, 0, 0, 0),
     )
     style.configure(
         "Cyber.TEntry",
         fieldbackground=colors["entry"],
         foreground=colors["text"],
-        bordercolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
-        darkcolor=colors["panel_edge"],
-        padding=6,
+        bordercolor=colors["panel_alt"],
+        lightcolor=colors["panel_alt"],
+        darkcolor=colors["panel_alt"],
+        borderwidth=0,
+        relief="flat",
+        padding=(8, 7),
     )
     style.map(
         "Cyber.TEntry",
-        bordercolor=[("focus", colors["accent"]), ("!focus", colors["panel_edge"])],
-        lightcolor=[("focus", colors["accent"]), ("!focus", colors["panel_edge"])],
+        bordercolor=[("focus", colors["accent_soft"]), ("!focus", colors["panel_alt"])],
+        lightcolor=[("focus", colors["accent_soft"]), ("!focus", colors["panel_alt"])],
     )
     style.configure(
         "TCheckbutton",
@@ -392,8 +394,14 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "HeroNote.TLabel",
         background=colors["bg"],
         foreground=colors["accent_deep"],
-        font=("Segoe UI", 9, "bold"),
+        font=("Arial", 9, "bold"),
         padding=(10, 4),
+    )
+    style.configure(
+        "Soft.TFrame",
+        background=colors["panel_alt"],
+        borderwidth=0,
+        relief="flat",
     )
     style.configure(
         "Primary.TButton",
@@ -404,13 +412,13 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         darkcolor=colors["accent_deep"],
         borderwidth=1,
         relief="flat",
-        padding=(12, 6),
-        font=("Segoe UI", 9, "bold"),
+        padding=(14, 7),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Primary.TButton",
         background=[
-            ("pressed", "#a8372a"),
+            ("pressed", "#2747b5"),
             ("active", colors["accent"]),
         ],
         foreground=[("!disabled", "#ffffff")],
@@ -425,7 +433,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         borderwidth=1,
         relief="flat",
         padding=(12, 6),
-        font=("Segoe UI", 9, "bold"),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Action.TButton",
@@ -450,13 +458,13 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         borderwidth=1,
         relief="flat",
         padding=(12, 6),
-        font=("Segoe UI", 9, "bold"),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Accent.TButton",
         background=[
             ("pressed", colors["accent_deep"]),
-            ("active", "#f07a60"),
+            ("active", "#6d96ff"),
         ],
         foreground=[("!disabled", "#ffffff")],
     )
@@ -468,13 +476,13 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "Danger.TButton",
         background=colors["danger_soft"],
         foreground=colors["danger"],
-        bordercolor="#f4c8be",
-        lightcolor="#f4c8be",
+        bordercolor="#f3caca",
+        lightcolor="#f3caca",
         darkcolor=colors["panel_edge"],
         borderwidth=1,
         relief="flat",
-        padding=(12, 6),
-        font=("Segoe UI", 9, "bold"),
+        padding=(14, 7),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Danger.TButton",
@@ -484,7 +492,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         ],
         foreground=[
             ("pressed", colors["danger"]),
-            ("active", "#b9453d"),
+            ("active", "#c45757"),
             ("!disabled", colors["danger"]),
         ],
     )
@@ -510,7 +518,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         bordercolor=colors["panel_edge"],
         lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
-        font=("Segoe UI", 10, "bold"),
+        font=("Arial", 10, "bold"),
         padding=(6, 6),
     )
     style.map(
@@ -560,11 +568,11 @@ class App:
 
         self.hero_canvas = tk.Canvas(
             container,
-            height=76,
+            height=102,
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
-            background="#f8f2ed",
+            background="#eef3ff",
         )
         self.hero_canvas.pack(fill=X, pady=(0, 8))
         self.hero_canvas.bind("<Configure>", self._on_hero_resize)
@@ -682,10 +690,9 @@ class App:
             style="Panel.TFrame",
             padding=(CONTENT_INSET_X, 12, CONTENT_INSET_X, 12),
         )
-        actions = ttk.Frame(scan_body, style="Toolbar.TFrame")
-        actions.pack(fill=X, pady=(0, 8))
-        primary_actions = ttk.Frame(actions, style="Panel.TFrame")
-        primary_actions.pack(side=LEFT, fill=X, expand=True)
+        actions = self._build_pill_group(scan_body, pady=(0, 10))
+        primary_actions = ttk.Frame(actions, style="Soft.TFrame")
+        primary_actions.pack(fill=X, expand=True)
         ttk.Button(
             primary_actions,
             text="⌕ 扫描",
@@ -709,8 +716,7 @@ class App:
             text="提示：左侧勾选即可多选",
             style="PanelHint.TLabel",
         ).pack(side=LEFT, padx=(12, 0))
-        filter_bar = ttk.Frame(scan_body, style="Panel.TFrame")
-        filter_bar.pack(fill=X, pady=(0, 8))
+        filter_bar = self._build_pill_group(scan_body, pady=(0, 8), body_padding=(14, 10, 14, 10))
         ttk.Label(filter_bar, text="过滤", style="Field.TLabel").pack(side=LEFT)
         type_box = ttk.Combobox(
             filter_bar,
@@ -727,7 +733,7 @@ class App:
         ttk.Button(filter_bar, text="× 清空", command=self.clear_scan_filters, style="Action.TButton").pack(
             side=LEFT, padx=(8, 0)
         )
-        scan_list = ttk.Frame(scan_body, style="Panel.TFrame")
+        scan_list = ttk.Frame(scan_body, style="Soft.TFrame", padding=(10, 10, 10, 10))
         scan_list.pack(fill=BOTH, expand=True)
         columns = ("pick", "index", "type", "path")
         self.scan_tree = ttk.Treeview(
@@ -861,7 +867,7 @@ class App:
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
-            background="#f8f2ed",
+            background="#eef3ff",
             height=120,
         )
         card.pack(fill=BOTH if expand else X, expand=expand, pady=pady)
@@ -872,7 +878,7 @@ class App:
             anchor="w",
             text=title,
             fill="#bf3f30",
-            font=("Segoe UI", 10, "bold"),
+            font=("Arial", 10, "bold"),
         )
         window_id = card.create_window(CONTENT_INSET_X, 40, anchor="nw", window=body)
 
@@ -892,7 +898,7 @@ class App:
                 width - 4,
                 total_height,
                 radius=20,
-                fill="#2c1c1412",
+                fill="#dae5ff",
                 outline="",
                 tags="card-bg",
             )
@@ -904,7 +910,7 @@ class App:
                 total_height - 2,
                 radius=20,
                 fill="#ffffff",
-                outline="#ead9ce",
+                outline="#dfe7f6",
                 width=1,
                 tags="card-bg",
             )
@@ -917,33 +923,100 @@ class App:
         card.after_idle(redraw)
         return card, body
 
+    def _build_pill_group(
+        self,
+        parent,
+        pady: tuple[int, int] = (0, 8),
+        body_padding: tuple[int, int, int, int] = (12, 10, 12, 10),
+    ) -> ttk.Frame:
+        shell = tk.Canvas(
+            parent,
+            highlightthickness=0,
+            borderwidth=0,
+            relief="flat",
+            background="#eef3ff",
+            height=56,
+        )
+        shell.pack(fill=X, pady=pady)
+        body = ttk.Frame(shell, style="Soft.TFrame", padding=body_padding)
+        window_id = shell.create_window(0, 0, anchor="nw", window=body)
+
+        def redraw(_event=None) -> None:
+            width = max(shell.winfo_width(), 220)
+            shell.itemconfigure(window_id, width=max(width - 4, 100))
+            shell.update_idletasks()
+            body_height = body.winfo_reqheight()
+            total_height = max(48, body_height + 4)
+            shell.configure(height=total_height)
+            shell.delete("pill-bg")
+            self._create_rounded_rect(
+                shell,
+                2,
+                2,
+                width - 2,
+                total_height - 2,
+                radius=18,
+                fill="#f4f8ff",
+                outline="#dfe7f6",
+                width=1,
+                tags="pill-bg",
+            )
+            shell.tag_lower("pill-bg")
+            shell.coords(window_id, 2, 2)
+
+        shell.bind("<Configure>", redraw)
+        body.bind("<Configure>", redraw)
+        shell.after_idle(redraw)
+        return body
+
     def _render_hero_banner(self, width: int) -> None:
         width = max(width, 420)
         height = int(self.hero_canvas.cget("height"))
         steps = 96
         self.hero_canvas.delete("all")
+        self._create_rounded_rect(
+            self.hero_canvas,
+            4,
+            14,
+            width - 4,
+            height,
+            radius=24,
+            fill="#dbe7ff",
+            outline="",
+        )
         for index in range(steps):
             ratio = index / max(steps - 1, 1)
             color = hero_gradient_color(ratio)
-            x0 = width * index / steps
-            x1 = width * (index + 1) / steps
-            self.hero_canvas.create_rectangle(x0, 0, x1 + 1, height, outline="", fill=color)
-        self.hero_canvas.create_text(
-            HEADER_TEXT_INSET_X,
-            14,
-            anchor="nw",
-            text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
-            fill="#ffffff",
-            font=("Segoe UI", 15, "bold"),
+            x0 = 8 + (width - 16) * index / steps
+            x1 = 8 + (width - 16) * (index + 1) / steps
+            self.hero_canvas.create_rectangle(x0, 10, x1 + 1, height - 6, outline="", fill=color)
+        self._create_rounded_rect(
+            self.hero_canvas,
+            2,
+            6,
+            width - 2,
+            height - 4,
+            radius=24,
+            fill="",
+            outline="#cfe0ff",
+            width=1,
         )
         self.hero_canvas.create_text(
             HEADER_TEXT_INSET_X,
-            46,
+            22,
+            anchor="nw",
+            text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
+            fill="#ffffff",
+            font=("Arial", 16, "bold"),
+        )
+        self.hero_canvas.create_text(
+            HEADER_TEXT_INSET_X,
+            58,
             anchor="nw",
             width=max(width - HEADER_TEXT_INSET_X * 2, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
-            fill="#fff4ef",
-            font=("Segoe UI", 10),
+            fill="#eaf2ff",
+            font=("Arial", 10),
         )
 
     def _on_hero_resize(self, event) -> None:
@@ -958,7 +1031,7 @@ class App:
         ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
 
     def _add_compact_entry(self, parent, label_text: str, key: str, row: int, column: int, hint: str, show: str | None = None) -> None:
-        field = ttk.Frame(parent, style="Panel.TFrame", padding=(0, 0, 14 if column == 0 else 0, 0))
+        field = ttk.Frame(parent, style="Soft.TFrame", padding=(12, 10, 12 if column == 0 else 12, 10))
         field.grid(row=row, column=column, sticky="nsew", padx=(0, 10 if column == 0 else 0), pady=3)
         field.columnconfigure(0, weight=1)
         ttk.Label(field, text=label_text, style="Field.TLabel").grid(row=0, column=0, sticky=W)
@@ -966,7 +1039,7 @@ class App:
         self.config_vars[key] = variable
         variable.trace_add("write", lambda *_args: self.refresh_config_summary())
         entry = ttk.Entry(field, textvariable=variable, show=show or "", style="Cyber.TEntry")
-        entry.grid(row=1, column=0, sticky="ew", pady=(4, 2))
+        entry.grid(row=1, column=0, sticky="ew", pady=(6, 4))
         ttk.Label(
             field,
             text=hint,
