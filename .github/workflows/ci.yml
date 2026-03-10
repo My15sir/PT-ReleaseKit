@@ -11,24 +11,49 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install shellcheck
         run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Show shellcheck version
+        run: shellcheck --version
       - name: ShellCheck
-        run: shellcheck -x bdtool.sh bdtool install.sh ptbd ptbd-gui ptbd-start.sh ptbd-remote.sh ptbd-remote-start.sh PT-BDtool.sh PT-BDtool.command scripts/*.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          shellcheck -s bash -x \
+            bdtool.sh \
+            bdtool \
+            install.sh \
+            ptbd \
+            ptbd-gui \
+            ptbd-start.sh \
+            ptbd-remote.sh \
+            ptbd-remote-start.sh \
+            PT-BDtool.sh \
+            PT-BDtool.command \
+            scripts/*.sh
 
   full-regression:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install runtime commands
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip
       - name: Run full-test.sh
-        run: ./scripts/full-test.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! ./scripts/full-test.sh; then
+            echo '--- full-test.log ---'
+            tail -n 200 bdtool-output/logs/full-test.log || true
+            echo '--- full-test-results.tsv ---'
+            cat bdtool-output/logs/full-test-results.tsv || true
+            exit 1
+          fi
 
   fetch-deps:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install runtime commands for system-mode bundling
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip
       - name: Prepare mock BDInfo command
         run: |
           mkdir -p .ci-bin
@@ -59,7 +84,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install runtime commands for system-mode bundling
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip
       - name: Prepare mock BDInfo command
         run: |
           mkdir -p .ci-bin
@@ -71,9 +96,22 @@ jobs:
           SH
           chmod +x .ci-bin/BDInfo
       - name: Build bundle then install offline
+        shell: bash
         run: |
-          PATH="$PWD/.ci-bin:$PATH" PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh
-          bash install.sh --offline
+          set -euo pipefail
+          if ! PATH="$PWD/.ci-bin:$PATH" PTBD_FETCH_MODE=system bash scripts/fetch-deps.sh; then
+            echo '--- fetch-deps failed ---'
+            exit 1
+          fi
+          if ! bash install.sh --offline; then
+            echo '--- install.sh failed, dump diagnostics ---'
+            command -v bdtool || true
+            command -v ptbd || true
+            command -v ptbd-gui || true
+            ls -la "$HOME/.local/bin" || true
+            ls -la "$HOME/.local/share/pt-bdtool/PT-BDtool-app" || true
+            exit 1
+          fi
       - name: Ensure installer has no apt calls
         run: |
           ! grep -Eq 'apt-get|apt ' install.sh
