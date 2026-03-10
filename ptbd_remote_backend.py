@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -14,6 +16,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
+from urllib.parse import urlsplit
 
 try:
     import paramiko
@@ -46,16 +49,190 @@ def quote_sh(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
-def parse_remote_host(remote_host: str) -> tuple[str | None, str]:
-    host = remote_host.strip()
-    if not host:
+SSH_OPTIONS_WITH_VALUE = {
+    "-b",
+    "-c",
+    "-D",
+    "-E",
+    "-F",
+    "-I",
+    "-i",
+    "-J",
+    "-L",
+    "-l",
+    "-m",
+    "-O",
+    "-o",
+    "-p",
+    "-Q",
+    "-R",
+    "-S",
+    "-W",
+    "-w",
+}
+
+IGNORED_HOST_TOKENS = {
+    "host",
+    "password",
+    "passwd",
+    "port",
+    "ssh",
+    "user",
+    "vps",
+}
+
+REMOTE_TARGET_PATTERN = re.compile(
+    r"""
+    (?<![A-Za-z0-9_.-])
+    (?:(?P<user>[A-Za-z0-9._-]+)@)?
+    (?P<host>
+        \[[0-9A-Fa-f:.]+\]
+        |
+        (?:\d{1,3}\.){3}\d{1,3}
+        |
+        localhost
+        |
+        [A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*
+    )
+    (?::(?P<port>\d{1,5}))?
+    """,
+    re.VERBOSE,
+)
+
+
+def clean_remote_host_token(hostname: str) -> str:
+    cleaned = hostname.strip().strip("\"'<>[](){}")
+    if not cleaned:
         raise ValueError("缺少 VPS 地址。")
-    if "@" not in host:
-        return None, host
-    username, _, hostname = host.rpartition("@")
+    return cleaned
+
+
+def score_remote_target_candidate(username: str | None, hostname: str, port: int | None) -> int:
+    score = 0
+    lowered = hostname.lower()
+    if username:
+        score += 4
+    if "." in hostname or ":" in hostname or hostname.replace(".", "").isdigit():
+        score += 3
+    if port is not None:
+        score += 2
+    if lowered in IGNORED_HOST_TOKENS:
+        score -= 6
+    return score
+
+
+def parse_port_value(value: str | int | None) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if not text.isdigit():
+        raise ValueError(f"SSH 端口格式无效：{value}")
+    port = int(text)
+    if not (1 <= port <= 65535):
+        raise ValueError(f"SSH 端口超出范围：{value}")
+    return port
+
+
+def parse_ssh_command_target(text: str) -> tuple[str | None, str, int | None] | None:
+    try:
+        tokens = shlex.split(text)
+    except ValueError:
+        return None
+    if not tokens or tokens[0] != "ssh":
+        return None
+
+    username: str | None = None
+    port: int | None = None
+    index = 1
+    while index < len(tokens):
+        token = tokens[index]
+        if token in SSH_OPTIONS_WITH_VALUE:
+            if index + 1 >= len(tokens):
+                break
+            value = tokens[index + 1]
+            if token == "-l":
+                username = value
+            elif token == "-p":
+                port = parse_port_value(value)
+            index += 2
+            continue
+        if token.startswith("-p") and token != "-p":
+            port = parse_port_value(token[2:])
+            index += 1
+            continue
+        if token.startswith("-l") and token != "-l":
+            username = token[2:] or None
+            index += 1
+            continue
+        if token.startswith("-"):
+            index += 1
+            continue
+
+        target = token
+        if "@" in target:
+            parsed_user, _, hostname = target.rpartition("@")
+            username = parsed_user or username
+        else:
+            hostname = target
+        hostname = clean_remote_host_token(hostname)
+        return username or None, hostname, port
+    return None
+
+
+def parse_remote_target(remote_host: str) -> tuple[str | None, str, int | None]:
+    text = remote_host.strip()
+    if not text:
+        raise ValueError("缺少 VPS 地址。")
+
+    if text.startswith("ssh://"):
+        parsed = urlsplit(text)
+        if not parsed.hostname:
+            raise ValueError(f"VPS 地址格式无效：{remote_host}")
+        return parsed.username or None, parsed.hostname, parse_port_value(parsed.port)
+
+    ssh_target = parse_ssh_command_target(text)
+    if ssh_target is not None:
+        return ssh_target
+
+    candidates: list[tuple[int, str | None, str, int | None]] = []
+    for match in REMOTE_TARGET_PATTERN.finditer(text):
+        hostname = clean_remote_host_token(match.group("host"))
+        username = match.group("user") or None
+        port = parse_port_value(match.group("port"))
+        score = score_remote_target_candidate(username, hostname, port)
+        candidates.append((score, username, hostname, port))
+    if candidates:
+        _, username, hostname, port = max(candidates, key=lambda item: item[0])
+        return username, hostname, port
+
+    direct = clean_remote_host_token(text)
+    if " " in direct:
+        raise ValueError(f"VPS 地址格式无效：{remote_host}")
+    if "@" not in direct:
+        return None, direct, None
+    username, _, hostname = direct.rpartition("@")
     if not hostname:
         raise ValueError(f"VPS 地址格式无效：{remote_host}")
-    return username or None, hostname
+    return username or None, clean_remote_host_token(hostname), None
+
+
+def format_remote_host(username: str | None, hostname: str) -> str:
+    return f"{username}@{hostname}" if username else hostname
+
+
+def normalize_remote_connection(remote_host: str, remote_port: str | int | None) -> tuple[str, str]:
+    username, hostname, embedded_port = parse_remote_target(remote_host)
+    port = embedded_port if embedded_port is not None else parse_port_value(remote_port)
+    if port is None:
+        port = 22
+    return format_remote_host(username, hostname), str(port)
+
+
+def parse_remote_host(remote_host: str) -> tuple[str | None, str]:
+    username, hostname, _ = parse_remote_target(remote_host)
+    return username, hostname
 
 
 def bool_flag(value: str) -> bool:
@@ -372,13 +549,17 @@ class PTBDRemoteBackend:
         self.ensure_available()
         if self.client is not None:
             return
-        username, hostname = parse_remote_host(self.config["remote_host"])
+        normalized_host, normalized_port = normalize_remote_connection(
+            self.config["remote_host"],
+            self.config.get("remote_port") or 22,
+        )
+        username, hostname = parse_remote_host(normalized_host)
         password = self.config.get("remote_password") or None
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(
             hostname=hostname,
-            port=int(self.config.get("remote_port") or 22),
+            port=int(normalized_port),
             username=username,
             password=password,
             allow_agent=not password,

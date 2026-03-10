@@ -20,6 +20,7 @@ from ptbd_remote_backend import (
     TaskCancelledError,
     backend_available,
     backend_status,
+    normalize_remote_connection,
 )
 
 
@@ -242,28 +243,46 @@ def standalone_backend_label() -> str:
     return "内置独立控制后端" if backend_available() else "旧版 shell 回退后端"
 
 
-def configure_cyberpunk_theme(root: tk.Tk) -> None:
+def blend_hex_color(start: str, end: str, ratio: float) -> str:
+    ratio = max(0.0, min(1.0, ratio))
+    start_rgb = tuple(int(start[index : index + 2], 16) for index in (1, 3, 5))
+    end_rgb = tuple(int(end[index : index + 2], 16) for index in (1, 3, 5))
+    mixed = tuple(int(a + (b - a) * ratio) for a, b in zip(start_rgb, end_rgb))
+    return "#" + "".join(f"{channel:02x}" for channel in mixed)
+
+
+def hero_gradient_color(ratio: float) -> str:
+    if ratio <= 0.55:
+        return blend_hex_color("#5b7cff", "#57b8ff", ratio / 0.55 if ratio else 0.0)
+    return blend_hex_color("#57b8ff", "#95d8ff", (ratio - 0.55) / 0.45)
+
+
+def configure_gradient_theme(root: tk.Tk) -> None:
     style = ttk.Style(root)
     if "clam" in style.theme_names():
         style.theme_use("clam")
 
     colors = {
-        "bg": "#050816",
-        "bg_alt": "#0b1023",
-        "panel": "#0c1328",
-        "panel_alt": "#101935",
-        "panel_edge": "#172348",
-        "entry": "#09101f",
-        "text": "#d7e9ff",
-        "muted": "#7d9cc0",
-        "accent": "#24f2ff",
-        "accent_soft": "#1889b8",
-        "magenta": "#ff2ed1",
-        "warning": "#f9ff6c",
-        "danger": "#ff668f",
-        "button": "#111b35",
-        "button_hover": "#16264b",
-        "button_pressed": "#08111f",
+        "bg": "#eef3ff",
+        "bg_alt": "#f6f9ff",
+        "panel": "#ffffff",
+        "panel_alt": "#f4f8ff",
+        "panel_edge": "#d7e1f3",
+        "entry": "#ffffff",
+        "text": "#23314d",
+        "muted": "#6c7a96",
+        "accent": "#4f7cff",
+        "accent_soft": "#b9d8ff",
+        "accent_deep": "#365ad6",
+        "warning": "#4b64b8",
+        "danger": "#d96d6d",
+        "danger_soft": "#fdeeee",
+        "button": "#eef4ff",
+        "button_hover": "#e2ebff",
+        "button_pressed": "#d5e2ff",
+        "tree_select": "#dce8ff",
+        "tree_header": "#edf4ff",
+        "log_bg": "#f8fbff",
     }
 
     root.configure(bg=colors["bg"])
@@ -275,7 +294,7 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
         bordercolor=colors["accent_soft"],
         darkcolor=colors["panel_edge"],
         lightcolor=colors["accent_soft"],
-        troughcolor=colors["panel"],
+        troughcolor=colors["panel_alt"],
         fieldbackground=colors["entry"],
         focuscolor=colors["accent"],
     )
@@ -285,36 +304,15 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
         background=colors["panel"],
         borderwidth=1,
         relief="solid",
-        bordercolor=colors["accent_soft"],
-        lightcolor=colors["accent_soft"],
-        darkcolor=colors["panel_edge"],
-    )
-    style.configure(
-        "Hero.TFrame",
-        background=colors["panel_alt"],
-        borderwidth=1,
-        relief="solid",
-        bordercolor=colors["magenta"],
-        lightcolor=colors["accent"],
+        bordercolor=colors["panel_edge"],
+        lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
     )
     style.configure("TLabel", background=colors["bg"], foreground=colors["text"])
     style.configure(
-        "Title.TLabel",
-        background=colors["panel_alt"],
-        foreground=colors["accent"],
-        font=("Arial", 16, "bold"),
-    )
-    style.configure(
-        "Subtitle.TLabel",
-        background=colors["panel_alt"],
-        foreground=colors["muted"],
-        font=("Arial", 10),
-    )
-    style.configure(
         "Field.TLabel",
         background=colors["panel"],
-        foreground=colors["accent"],
+        foreground=colors["accent_deep"],
         font=("Arial", 10, "bold"),
     )
     style.configure(
@@ -347,29 +345,29 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
         background=colors["bg"],
         borderwidth=1,
         relief="solid",
-        bordercolor=colors["accent_soft"],
-        lightcolor=colors["accent_soft"],
+        bordercolor=colors["panel_edge"],
+        lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
     )
     style.configure(
         "Section.TLabelframe.Label",
         background=colors["bg"],
-        foreground=colors["magenta"],
+        foreground=colors["accent_deep"],
         font=("Arial", 10, "bold"),
     )
     style.configure(
         "Cyber.TEntry",
         fieldbackground=colors["entry"],
         foreground=colors["text"],
-        bordercolor=colors["accent_soft"],
-        lightcolor=colors["accent_soft"],
+        bordercolor=colors["panel_edge"],
+        lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
         padding=6,
     )
     style.map(
         "Cyber.TEntry",
-        bordercolor=[("focus", colors["accent"]), ("!focus", colors["accent_soft"])],
-        lightcolor=[("focus", colors["accent"]), ("!focus", colors["accent_soft"])],
+        bordercolor=[("focus", colors["accent"]), ("!focus", colors["panel_edge"])],
+        lightcolor=[("focus", colors["accent"]), ("!focus", colors["panel_edge"])],
     )
     style.configure(
         "TCheckbutton",
@@ -380,7 +378,7 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
         "TCheckbutton",
         foreground=[
             ("disabled", colors["muted"]),
-            ("active", colors["accent"]),
+            ("active", colors["accent_deep"]),
             ("!disabled", colors["text"]),
         ],
         background=[("active", colors["panel"]), ("!disabled", colors["panel"])],
@@ -388,9 +386,9 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
     style.configure(
         "Action.TButton",
         background=colors["button"],
-        foreground=colors["accent"],
-        bordercolor=colors["accent_soft"],
-        lightcolor=colors["accent_soft"],
+        foreground=colors["accent_deep"],
+        bordercolor=colors["panel_edge"],
+        lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
         padding=(10, 7),
     )
@@ -401,36 +399,36 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
             ("active", colors["button_hover"]),
         ],
         foreground=[
-            ("pressed", colors["accent"]),
-            ("active", colors["warning"]),
-            ("!disabled", colors["accent"]),
+            ("pressed", colors["accent_deep"]),
+            ("active", colors["accent"]),
+            ("!disabled", colors["accent_deep"]),
         ],
-        bordercolor=[("active", colors["accent"]), ("!disabled", colors["accent_soft"])],
+        bordercolor=[("active", colors["accent_soft"]), ("!disabled", colors["panel_edge"])],
     )
     style.configure(
         "Accent.TButton",
         background=colors["accent"],
-        foreground=colors["bg"],
+        foreground="#ffffff",
         bordercolor=colors["accent"],
         lightcolor=colors["accent"],
-        darkcolor=colors["accent_soft"],
+        darkcolor=colors["accent_deep"],
         padding=(10, 7),
         font=("Arial", 10, "bold"),
     )
     style.map(
         "Accent.TButton",
         background=[
-            ("pressed", colors["accent_soft"]),
-            ("active", colors["warning"]),
+            ("pressed", colors["accent_deep"]),
+            ("active", "#6d96ff"),
         ],
-        foreground=[("!disabled", colors["bg"])],
+        foreground=[("!disabled", "#ffffff")],
     )
     style.configure(
         "Danger.TButton",
-        background=colors["panel_alt"],
+        background=colors["danger_soft"],
         foreground=colors["danger"],
-        bordercolor=colors["magenta"],
-        lightcolor=colors["danger"],
+        bordercolor="#f3caca",
+        lightcolor="#f3caca",
         darkcolor=colors["panel_edge"],
         padding=(10, 7),
     )
@@ -442,31 +440,31 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
         ],
         foreground=[
             ("pressed", colors["danger"]),
-            ("active", colors["warning"]),
+            ("active", "#c45757"),
             ("!disabled", colors["danger"]),
         ],
     )
     style.configure(
         "Cyber.Treeview",
-        background=colors["entry"],
-        fieldbackground=colors["entry"],
+        background=colors["panel"],
+        fieldbackground=colors["panel"],
         foreground=colors["text"],
-        bordercolor=colors["accent_soft"],
-        lightcolor=colors["accent_soft"],
+        bordercolor=colors["panel_edge"],
+        lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
         rowheight=28,
     )
     style.map(
         "Cyber.Treeview",
-        background=[("selected", colors["magenta"])],
-        foreground=[("selected", colors["bg"])],
+        background=[("selected", colors["tree_select"])],
+        foreground=[("selected", colors["text"])],
     )
     style.configure(
         "Cyber.Treeview.Heading",
-        background=colors["panel_alt"],
-        foreground=colors["accent"],
-        bordercolor=colors["magenta"],
-        lightcolor=colors["magenta"],
+        background=colors["tree_header"],
+        foreground=colors["accent_deep"],
+        bordercolor=colors["panel_edge"],
+        lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
         font=("Arial", 10, "bold"),
         padding=(6, 6),
@@ -474,7 +472,7 @@ def configure_cyberpunk_theme(root: tk.Tk) -> None:
     style.map(
         "Cyber.Treeview.Heading",
         background=[("active", colors["button_hover"])],
-        foreground=[("active", colors["warning"]), ("!disabled", colors["accent"])],
+        foreground=[("active", colors["accent"]), ("!disabled", colors["accent_deep"])],
     )
 
 
@@ -503,31 +501,24 @@ class App:
         container = ttk.Frame(self.root, padding=16)
         container.pack(fill=BOTH, expand=True)
 
-        hero = ttk.Frame(container, style="Hero.TFrame", padding=(18, 16))
-        hero.pack(fill=X, pady=(0, 12))
-
-        title = ttk.Label(
-            hero,
-            text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
-            style="Title.TLabel",
+        self.hero_canvas = tk.Canvas(
+            container,
+            height=116,
+            highlightthickness=0,
+            borderwidth=0,
+            relief="flat",
+            background="#eef3ff",
         )
-        title.pack(anchor=W)
-
-        subtitle = ttk.Label(
-            hero,
-            text="第一次填好 VPS 和保存目录。扫描目录留空时，会自动优先扫常见媒体目录；扫到候选后可直接双击开跑。",
-            style="Subtitle.TLabel",
-            wraplength=840,
-            justify="left",
-        )
-        subtitle.pack(anchor=W, pady=(4, 12))
+        self.hero_canvas.pack(fill=X, pady=(0, 12))
+        self.hero_canvas.bind("<Configure>", self._on_hero_resize)
+        self._render_hero_banner(888)
 
         form_panel = ttk.LabelFrame(container, text="连接配置", style="Section.TLabelframe", padding=8)
         form_panel.pack(fill=X, pady=(0, 10))
         form = ttk.Frame(form_panel, style="Panel.TFrame", padding=12)
         form.pack(fill=X)
 
-        self._add_entry(form, "VPS 地址", "remote_host", 0, "例如：root@1.2.3.4")
+        self._add_entry(form, "VPS 地址", "remote_host", 0, "例如：root@1.2.3.4，也支持直接粘贴 ssh root@1.2.3.4")
         self._add_entry(form, "SSH 端口", "remote_port", 1, "默认 22")
         self._add_entry(form, "SSH 密码", "remote_password", 2, "留空表示走密钥", show="*")
         self._add_entry(form, "远端命令", "remote_cmd", 3, "源码旧模式才需要，一般别改")
@@ -634,16 +625,16 @@ class App:
             log_body,
             wrap="word",
             font=("Consolas", 10),
-            background="#09101f",
-            foreground="#d7e9ff",
-            insertbackground="#24f2ff",
-            selectbackground="#ff2ed1",
-            selectforeground="#050816",
+            background="#f8fbff",
+            foreground="#23314d",
+            insertbackground="#4f7cff",
+            selectbackground="#cfe0ff",
+            selectforeground="#23314d",
             relief="flat",
             borderwidth=0,
             highlightthickness=1,
-            highlightbackground="#1889b8",
-            highlightcolor="#24f2ff",
+            highlightbackground="#d7e1f3",
+            highlightcolor="#7da8ff",
             padx=12,
             pady=10,
         )
@@ -664,6 +655,47 @@ class App:
             "准备完成。",
         ):
             append_gui_log_line(line)
+
+    def _render_hero_banner(self, width: int) -> None:
+        width = max(width, 420)
+        height = int(self.hero_canvas.cget("height"))
+        steps = 96
+        self.hero_canvas.delete("all")
+        for index in range(steps):
+            ratio = index / max(steps - 1, 1)
+            color = hero_gradient_color(ratio)
+            x0 = width * index / steps
+            x1 = width * (index + 1) / steps
+            self.hero_canvas.create_rectangle(x0, 0, x1 + 1, height, outline="", fill=color)
+        self.hero_canvas.create_rectangle(0, height - 22, width, height, outline="", fill="#edf4ff")
+        self.hero_canvas.create_text(
+            22,
+            22,
+            anchor="nw",
+            text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
+            fill="#ffffff",
+            font=("Arial", 16, "bold"),
+        )
+        self.hero_canvas.create_text(
+            22,
+            54,
+            anchor="nw",
+            width=max(width - 44, 180),
+            text="第一次填好 VPS 和保存目录。扫描目录留空时，会自动优先扫常见媒体目录；扫到候选后可直接双击开跑。",
+            fill="#eef5ff",
+            font=("Arial", 10),
+        )
+        self.hero_canvas.create_text(
+            width - 22,
+            height - 11,
+            anchor="e",
+            text="渐变风格界面",
+            fill="#4c6dcf",
+            font=("Arial", 9, "bold"),
+        )
+
+    def _on_hero_resize(self, event) -> None:
+        self._render_hero_banner(event.width)
 
     def _add_entry(self, parent, label_text: str, key: str, row: int, hint: str, show: str | None = None) -> None:
         ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 10), pady=4)
@@ -694,10 +726,28 @@ class App:
             "auto_cleanup": bool(self.config_vars["auto_cleanup"].get()),
         }
 
-    def save_form(self) -> bool:
+    def normalize_connection_fields(self) -> dict | None:
         data = self.form_data()
         if not data["remote_host"]:
             messagebox.showerror("缺少配置", "请先填写 VPS 地址。")
+            return None
+        try:
+            normalized_host, normalized_port = normalize_remote_connection(
+                data["remote_host"],
+                data["remote_port"],
+            )
+        except Exception as exc:
+            messagebox.showerror("连接配置无效", str(exc))
+            return None
+        self.config_vars["remote_host"].set(normalized_host)
+        self.config_vars["remote_port"].set(normalized_port)
+        data["remote_host"] = normalized_host
+        data["remote_port"] = normalized_port
+        return data
+
+    def save_form(self) -> bool:
+        data = self.normalize_connection_fields()
+        if data is None:
             return False
         try:
             save_config(data)
@@ -1174,7 +1224,7 @@ def cli_main() -> int:
         return 0
 
     root = tk.Tk()
-    configure_cyberpunk_theme(root)
+    configure_gradient_theme(root)
     App(root)
     root.mainloop()
     return 0
