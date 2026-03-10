@@ -27,6 +27,7 @@ from ptbd_remote_backend import (
 
 APP_NAME = "PT-BDtool"
 CONTENT_INSET_X = 14
+HEADER_TEXT_INSET_X = 0
 
 
 def resolve_script_path(path: str) -> Path:
@@ -338,7 +339,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         background=colors["panel_alt"],
         foreground=colors["warning"],
         font=("Arial", 10, "bold"),
-        padding=(CONTENT_INSET_X, 8),
+        padding=(0, 8),
     )
     style.configure(
         "Path.TLabel",
@@ -357,7 +358,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         background=colors["bg"],
         foreground=colors["accent_deep"],
         font=("Arial", 10, "bold"),
-        padding=(CONTENT_INSET_X, 0, 0, 0),
+        padding=(0, 0, 0, 0),
     )
     style.configure(
         "Cyber.TEntry",
@@ -549,7 +550,7 @@ class App:
 
         self.hero_canvas = tk.Canvas(
             container,
-            height=64,
+            height=72,
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
@@ -813,26 +814,26 @@ class App:
             self.hero_canvas.create_rectangle(x0, 0, x1 + 1, height, outline="", fill=color)
         self.hero_canvas.create_rectangle(0, height - 22, width, height, outline="", fill="#edf4ff")
         self.hero_canvas.create_text(
-            CONTENT_INSET_X,
-            12,
+            HEADER_TEXT_INSET_X,
+            10,
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
             fill="#ffffff",
             font=("Arial", 15, "bold"),
         )
         self.hero_canvas.create_text(
-            CONTENT_INSET_X,
-            38,
+            HEADER_TEXT_INSET_X,
+            36,
             anchor="nw",
-            width=max(width - CONTENT_INSET_X * 2, 180),
+            width=max(width - 150, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
             fill="#18305f",
             font=("Arial", 10, "bold"),
         )
-        badge_x0 = width - 122
-        badge_y0 = height - 30
-        badge_x1 = width - 18
-        badge_y1 = height - 8
+        badge_x0 = width - 114
+        badge_y0 = 10
+        badge_x1 = width - 12
+        badge_y1 = 30
         self.hero_canvas.create_rectangle(
             badge_x0,
             badge_y0,
