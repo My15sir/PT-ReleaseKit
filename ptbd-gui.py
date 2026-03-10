@@ -303,11 +303,8 @@ def configure_gradient_theme(root: tk.Tk) -> None:
     style.configure(
         "Panel.TFrame",
         background=colors["panel"],
-        borderwidth=1,
-        relief="solid",
-        bordercolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
-        darkcolor=colors["panel_edge"],
+        borderwidth=0,
+        relief="flat",
     )
     style.configure("TLabel", background=colors["bg"], foreground=colors["text"])
     style.configure(
@@ -327,6 +324,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         background=colors["panel_alt"],
         foreground=colors["muted"],
         font=("Arial", 9),
+        padding=(0, 2),
     )
     style.configure(
         "Tips.TLabel",
@@ -350,11 +348,8 @@ def configure_gradient_theme(root: tk.Tk) -> None:
     style.configure(
         "Section.TLabelframe",
         background=colors["bg"],
-        borderwidth=1,
-        relief="solid",
-        bordercolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
-        darkcolor=colors["panel_edge"],
+        borderwidth=0,
+        relief="flat",
     )
     style.configure(
         "Section.TLabelframe.Label",
@@ -534,6 +529,7 @@ class App:
         self.summary_save_var = tk.StringVar(value="保存目录：未配置")
         self.filter_type_var = tk.StringVar(value="全部类型")
         self.filter_keyword_var = tk.StringVar(value="")
+        self.checked_scan_paths: set[str] = set()
         self.path_tooltip: tk.Toplevel | None = None
         self.path_tooltip_label: tk.Label | None = None
         self.tooltip_item: str | None = None
@@ -561,24 +557,39 @@ class App:
         self.hero_canvas.bind("<Configure>", self._on_hero_resize)
         self._render_hero_banner(888)
 
-        form_panel = ttk.LabelFrame(container, text="连接与保存设置", style="Section.TLabelframe", padding=8)
+        form_panel = ttk.LabelFrame(container, text="连接与保存设置", style="Section.TLabelframe", padding=0)
         form_panel.pack(fill=X, pady=(0, 6))
-        form_summary = ttk.Frame(form_panel, style="Panel.TFrame", padding=(10, 8))
+        form_summary = ttk.Frame(form_panel, style="Panel.TFrame", padding=(14, 12))
         form_summary.pack(fill=X)
         form_summary.columnconfigure(0, weight=1)
         ttk.Label(form_summary, textvariable=self.summary_host_var, style="Field.TLabel").grid(row=0, column=0, sticky=W)
         ttk.Label(form_summary, textvariable=self.summary_save_var, style="PanelHint.TLabel").grid(
             row=1, column=0, sticky=W, pady=(2, 0)
         )
+        summary_actions = ttk.Frame(form_summary, style="Panel.TFrame")
+        summary_actions.grid(row=0, column=1, rowspan=2, padx=(10, 0), sticky="e")
+        ttk.Button(summary_actions, text="保存配置", command=self.save_form, style="Action.TButton").pack(side=LEFT)
+        ttk.Button(
+            summary_actions,
+            text="打开配置目录",
+            command=self.open_config_dir,
+            style="Action.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(
+            summary_actions,
+            text="打开日志文件",
+            command=self.open_log_file,
+            style="Action.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
         self.form_toggle_button = ttk.Button(
             form_summary,
             text="展开设置",
             command=self.toggle_form_panel,
             style="Action.TButton",
         )
-        self.form_toggle_button.grid(row=0, column=1, rowspan=2, padx=(10, 0))
+        self.form_toggle_button.grid(row=0, column=2, rowspan=2, padx=(10, 0))
 
-        self.form_details = ttk.Frame(form_panel, style="Panel.TFrame", padding=10)
+        self.form_details = ttk.Frame(form_panel, style="Panel.TFrame", padding=(14, 6, 14, 14))
         form = self.form_details
 
         self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4 或 ssh root@1.2.3.4")
@@ -588,7 +599,7 @@ class App:
         self._add_compact_entry(form, "扫描白名单", "scan_include", 2, 0, "留空时自动扫描常见媒体目录")
         self._add_compact_entry(form, "额外排除", "scan_exclude", 2, 1, "可留空")
 
-        save_group = ttk.Frame(form, style="Panel.TFrame")
+        save_group = ttk.Frame(form, style="Panel.TFrame", padding=(0, 8, 0, 0))
         save_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         save_group.columnconfigure(0, weight=1)
         ttk.Label(save_group, text="本机保存目录", style="Field.TLabel").grid(row=0, column=0, sticky=W)
@@ -607,7 +618,7 @@ class App:
             row=0, column=1, padx=(8, 0)
         )
 
-        option_group = ttk.Frame(form, style="Panel.TFrame", padding=(10, 8))
+        option_group = ttk.Frame(form, style="Panel.TFrame", padding=(0, 12, 0, 0))
         option_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         option_group.columnconfigure(0, weight=1)
         ttk.Label(option_group, text="运行选项", style="Field.TLabel").grid(row=0, column=0, sticky=W)
@@ -645,16 +656,14 @@ class App:
         status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
         status.pack(anchor=W, pady=(2, 8))
 
-        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=8)
+        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=0)
         scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
-        scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=8)
+        scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=(14, 12, 14, 12))
         scan_body.pack(fill=BOTH, expand=True)
         actions = ttk.Frame(scan_body, style="Toolbar.TFrame")
         actions.pack(fill=X, pady=(0, 8))
-        primary_actions = ttk.Frame(actions, style="Panel.TFrame", padding=10)
+        primary_actions = ttk.Frame(actions, style="Panel.TFrame")
         primary_actions.pack(side=LEFT, fill=X, expand=True)
-        secondary_actions = ttk.Frame(actions, style="Panel.TFrame", padding=10)
-        secondary_actions.pack(side=LEFT, padx=(10, 0))
         ttk.Button(
             primary_actions,
             text="先扫描 VPS 候选",
@@ -673,24 +682,6 @@ class App:
             command=self.stop_remote,
             style="Danger.TButton",
         ).pack(side=LEFT, padx=(10, 0))
-        ttk.Button(
-            secondary_actions,
-            text="保存配置",
-            command=self.save_form,
-            style="Action.TButton",
-        ).pack(side=LEFT)
-        ttk.Button(
-            secondary_actions,
-            text="打开配置目录",
-            command=self.open_config_dir,
-            style="Action.TButton",
-        ).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(
-            secondary_actions,
-            text="打开日志文件",
-            command=self.open_log_file,
-            style="Action.TButton",
-        ).pack(side=LEFT, padx=(8, 0))
         filter_bar = ttk.Frame(scan_body, style="Panel.TFrame")
         filter_bar.pack(fill=X, pady=(0, 8))
         ttk.Label(filter_bar, text="过滤", style="Field.TLabel").pack(side=LEFT)
@@ -711,18 +702,20 @@ class App:
         )
         scan_list = ttk.Frame(scan_body, style="Panel.TFrame")
         scan_list.pack(fill=BOTH, expand=True)
-        columns = ("index", "type", "path")
+        columns = ("pick", "index", "type", "path")
         self.scan_tree = ttk.Treeview(
             scan_list,
             columns=columns,
             show="headings",
             height=18,
             style="Cyber.Treeview",
-            selectmode="extended",
+            selectmode="browse",
         )
+        self.scan_tree.heading("pick", text="选择")
         self.scan_tree.heading("index", text="#")
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
+        self.scan_tree.column("pick", width=76, anchor="center", stretch=False)
         self.scan_tree.column("index", width=56, anchor="center")
         self.scan_tree.column("type", width=100, anchor="center")
         self.scan_tree.column("path", width=980, minwidth=560, anchor="w", stretch=True)
@@ -734,6 +727,7 @@ class App:
         scan_scrollbar_x.pack(fill=X, pady=(8, 0))
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
         self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
+        self.scan_tree.bind("<Button-1>", self.on_scan_click, add="+")
         self.scan_tree.bind("<Motion>", self.on_scan_tree_hover)
         self.scan_tree.bind("<Leave>", self.hide_path_tooltip)
         self.scan_tree.bind("<ButtonPress-1>", self.hide_path_tooltip)
@@ -741,7 +735,7 @@ class App:
         self.scan_tree.bind("<Control-Button-1>", self.on_scan_right_click)
         ttk.Label(
             scan_body,
-            text="路径列支持横向滚动。悬停可预览完整路径，双击会弹窗显示完整路径。",
+            text="左侧勾选列用于批量启动；单击可勾选，双击路径会弹窗显示完整路径，路径列支持横向滚动。",
             style="PanelHint.TLabel",
         ).pack(anchor=W, pady=(6, 2))
         ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
@@ -817,7 +811,7 @@ class App:
             anchor="nw",
             width=max(width - 36, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
-            fill="#f7fbff",
+            fill="#18305f",
             font=("Arial", 10, "bold"),
         )
         badge_x0 = width - 122
@@ -1373,7 +1367,9 @@ class App:
             self.scan_tree.delete(item)
         source_items = self.visible_scan_items()
         for item in source_items:
-            self.scan_tree.insert("", END, values=(item["index"], item.get("type_label", item["type"]), item["path"]))
+            path = item["path"]
+            marker = "☑" if path in self.checked_scan_paths else "☐"
+            self.scan_tree.insert("", END, values=(marker, item["index"], item.get("type_label", item["type"]), path))
         shown = len(source_items)
         total = len(self.scan_items)
         if self.has_active_scan_filter() and shown == 0:
@@ -1383,10 +1379,10 @@ class App:
         to_select: list[str] = []
         for item_id in self.scan_tree.get_children():
             values = self.scan_tree.item(item_id, "values")
-            if values and len(values) >= 3 and str(values[2]).strip() in previous_paths:
+            if values and len(values) >= 4 and str(values[3]).strip() in previous_paths:
                 to_select.append(item_id)
         if to_select:
-            self.scan_tree.selection_set(tuple(to_select))
+            self.scan_tree.selection_set(to_select[0])
             self.scan_tree.focus(to_select[0])
         elif source_items:
             first = self.scan_tree.get_children()[0]
@@ -1394,46 +1390,86 @@ class App:
             self.scan_tree.focus(first)
         else:
             self.selected_path_var.set("当前没有匹配的候选")
+            return
+        self.on_scan_select()
         if auto_start:
             self.auto_start_after_scan = False
             if len(self.scan_items) == 1:
+                only_path = self.scan_items[0].get("path")
+                if only_path:
+                    self.checked_scan_paths = {str(only_path)}
+                    self.refresh_scan_items(auto_start=False)
                 self.append_log("[gui] 只发现 1 个候选，自动开始处理")
                 self.root.after(0, self.start_remote)
             elif len(self.scan_items) == 0:
                 self.status_var.set("扫描完成：没有发现可处理候选")
             else:
-                self.status_var.set("扫描完成：已自动选中第一项，请双击或点“启动所选条目”继续")
+                self.status_var.set("扫描完成：已定位第一项，请先勾选要处理的条目，再点“启动所选条目”")
 
     def on_scan_select(self, _event=None) -> None:
-        selection = self.scan_tree.selection()
-        if not selection:
-            self.selected_path_var.set("")
-            return
-        paths = self.current_selected_paths()
-        if len(paths) == 1:
-            self.selected_path_var.set(f"当前选中：{paths[0]}")
+        checked_count = len(self.checked_scan_paths)
+        focus_path = self.current_selected_path()
+        if checked_count and focus_path:
+            self.selected_path_var.set(f"已勾选 {checked_count} 项，当前定位：{focus_path}")
+        elif checked_count:
+            sample = next(iter(self.checked_scan_paths))
+            self.selected_path_var.set(f"已勾选 {checked_count} 项，第一项：{sample}")
+        elif focus_path:
+            self.selected_path_var.set(f"当前定位：{focus_path}，左侧打勾后才会批量启动")
         else:
-            self.selected_path_var.set(f"当前已选 {len(paths)} 项，第一项：{paths[0]}")
+            self.selected_path_var.set("当前未勾选条目")
 
     def current_selected_path(self) -> str:
-        paths = self.current_selected_paths()
-        return paths[0] if paths else ""
+        selection = self.scan_tree.selection()
+        if not selection:
+            return ""
+        values = self.scan_tree.item(selection[0], "values")
+        if not values or len(values) < 4:
+            return ""
+        return str(values[3]).strip()
 
     def current_selected_paths(self) -> list[str]:
-        selection = set(self.scan_tree.selection())
         paths: list[str] = []
+        visible_checked: set[str] = set()
         for item_id in self.scan_tree.get_children():
-            if item_id not in selection:
-                continue
             values = self.scan_tree.item(item_id, "values")
-            if values and len(values) >= 3:
-                path = str(values[2]).strip()
-                if path and path not in paths:
+            if values and len(values) >= 4:
+                path = str(values[3]).strip()
+                if path in self.checked_scan_paths:
+                    visible_checked.add(path)
+                if path and path in self.checked_scan_paths and path not in paths:
                     paths.append(path)
+        if paths:
+            return paths
+        for item in self.scan_items:
+            path = str(item.get("path", "")).strip()
+            if path and path in self.checked_scan_paths and path not in paths:
+                paths.append(path)
         return paths
 
     def selected_scan_item_path(self) -> str:
         return self.current_selected_path()
+
+    def set_scan_item_checked(self, path: str, checked: bool) -> None:
+        if not path:
+            return
+        if checked:
+            self.checked_scan_paths.add(path)
+        else:
+            self.checked_scan_paths.discard(path)
+
+    def toggle_scan_item_checked(self, item_id: str) -> None:
+        values = self.scan_tree.item(item_id, "values")
+        if not values or len(values) < 4:
+            return
+        path = str(values[3]).strip()
+        if not path:
+            return
+        checked = path not in self.checked_scan_paths
+        self.set_scan_item_checked(path, checked)
+        marker = "☑" if checked else "☐"
+        self.scan_tree.item(item_id, values=(marker, values[1], values[2], values[3]))
+        self.on_scan_select()
 
     def copy_selected_scan_path(self) -> None:
         selected_path = self.selected_scan_item_path()
@@ -1456,9 +1492,11 @@ class App:
         if not selected_path:
             return
         self.hide_path_tooltip()
+        self.checked_scan_paths = {selected_path}
         focus_item = self.scan_tree.focus()
         if focus_item:
             self.scan_tree.selection_set(focus_item)
+        self.refresh_scan_items()
         self.start_remote()
 
     def hide_path_tooltip(self, _event=None) -> None:
@@ -1497,14 +1535,14 @@ class App:
         region = self.scan_tree.identify("region", event.x, event.y)
         column = self.scan_tree.identify_column(event.x)
         item_id = self.scan_tree.identify_row(event.y)
-        if region != "cell" or column != "#3" or not item_id:
+        if region != "cell" or column != "#4" or not item_id:
             self.hide_path_tooltip()
             return
         values = self.scan_tree.item(item_id, "values")
-        if not values or len(values) < 3:
+        if not values or len(values) < 4:
             self.hide_path_tooltip()
             return
-        full_path = str(values[2]).strip()
+        full_path = str(values[3]).strip()
         bbox = self.scan_tree.bbox(item_id, column)
         if not bbox:
             self.hide_path_tooltip()
@@ -1532,6 +1570,18 @@ class App:
         if selected_path:
             self.hide_path_tooltip()
             self.show_full_path_dialog(selected_path)
+
+    def on_scan_click(self, event) -> str | None:
+        item_id = self.scan_tree.identify_row(event.y)
+        column = self.scan_tree.identify_column(event.x)
+        if not item_id:
+            return None
+        self.scan_tree.focus(item_id)
+        if column == "#1":
+            self.toggle_scan_item_checked(item_id)
+            self.scan_tree.selection_set(item_id)
+            return "break"
+        return None
 
     def on_scan_right_click(self, event) -> None:
         item_id = self.scan_tree.identify_row(event.y)
