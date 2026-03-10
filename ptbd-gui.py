@@ -402,8 +402,10 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         bordercolor=colors["accent_deep"],
         lightcolor=colors["accent_deep"],
         darkcolor=colors["accent_deep"],
-        padding=(14, 9),
-        font=("Arial", 10, "bold"),
+        borderwidth=1,
+        relief="flat",
+        padding=(12, 6),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Primary.TButton",
@@ -420,7 +422,10 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         bordercolor=colors["panel_edge"],
         lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
-        padding=(10, 7),
+        borderwidth=1,
+        relief="flat",
+        padding=(12, 6),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Action.TButton",
@@ -442,8 +447,10 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         bordercolor=colors["accent"],
         lightcolor=colors["accent"],
         darkcolor=colors["accent_deep"],
-        padding=(10, 7),
-        font=("Arial", 10, "bold"),
+        borderwidth=1,
+        relief="flat",
+        padding=(12, 6),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Accent.TButton",
@@ -464,7 +471,10 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         bordercolor="#f3caca",
         lightcolor="#f3caca",
         darkcolor=colors["panel_edge"],
-        padding=(10, 7),
+        borderwidth=1,
+        relief="flat",
+        padding=(12, 6),
+        font=("Arial", 9, "bold"),
     )
     style.map(
         "Danger.TButton",
@@ -571,16 +581,16 @@ class App:
         )
         summary_actions = ttk.Frame(form_summary, style="Panel.TFrame")
         summary_actions.grid(row=0, column=1, rowspan=2, padx=(10, 0), sticky="e")
-        ttk.Button(summary_actions, text="💾 保存", command=self.save_form, style="Action.TButton").pack(side=LEFT)
+        ttk.Button(summary_actions, text="▣ 保存", command=self.save_form, style="Action.TButton").pack(side=LEFT)
         ttk.Button(
             summary_actions,
-            text="📁 配置",
+            text="⌂ 配置",
             command=self.open_config_dir,
             style="Action.TButton",
         ).pack(side=LEFT, padx=(8, 0))
         ttk.Button(
             summary_actions,
-            text="📜 日志",
+            text="≡ 日志",
             command=self.open_log_file,
             style="Action.TButton",
         ).pack(side=LEFT, padx=(8, 0))
@@ -621,7 +631,7 @@ class App:
         self.config_vars["save_dir"] = variable
         entry = ttk.Entry(save_path_row, textvariable=variable, style="Cyber.TEntry")
         entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(save_path_row, text="📂 选择", command=self.pick_save_dir, style="Action.TButton").grid(
+        ttk.Button(save_path_row, text="⌂ 选择", command=self.pick_save_dir, style="Action.TButton").grid(
             row=0, column=1, padx=(8, 0)
         )
 
@@ -677,19 +687,19 @@ class App:
         primary_actions.pack(side=LEFT, fill=X, expand=True)
         ttk.Button(
             primary_actions,
-            text="🔎 扫描",
+            text="⌕ 扫描",
             command=self.scan_remote,
             style="Primary.TButton",
         ).pack(side=LEFT)
         ttk.Button(
             primary_actions,
-            text="▶ 启动",
+            text="▷ 启动",
             command=self.start_remote,
             style="Accent.TButton",
         ).pack(side=LEFT, padx=(10, 0))
         ttk.Button(
             primary_actions,
-            text="■ 停止",
+            text="□ 停止",
             command=self.stop_remote,
             style="Danger.TButton",
         ).pack(side=LEFT, padx=(10, 0))
@@ -713,7 +723,7 @@ class App:
         keyword_entry = ttk.Entry(filter_bar, textvariable=self.filter_keyword_var, style="Cyber.TEntry")
         keyword_entry.pack(side=LEFT, fill=X, expand=True)
         keyword_entry.bind("<KeyRelease>", lambda _event: self.apply_scan_filters())
-        ttk.Button(filter_bar, text="✕ 清空", command=self.clear_scan_filters, style="Action.TButton").pack(
+        ttk.Button(filter_bar, text="× 清空", command=self.clear_scan_filters, style="Action.TButton").pack(
             side=LEFT, padx=(8, 0)
         )
         scan_list = ttk.Frame(scan_body, style="Panel.TFrame")
@@ -756,9 +766,9 @@ class App:
         ).pack(anchor=W, pady=(6, 2))
         ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
         self.scan_context_menu = tk.Menu(self.root, tearoff=0)
-        self.scan_context_menu.add_command(label="📋 复制路径", command=self.copy_selected_scan_path)
-        self.scan_context_menu.add_command(label="👁 查看完整路径", command=self.show_selected_scan_path_dialog)
-        self.scan_context_menu.add_command(label="▶ 直接启动", command=self.start_selected_scan_item)
+        self.scan_context_menu.add_command(label="⧉ 复制路径", command=self.copy_selected_scan_path)
+        self.scan_context_menu.add_command(label="⌕ 查看完整路径", command=self.show_selected_scan_path_dialog)
+        self.scan_context_menu.add_command(label="▷ 直接启动", command=self.start_selected_scan_item)
 
         log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
         log_panel.pack(fill=BOTH, expand=False)
@@ -1643,19 +1653,19 @@ class App:
         ttk.Label(footer, textvariable=copy_status, style="PanelHint.TLabel").grid(row=0, column=0, sticky=W)
         ttk.Button(
             footer,
-            text="📋 复制",
+            text="⧉ 复制",
             command=lambda: self.copy_full_path(path, copy_status),
             style="Action.TButton",
         ).grid(row=0, column=1, padx=(10, 0))
         ttk.Button(
             footer,
-            text="📂 目录",
+            text="⌂ 目录",
             command=lambda: self.open_parent_dir_for_path(path, copy_status),
             style="Action.TButton",
         ).grid(row=0, column=2, padx=(8, 0))
         ttk.Button(
             footer,
-            text="✕ 关闭",
+            text="× 关闭",
             command=dialog.destroy,
             style="Action.TButton",
         ).grid(row=0, column=3, padx=(8, 0))
