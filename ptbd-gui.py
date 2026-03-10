@@ -256,8 +256,8 @@ def blend_hex_color(start: str, end: str, ratio: float) -> str:
 
 def hero_gradient_color(ratio: float) -> str:
     if ratio <= 0.55:
-        return blend_hex_color("#5678f0", "#4f99ef", ratio / 0.55 if ratio else 0.0)
-    return blend_hex_color("#4f99ef", "#79b5f4", (ratio - 0.55) / 0.45)
+        return blend_hex_color("#f08d6f", "#e66b52", ratio / 0.55 if ratio else 0.0)
+    return blend_hex_color("#e66b52", "#bf3f30", (ratio - 0.55) / 0.45)
 
 
 def configure_gradient_theme(root: tk.Tk) -> None:
@@ -266,26 +266,26 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         style.theme_use("clam")
 
     colors = {
-        "bg": "#eef3ff",
-        "bg_alt": "#f6f9ff",
+        "bg": "#f8f2ed",
+        "bg_alt": "#fdf7f2",
         "panel": "#ffffff",
-        "panel_alt": "#f4f8ff",
-        "panel_edge": "#e0e0e0",
+        "panel_alt": "#f7efe9",
+        "panel_edge": "#ead9ce",
         "entry": "#ffffff",
-        "text": "#23314d",
-        "muted": "#6c7a96",
-        "accent": "#4f7cff",
-        "accent_soft": "#b9d8ff",
-        "accent_deep": "#365ad6",
-        "warning": "#4b64b8",
-        "danger": "#d96d6d",
-        "danger_soft": "#fdeeee",
-        "button": "#eef4ff",
-        "button_hover": "#e2ebff",
-        "button_pressed": "#d5e2ff",
-        "tree_select": "#dce8ff",
-        "tree_header": "#edf4ff",
-        "log_bg": "#f8fbff",
+        "text": "#2a1f19",
+        "muted": "#6b5549",
+        "accent": "#e65c46",
+        "accent_soft": "#ffd8cc",
+        "accent_deep": "#bf3f30",
+        "warning": "#bf3f30",
+        "danger": "#c94e45",
+        "danger_soft": "#fff0ec",
+        "button": "#fff7f2",
+        "button_hover": "#fdece3",
+        "button_pressed": "#f8dfd3",
+        "tree_select": "#fff0e8",
+        "tree_header": "#fbf3ee",
+        "log_bg": "#fffaf7",
     }
 
     root.configure(bg=colors["bg"])
@@ -294,9 +294,9 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         ".",
         background=colors["bg"],
         foreground=colors["text"],
-        bordercolor=colors["accent_soft"],
+        bordercolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
-        lightcolor=colors["accent_soft"],
+        lightcolor=colors["panel_edge"],
         troughcolor=colors["panel_alt"],
         fieldbackground=colors["entry"],
         focuscolor=colors["accent"],
@@ -313,32 +313,32 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "Field.TLabel",
         background=colors["panel"],
         foreground=colors["accent_deep"],
-        font=("Arial", 10, "bold"),
+        font=("Segoe UI", 10, "bold"),
     )
     style.configure(
         "Hint.TLabel",
         background=colors["panel"],
         foreground=colors["muted"],
-        font=("Arial", 9),
+        font=("Segoe UI", 9),
     )
     style.configure(
         "PanelHint.TLabel",
         background=colors["panel_alt"],
         foreground=colors["muted"],
-        font=("Arial", 9),
+        font=("Segoe UI", 9),
         padding=(0, 2),
     )
     style.configure(
         "Tips.TLabel",
         background=colors["panel"],
         foreground=colors["text"],
-        font=("Arial", 10),
+        font=("Segoe UI", 10),
     )
     style.configure(
         "Status.TLabel",
         background=colors["panel_alt"],
         foreground=colors["warning"],
-        font=("Arial", 10, "bold"),
+        font=("Segoe UI", 10, "bold"),
         padding=(0, 8),
     )
     style.configure(
@@ -357,7 +357,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "Section.TLabelframe.Label",
         background=colors["bg"],
         foreground=colors["accent_deep"],
-        font=("Arial", 10, "bold"),
+        font=("Segoe UI", 10, "bold"),
         padding=(0, 0, 0, 0),
     )
     style.configure(
@@ -392,7 +392,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "HeroNote.TLabel",
         background=colors["bg"],
         foreground=colors["accent_deep"],
-        font=("Arial", 9, "bold"),
+        font=("Segoe UI", 9, "bold"),
         padding=(10, 4),
     )
     style.configure(
@@ -405,12 +405,12 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         borderwidth=1,
         relief="flat",
         padding=(12, 6),
-        font=("Arial", 9, "bold"),
+        font=("Segoe UI", 9, "bold"),
     )
     style.map(
         "Primary.TButton",
         background=[
-            ("pressed", "#2747b5"),
+            ("pressed", "#a8372a"),
             ("active", colors["accent"]),
         ],
         foreground=[("!disabled", "#ffffff")],
@@ -425,7 +425,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         borderwidth=1,
         relief="flat",
         padding=(12, 6),
-        font=("Arial", 9, "bold"),
+        font=("Segoe UI", 9, "bold"),
     )
     style.map(
         "Action.TButton",
@@ -450,13 +450,13 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         borderwidth=1,
         relief="flat",
         padding=(12, 6),
-        font=("Arial", 9, "bold"),
+        font=("Segoe UI", 9, "bold"),
     )
     style.map(
         "Accent.TButton",
         background=[
             ("pressed", colors["accent_deep"]),
-            ("active", "#6d96ff"),
+            ("active", "#f07a60"),
         ],
         foreground=[("!disabled", "#ffffff")],
     )
@@ -468,13 +468,13 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         "Danger.TButton",
         background=colors["danger_soft"],
         foreground=colors["danger"],
-        bordercolor="#f3caca",
-        lightcolor="#f3caca",
+        bordercolor="#f4c8be",
+        lightcolor="#f4c8be",
         darkcolor=colors["panel_edge"],
         borderwidth=1,
         relief="flat",
         padding=(12, 6),
-        font=("Arial", 9, "bold"),
+        font=("Segoe UI", 9, "bold"),
     )
     style.map(
         "Danger.TButton",
@@ -484,7 +484,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         ],
         foreground=[
             ("pressed", colors["danger"]),
-            ("active", "#c45757"),
+            ("active", "#b9453d"),
             ("!disabled", colors["danger"]),
         ],
     )
@@ -510,7 +510,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         bordercolor=colors["panel_edge"],
         lightcolor=colors["panel_edge"],
         darkcolor=colors["panel_edge"],
-        font=("Arial", 10, "bold"),
+        font=("Segoe UI", 10, "bold"),
         padding=(6, 6),
     )
     style.map(
@@ -564,7 +564,7 @@ class App:
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
-            background="#eef3ff",
+            background="#f8f2ed",
         )
         self.hero_canvas.pack(fill=X, pady=(0, 8))
         self.hero_canvas.bind("<Configure>", self._on_hero_resize)
@@ -861,7 +861,7 @@ class App:
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
-            background="#eef3ff",
+            background="#f8f2ed",
             height=120,
         )
         card.pack(fill=BOTH if expand else X, expand=expand, pady=pady)
@@ -871,8 +871,8 @@ class App:
             18,
             anchor="w",
             text=title,
-            fill="#365ad6",
-            font=("Arial", 10, "bold"),
+            fill="#bf3f30",
+            font=("Segoe UI", 10, "bold"),
         )
         window_id = card.create_window(CONTENT_INSET_X, 40, anchor="nw", window=body)
 
@@ -887,13 +887,24 @@ class App:
             card.delete("card-bg")
             self._create_rounded_rect(
                 card,
+                4,
+                10,
+                width - 4,
+                total_height,
+                radius=20,
+                fill="#2c1c1412",
+                outline="",
+                tags="card-bg",
+            )
+            self._create_rounded_rect(
+                card,
                 2,
                 4,
                 width - 2,
                 total_height - 2,
-                radius=18,
+                radius=20,
                 fill="#ffffff",
-                outline="#dfe6f4",
+                outline="#ead9ce",
                 width=1,
                 tags="card-bg",
             )
@@ -923,7 +934,7 @@ class App:
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
             fill="#ffffff",
-            font=("Arial", 15, "bold"),
+            font=("Segoe UI", 15, "bold"),
         )
         self.hero_canvas.create_text(
             HEADER_TEXT_INSET_X,
@@ -931,8 +942,8 @@ class App:
             anchor="nw",
             width=max(width - HEADER_TEXT_INSET_X * 2, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
-            fill="#18305f",
-            font=("Arial", 10),
+            fill="#fff4ef",
+            font=("Segoe UI", 10),
         )
 
     def _on_hero_resize(self, event) -> None:
