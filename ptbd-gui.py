@@ -242,11 +242,248 @@ def standalone_backend_label() -> str:
     return "内置独立控制后端" if backend_available() else "旧版 shell 回退后端"
 
 
+def configure_cyberpunk_theme(root: tk.Tk) -> None:
+    style = ttk.Style(root)
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+
+    colors = {
+        "bg": "#050816",
+        "bg_alt": "#0b1023",
+        "panel": "#0c1328",
+        "panel_alt": "#101935",
+        "panel_edge": "#172348",
+        "entry": "#09101f",
+        "text": "#d7e9ff",
+        "muted": "#7d9cc0",
+        "accent": "#24f2ff",
+        "accent_soft": "#1889b8",
+        "magenta": "#ff2ed1",
+        "warning": "#f9ff6c",
+        "danger": "#ff668f",
+        "button": "#111b35",
+        "button_hover": "#16264b",
+        "button_pressed": "#08111f",
+    }
+
+    root.configure(bg=colors["bg"])
+
+    style.configure(
+        ".",
+        background=colors["bg"],
+        foreground=colors["text"],
+        bordercolor=colors["accent_soft"],
+        darkcolor=colors["panel_edge"],
+        lightcolor=colors["accent_soft"],
+        troughcolor=colors["panel"],
+        fieldbackground=colors["entry"],
+        focuscolor=colors["accent"],
+    )
+    style.configure("TFrame", background=colors["bg"])
+    style.configure(
+        "Panel.TFrame",
+        background=colors["panel"],
+        borderwidth=1,
+        relief="solid",
+        bordercolor=colors["accent_soft"],
+        lightcolor=colors["accent_soft"],
+        darkcolor=colors["panel_edge"],
+    )
+    style.configure(
+        "Hero.TFrame",
+        background=colors["panel_alt"],
+        borderwidth=1,
+        relief="solid",
+        bordercolor=colors["magenta"],
+        lightcolor=colors["accent"],
+        darkcolor=colors["panel_edge"],
+    )
+    style.configure("TLabel", background=colors["bg"], foreground=colors["text"])
+    style.configure(
+        "Title.TLabel",
+        background=colors["panel_alt"],
+        foreground=colors["accent"],
+        font=("Arial", 16, "bold"),
+    )
+    style.configure(
+        "Subtitle.TLabel",
+        background=colors["panel_alt"],
+        foreground=colors["muted"],
+        font=("Arial", 10),
+    )
+    style.configure(
+        "Field.TLabel",
+        background=colors["panel"],
+        foreground=colors["accent"],
+        font=("Arial", 10, "bold"),
+    )
+    style.configure(
+        "Hint.TLabel",
+        background=colors["panel"],
+        foreground=colors["muted"],
+        font=("Arial", 9),
+    )
+    style.configure(
+        "Tips.TLabel",
+        background=colors["panel"],
+        foreground=colors["text"],
+        font=("Arial", 10),
+    )
+    style.configure(
+        "Status.TLabel",
+        background=colors["panel_alt"],
+        foreground=colors["warning"],
+        font=("Arial", 10, "bold"),
+        padding=(12, 8),
+    )
+    style.configure(
+        "Path.TLabel",
+        background=colors["panel"],
+        foreground=colors["muted"],
+        font=("Consolas", 9),
+    )
+    style.configure(
+        "Section.TLabelframe",
+        background=colors["bg"],
+        borderwidth=1,
+        relief="solid",
+        bordercolor=colors["accent_soft"],
+        lightcolor=colors["accent_soft"],
+        darkcolor=colors["panel_edge"],
+    )
+    style.configure(
+        "Section.TLabelframe.Label",
+        background=colors["bg"],
+        foreground=colors["magenta"],
+        font=("Arial", 10, "bold"),
+    )
+    style.configure(
+        "Cyber.TEntry",
+        fieldbackground=colors["entry"],
+        foreground=colors["text"],
+        bordercolor=colors["accent_soft"],
+        lightcolor=colors["accent_soft"],
+        darkcolor=colors["panel_edge"],
+        padding=6,
+    )
+    style.map(
+        "Cyber.TEntry",
+        bordercolor=[("focus", colors["accent"]), ("!focus", colors["accent_soft"])],
+        lightcolor=[("focus", colors["accent"]), ("!focus", colors["accent_soft"])],
+    )
+    style.configure(
+        "TCheckbutton",
+        background=colors["panel"],
+        foreground=colors["text"],
+    )
+    style.map(
+        "TCheckbutton",
+        foreground=[
+            ("disabled", colors["muted"]),
+            ("active", colors["accent"]),
+            ("!disabled", colors["text"]),
+        ],
+        background=[("active", colors["panel"]), ("!disabled", colors["panel"])],
+    )
+    style.configure(
+        "Action.TButton",
+        background=colors["button"],
+        foreground=colors["accent"],
+        bordercolor=colors["accent_soft"],
+        lightcolor=colors["accent_soft"],
+        darkcolor=colors["panel_edge"],
+        padding=(10, 7),
+    )
+    style.map(
+        "Action.TButton",
+        background=[
+            ("pressed", colors["button_pressed"]),
+            ("active", colors["button_hover"]),
+        ],
+        foreground=[
+            ("pressed", colors["accent"]),
+            ("active", colors["warning"]),
+            ("!disabled", colors["accent"]),
+        ],
+        bordercolor=[("active", colors["accent"]), ("!disabled", colors["accent_soft"])],
+    )
+    style.configure(
+        "Accent.TButton",
+        background=colors["accent"],
+        foreground=colors["bg"],
+        bordercolor=colors["accent"],
+        lightcolor=colors["accent"],
+        darkcolor=colors["accent_soft"],
+        padding=(10, 7),
+        font=("Arial", 10, "bold"),
+    )
+    style.map(
+        "Accent.TButton",
+        background=[
+            ("pressed", colors["accent_soft"]),
+            ("active", colors["warning"]),
+        ],
+        foreground=[("!disabled", colors["bg"])],
+    )
+    style.configure(
+        "Danger.TButton",
+        background=colors["panel_alt"],
+        foreground=colors["danger"],
+        bordercolor=colors["magenta"],
+        lightcolor=colors["danger"],
+        darkcolor=colors["panel_edge"],
+        padding=(10, 7),
+    )
+    style.map(
+        "Danger.TButton",
+        background=[
+            ("pressed", colors["button_pressed"]),
+            ("active", colors["button_hover"]),
+        ],
+        foreground=[
+            ("pressed", colors["danger"]),
+            ("active", colors["warning"]),
+            ("!disabled", colors["danger"]),
+        ],
+    )
+    style.configure(
+        "Cyber.Treeview",
+        background=colors["entry"],
+        fieldbackground=colors["entry"],
+        foreground=colors["text"],
+        bordercolor=colors["accent_soft"],
+        lightcolor=colors["accent_soft"],
+        darkcolor=colors["panel_edge"],
+        rowheight=28,
+    )
+    style.map(
+        "Cyber.Treeview",
+        background=[("selected", colors["magenta"])],
+        foreground=[("selected", colors["bg"])],
+    )
+    style.configure(
+        "Cyber.Treeview.Heading",
+        background=colors["panel_alt"],
+        foreground=colors["accent"],
+        bordercolor=colors["magenta"],
+        lightcolor=colors["magenta"],
+        darkcolor=colors["panel_edge"],
+        font=("Arial", 10, "bold"),
+        padding=(6, 6),
+    )
+    style.map(
+        "Cyber.Treeview.Heading",
+        background=[("active", colors["button_hover"])],
+        foreground=[("active", colors["warning"]), ("!disabled", colors["accent"])],
+    )
+
+
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PT-BDtool 小白启动器")
         self.root.geometry("920x720")
+        self.root.minsize(920, 720)
         self.process: subprocess.Popen[str] | None = None
         self.reader_threads: list[threading.Thread] = []
         self.backend: PTBDRemoteBackend | None = None
@@ -263,23 +500,31 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.root, padding=12)
+        container = ttk.Frame(self.root, padding=16)
         container.pack(fill=BOTH, expand=True)
 
+        hero = ttk.Frame(container, style="Hero.TFrame", padding=(18, 16))
+        hero.pack(fill=X, pady=(0, 12))
+
         title = ttk.Label(
-            container,
+            hero,
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
-            font=("Arial", 15, "bold"),
+            style="Title.TLabel",
         )
         title.pack(anchor=W)
 
         subtitle = ttk.Label(
-            container,
+            hero,
             text="第一次填好 VPS 和保存目录。扫描目录留空时，会自动优先扫常见媒体目录；扫到候选后可直接双击开跑。",
+            style="Subtitle.TLabel",
+            wraplength=840,
+            justify="left",
         )
         subtitle.pack(anchor=W, pady=(4, 12))
 
-        form = ttk.Frame(container)
+        form_panel = ttk.LabelFrame(container, text="连接配置", style="Section.TLabelframe", padding=8)
+        form_panel.pack(fill=X, pady=(0, 10))
+        form = ttk.Frame(form_panel, style="Panel.TFrame", padding=12)
         form.pack(fill=X)
 
         self._add_entry(form, "VPS 地址", "remote_host", 0, "例如：root@1.2.3.4")
@@ -290,9 +535,9 @@ class App:
         self._add_entry(form, "额外排除", "scan_exclude", 5, "可留空")
         self._add_entry(form, "本机保存目录", "save_dir", 6, "结果回到本机这里")
 
-        save_row = ttk.Frame(form)
+        save_row = ttk.Frame(form, style="Panel.TFrame")
         save_row.grid(row=7, column=1, sticky="ew", pady=(2, 8))
-        ttk.Button(save_row, text="选择目录", command=self.pick_save_dir).pack(side=LEFT)
+        ttk.Button(save_row, text="选择目录", command=self.pick_save_dir, style="Action.TButton").pack(side=LEFT)
         self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             save_row,
@@ -308,32 +553,67 @@ class App:
 
         form.columnconfigure(1, weight=1)
 
+        tips_panel = ttk.LabelFrame(container, text="运行说明", style="Section.TLabelframe", padding=8)
+        tips_panel.pack(fill=X, pady=(0, 10))
+        tips_body = ttk.Frame(tips_panel, style="Panel.TFrame", padding=12)
+        tips_body.pack(fill=X)
+
         tips = ttk.Label(
-            container,
+            tips_body,
             text=(
                 f"说明：当前优先走 {standalone_backend_label()}。打包后的 Windows / macOS 独立版不再依赖本机 Python、Git、bash、ssh；"
                 "源码直跑时若缺少内置后端，才会回退旧版 shell 模式。空白 VPS 会优先尝试 Debian / Ubuntu / Alpine 自动装依赖，"
                 "只有不够时才回退内置运行包。"
             ),
+            style="Tips.TLabel",
+            wraplength=840,
+            justify="left",
         )
-        tips.pack(anchor=W, pady=(0, 12))
+        tips.pack(anchor=W)
 
-        actions = ttk.Frame(container)
-        actions.pack(fill=X, pady=(0, 8))
-        ttk.Button(actions, text="保存配置", command=self.save_form).pack(side=LEFT)
-        ttk.Button(actions, text="打开配置目录", command=self.open_config_dir).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="打开日志文件", command=self.open_log_file).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="扫描 VPS 候选", command=self.scan_remote).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="一步到位启动", command=self.start_remote).pack(side=LEFT, padx=(8, 0))
-        ttk.Button(actions, text="停止当前任务", command=self.stop_remote).pack(side=LEFT, padx=(8, 0))
+        actions = ttk.Frame(container, style="Panel.TFrame", padding=12)
+        actions.pack(fill=X, pady=(0, 10))
+        ttk.Button(actions, text="保存配置", command=self.save_form, style="Action.TButton").pack(side=LEFT)
+        ttk.Button(
+            actions,
+            text="打开配置目录",
+            command=self.open_config_dir,
+            style="Action.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(
+            actions,
+            text="打开日志文件",
+            command=self.open_log_file,
+            style="Action.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(
+            actions,
+            text="扫描 VPS 候选",
+            command=self.scan_remote,
+            style="Accent.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(
+            actions,
+            text="一步到位启动",
+            command=self.start_remote,
+            style="Accent.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
+        ttk.Button(
+            actions,
+            text="停止当前任务",
+            command=self.stop_remote,
+            style="Danger.TButton",
+        ).pack(side=LEFT, padx=(8, 0))
 
-        status = ttk.Label(container, textvariable=self.status_var)
+        status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
         status.pack(anchor=W, pady=(4, 8))
 
-        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", padding=8)
+        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=8)
         scan_panel.pack(fill=BOTH, expand=False, pady=(0, 10))
+        scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=8)
+        scan_body.pack(fill=BOTH, expand=True)
         columns = ("index", "type", "path")
-        self.scan_tree = ttk.Treeview(scan_panel, columns=columns, show="headings", height=8)
+        self.scan_tree = ttk.Treeview(scan_body, columns=columns, show="headings", height=8, style="Cyber.Treeview")
         self.scan_tree.heading("index", text="#")
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
@@ -343,9 +623,30 @@ class App:
         self.scan_tree.pack(fill=BOTH, expand=True)
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
         self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
-        ttk.Label(scan_panel, textvariable=self.selected_path_var).pack(anchor=W, pady=(6, 0))
+        ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(6, 0))
 
-        self.log_view = ScrolledText(container, wrap="word", font=("Consolas", 10))
+        log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
+        log_panel.pack(fill=BOTH, expand=True)
+        log_body = ttk.Frame(log_panel, style="Panel.TFrame", padding=10)
+        log_body.pack(fill=BOTH, expand=True)
+
+        self.log_view = ScrolledText(
+            log_body,
+            wrap="word",
+            font=("Consolas", 10),
+            background="#09101f",
+            foreground="#d7e9ff",
+            insertbackground="#24f2ff",
+            selectbackground="#ff2ed1",
+            selectforeground="#050816",
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#1889b8",
+            highlightcolor="#24f2ff",
+            padx=12,
+            pady=10,
+        )
         self.log_view.pack(fill=BOTH, expand=True)
         self.log_view.insert(END, f"App root: {APP_ROOT}\n")
         self.log_view.insert(END, f"Config: {CONFIG_PATH}\n")
@@ -365,12 +666,12 @@ class App:
             append_gui_log_line(line)
 
     def _add_entry(self, parent, label_text: str, key: str, row: int, hint: str, show: str | None = None) -> None:
-        ttk.Label(parent, text=label_text).grid(row=row, column=0, sticky=W, padx=(0, 10), pady=4)
+        ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 10), pady=4)
         variable = tk.StringVar()
         self.config_vars[key] = variable
-        entry = ttk.Entry(parent, textvariable=variable, show=show or "")
+        entry = ttk.Entry(parent, textvariable=variable, show=show or "", style="Cyber.TEntry")
         entry.grid(row=row, column=1, sticky="ew", pady=4)
-        ttk.Label(parent, text=hint).grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
+        ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
 
     def _load_into_form(self, data: dict) -> None:
         for key, value in data.items():
@@ -873,9 +1174,7 @@ def cli_main() -> int:
         return 0
 
     root = tk.Tk()
-    style = ttk.Style(root)
-    if "clam" in style.theme_names():
-        style.theme_use("clam")
+    configure_cyberpunk_theme(root)
     App(root)
     root.mainloop()
     return 0
