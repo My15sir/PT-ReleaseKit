@@ -88,14 +88,14 @@ jobs:
             quick_start_title: PT-BDtool Linux 快速开始
             quick_start_body: |
               1. 解压 PT-BDtool-linux-portable.tar.gz
-              2. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击“启动PT-BDtool.sh”
+              2. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击 PT-BDtool.sh
               3. 填 VPS 地址、端口、密码、本机保存目录
               4. 点击“扫描 VPS 候选”
               5. 双击你要处理的条目
               
               提醒：
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
-              - 如果系统提示没执行权限，先运行：chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool
+              - 如果系统提示没执行权限，先运行：chmod +x PT-BDtool.desktop PT-BDtool.sh PT-BDtool
               - Linux 便携版配置优先保存在程序同目录
               - 只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
@@ -161,7 +161,7 @@ jobs:
           )
 
           if package_layout == "flatten-dir":
-              launcher = upload_dir / "启动PT-BDtool.sh"
+              launcher = upload_dir / "PT-BDtool.sh"
               launcher.write_text(
                   "#!/usr/bin/env bash\n"
                   "set -euo pipefail\n"
@@ -182,7 +182,7 @@ jobs:
                   "Type=Application\n"
                   "Name=PT-BDtool\n"
                   "Comment=Portable PT-BDtool Linux launcher\n"
-                  "Exec=bash -lc 'SCRIPT_DIR=\"$(cd -P \"$(dirname \"$1\")\" && pwd)\"; export PTBD_PORTABLE_CONFIG=1; if [[ -x \"$SCRIPT_DIR/启动PT-BDtool.sh\" ]]; then exec \"$SCRIPT_DIR/启动PT-BDtool.sh\"; fi; exec \"$SCRIPT_DIR/PT-BDtool\"' dummy %k\n"
+                  "Exec=bash -lc 'SCRIPT_DIR=\"$(cd -P \"$(dirname \"$1\")\" && pwd)\"; export PTBD_PORTABLE_CONFIG=1; if [[ -x \"$SCRIPT_DIR/PT-BDtool.sh\" ]]; then exec \"$SCRIPT_DIR/PT-BDtool.sh\"; fi; exec \"$SCRIPT_DIR/PT-BDtool\"' dummy %k\n"
                   "Terminal=false\n"
                   "StartupNotify=true\n"
                   "Categories=Utility;AudioVideo;\n"
@@ -275,8 +275,8 @@ jobs:
             如果系统拦住：
             - Windows：`更多信息 -> 仍要运行`
             - macOS：右键应用后点一次 `打开`
-            - Linux：如果桌面文件不生效，就改双击 `启动PT-BDtool.sh`
-            - Linux：如果提示无执行权限，先运行 `chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool`
+            - Linux：如果桌面文件不生效，就改双击 `PT-BDtool.sh`
+            - Linux：如果提示无执行权限，先运行 `chmod +x PT-BDtool.desktop PT-BDtool.sh PT-BDtool`
             - Linux：只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
             说明：

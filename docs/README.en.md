@@ -157,7 +157,7 @@ These 3 launcher files now try to open the `ptbd-gui` window first, instead of d
 The practical idea is:
 - **Windows**: double-click `PT-BDtool.bat`; install Python 3 and Git for Windows first
 - **macOS**: double-click `PT-BDtool.command`; if macOS blocks the first launch, right-click and choose “Open” once
-- **Linux**: double-click `PT-BDtool.desktop`, or use the installed PT-BDtool app launcher
+- **Linux**: double-click `PT-BDtool.desktop`; if your desktop does not honor it, double-click `PT-BDtool.sh` instead
 
 Recommended beginner flow after the GUI opens:
 1. fill in VPS host, port, password, and local save directory
