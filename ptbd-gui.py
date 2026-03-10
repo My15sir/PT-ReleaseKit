@@ -1325,7 +1325,67 @@ class App:
         selected_path = self.current_selected_path()
         if selected_path:
             self.hide_path_tooltip()
-            messagebox.showinfo("完整路径", selected_path)
+            self.show_full_path_dialog(selected_path)
+
+    def copy_full_path(self, path: str, status_var: tk.StringVar) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(path)
+        self.root.update_idletasks()
+        status_var.set("已复制到剪贴板")
+
+    def show_full_path_dialog(self, path: str) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("完整路径")
+        dialog.transient(self.root)
+        dialog.resizable(True, False)
+        dialog.geometry("760x180")
+        dialog.minsize(540, 160)
+
+        frame = ttk.Frame(dialog, padding=14, style="Panel.TFrame")
+        frame.pack(fill=BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(1, weight=1)
+
+        ttk.Label(frame, text="完整路径", style="Field.TLabel").grid(row=0, column=0, sticky=W)
+        path_box = tk.Text(
+            frame,
+            wrap="word",
+            height=4,
+            font=("Consolas", 10),
+            background="#f8fbff",
+            foreground="#23314d",
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#d7e1f3",
+            highlightcolor="#7da8ff",
+            padx=10,
+            pady=8,
+        )
+        path_box.grid(row=1, column=0, sticky="nsew", pady=(6, 10))
+        path_box.insert("1.0", path)
+        path_box.configure(state="disabled")
+
+        footer = ttk.Frame(frame, style="Panel.TFrame")
+        footer.grid(row=2, column=0, sticky="ew")
+        footer.columnconfigure(0, weight=1)
+        copy_status = tk.StringVar(value="可复制后粘贴到终端、文件管理器或 SSH 命令中")
+        ttk.Label(footer, textvariable=copy_status, style="PanelHint.TLabel").grid(row=0, column=0, sticky=W)
+        ttk.Button(
+            footer,
+            text="复制完整路径",
+            command=lambda: self.copy_full_path(path, copy_status),
+            style="Action.TButton",
+        ).grid(row=0, column=1, padx=(10, 0))
+        ttk.Button(
+            footer,
+            text="关闭",
+            command=dialog.destroy,
+            style="Action.TButton",
+        ).grid(row=0, column=2, padx=(8, 0))
+
+        dialog.grab_set()
+        dialog.focus_set()
 
     def _start_reader(self, proc: subprocess.Popen[str]) -> None:
         def read_stream() -> None:
