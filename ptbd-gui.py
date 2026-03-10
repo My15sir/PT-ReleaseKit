@@ -30,6 +30,16 @@ CONTENT_INSET_X = 14
 HEADER_TEXT_INSET_X = 16
 
 
+class _RoundButtonHandle:
+    def __init__(self, canvas: tk.Canvas, text_id: int) -> None:
+        self.canvas = canvas
+        self.text_id = text_id
+
+    def configure(self, **kwargs) -> None:
+        if "text" in kwargs:
+            self.canvas.itemconfigure(self.text_id, text=kwargs["text"])
+
+
 def resolve_script_path(path: str) -> Path:
     return Path(path).expanduser().resolve()
 
@@ -988,26 +998,15 @@ class App:
         if padx is not None:
             pack_kwargs["padx"] = padx
         shell.pack(**pack_kwargs)
-
-        button = tk.Button(
-            shell,
-            text=text,
-            command=command,
-            relief="flat",
-            borderwidth=0,
-            highlightthickness=0,
-            background=fill,
-            activebackground=hover,
-            foreground=fg,
-            activeforeground=fg,
-            font=("Arial", 9, "bold"),
+        shell.configure(cursor="hand2")
+        text_id = shell.create_text(
+            14,
+            19,
             anchor="w",
-            justify="left",
-            padx=14,
-            pady=6,
-            cursor="hand2",
+            text=text,
+            fill=fg,
+            font=("Arial", 9, "bold"),
         )
-        window_id = shell.create_window(0, 0, anchor="nw", window=button)
 
         def redraw(_event=None) -> None:
             width_px = max(shell.winfo_width(), 80)
@@ -1026,11 +1025,9 @@ class App:
                 tags="btn-bg",
             )
             shell.tag_lower("btn-bg")
-            shell.itemconfigure(window_id, width=width_px - 2, height=height_px - 2)
-            shell.coords(window_id, 1, 1)
+            shell.coords(text_id, 14, height_px / 2)
 
         def on_enter(_event=None) -> None:
-            button.configure(background=hover, activebackground=hover)
             shell.delete("btn-bg")
             self._create_rounded_rect(
                 shell,
@@ -1047,51 +1044,59 @@ class App:
             shell.tag_lower("btn-bg")
 
         def on_leave(_event=None) -> None:
-            button.configure(background=fill, activebackground=hover)
             redraw()
 
+        def on_click(_event=None) -> None:
+            command()
+
         shell.bind("<Configure>", redraw)
-        button.bind("<Enter>", on_enter)
-        button.bind("<Leave>", on_leave)
+        shell.bind("<Enter>", on_enter)
+        shell.bind("<Leave>", on_leave)
+        shell.bind("<Button-1>", on_click)
+        shell.tag_bind(text_id, "<Enter>", on_enter)
+        shell.tag_bind(text_id, "<Leave>", on_leave)
+        shell.tag_bind(text_id, "<Button-1>", on_click)
         shell.after_idle(redraw)
-        return button
+        return _RoundButtonHandle(shell, text_id)
 
     def _render_hero_banner(self, width: int) -> None:
         width = max(width, 420)
         height = int(self.hero_canvas.cget("height"))
-        steps = 96
         self.hero_canvas.delete("all")
         self._create_rounded_rect(
             self.hero_canvas,
-            4,
-            14,
-            width - 4,
-            height,
+            8,
+            18,
+            width - 8,
+            height - 6,
             radius=30,
-            fill="#dbe7ff",
+            fill="#d7e5ff",
             outline="",
         )
-        for index in range(steps):
-            ratio = index / max(steps - 1, 1)
-            color = hero_gradient_color(ratio)
-            x0 = 8 + (width - 16) * index / steps
-            x1 = 8 + (width - 16) * (index + 1) / steps
-            self.hero_canvas.create_rectangle(x0, 10, x1 + 1, height - 6, outline="", fill=color)
-        self._mask_rounded_corner_overdraw(8, 10, width - 8, height - 6, 30, "#eef3ff")
         self._create_rounded_rect(
             self.hero_canvas,
-            2,
             6,
-            width - 2,
-            height - 4,
+            14,
+            width - 6,
+            height - 10,
             radius=30,
-            fill="",
+            fill="#6ea6e8",
             outline="#cfe0ff",
             width=1,
         )
+        self._create_rounded_rect(
+            self.hero_canvas,
+            12,
+            20,
+            width - 12,
+            height - 18,
+            radius=24,
+            fill="#79afea",
+            outline="",
+        )
         self.hero_canvas.create_text(
             HEADER_TEXT_INSET_X,
-            22,
+            28,
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
             fill="#ffffff",
@@ -1099,30 +1104,13 @@ class App:
         )
         self.hero_canvas.create_text(
             HEADER_TEXT_INSET_X,
-            58,
+            60,
             anchor="nw",
             width=max(width - HEADER_TEXT_INSET_X * 2, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
             fill="#eaf2ff",
             font=("Arial", 10),
         )
-
-    def _mask_rounded_corner_overdraw(self, x1: float, y1: float, x2: float, y2: float, radius: float, color: str) -> None:
-        def arc_points(cx: float, cy: float, start_deg: float, end_deg: float, steps: int = 12) -> list[float]:
-            import math
-
-            points: list[float] = []
-            for index in range(steps + 1):
-                angle = math.radians(start_deg + (end_deg - start_deg) * index / steps)
-                points.extend([cx + radius * math.cos(angle), cy + radius * math.sin(angle)])
-            return points
-
-        tl = [x1, y1, x1 + radius, y1, *arc_points(x1 + radius, y1 + radius, 270, 180), x1, y1 + radius]
-        tr = [x2 - radius, y1, x2, y1, x2, y1 + radius, *arc_points(x2 - radius, y1 + radius, 0, -90)]
-        bl = [x1, y2 - radius, *arc_points(x1 + radius, y2 - radius, 180, 90), x1 + radius, y2, x1, y2]
-        br = [x2, y2 - radius, x2, y2, x2 - radius, y2, *arc_points(x2 - radius, y2 - radius, 90, 0)]
-        for points in (tl, tr, bl, br):
-            self.hero_canvas.create_polygon(points, fill=color, outline=color)
 
     def _on_hero_resize(self, event) -> None:
         self._render_hero_banner(event.width)
