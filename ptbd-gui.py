@@ -971,12 +971,16 @@ class App:
         padx: tuple[int, int] | None = None,
     ):
         fill, hover, fg, outline = self._button_palette(variant)
+        try:
+            parent_bg = str(parent.cget("background"))
+        except Exception:
+            parent_bg = "#eef3ff"
         shell = tk.Canvas(
             parent,
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
-            background=parent.cget("background"),
+            background=parent_bg,
             width=width * 16 + 12,
             height=38,
         )
