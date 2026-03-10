@@ -89,6 +89,8 @@
   - 英文说明
 - `docs/DEVELOPMENT.md`
   - 给维护者看
+- `docs/REPO-INDEX.md`
+  - 仓库导航
 
 ### GitHub 配置
 

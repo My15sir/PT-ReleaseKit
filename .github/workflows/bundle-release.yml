@@ -1,4 +1,4 @@
-name: Linux Bundle Release
+name: Release Linux Bundle
 
 on:
   workflow_dispatch:
@@ -39,14 +39,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build offline linux bundle asset
+      - name: Build Linux bundle asset
         run: bash scripts/build-bundle.sh
 
-      - name: Publish bundle release asset
+      - name: Publish Linux bundle release
         uses: ncipollo/release-action@v1
         with:
           tag: bundle-latest
-          name: PT-BDtool Linux Bundle
+          name: PT-BDtool Linux Bundle Asset
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
@@ -54,4 +54,5 @@ jobs:
           artifactErrorsFailBuild: true
           body: |
             自动更新的 Linux 离线运行包。
-            主要给控制端打包和源码仓库按需下载使用，不建议普通用户直接面对源码仓库。
+            主要给控制端打包和源码仓库按需下载使用。
+            普通用户请优先使用 `portable-latest` 里的成品包。

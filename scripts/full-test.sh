@@ -283,7 +283,7 @@ run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bd
 run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
 run_step "placeholder-png-valid" success python3 "$PLACEHOLDER_PNG_TEST" "$ROOT_DIR"
 run_step "remote-runtime-render" success python3 "$RUNTIME_RENDER_TEST" "$ROOT_DIR"
-run_step "workflow-ci-markers" success bash -c "grep -q 'name: CI' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Controller Builds' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
+run_step "workflow-ci-markers" success bash -c "grep -q 'name: Validate Project' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Release Portable Apps' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'name: Release Linux Bundle' '$ROOT_DIR/.github/workflows/bundle-release.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
 run_step "bdtool-help" success "$CLI_BIN" --help
 run_step "bdtool-version" success "$CLI_BIN" --version
 run_step "bdtool-doctor" success "$CLI_BIN" doctor

@@ -1,4 +1,4 @@
-name: Controller Builds
+name: Release Portable Apps
 
 on:
   workflow_dispatch:
@@ -29,7 +29,7 @@ permissions:
 
 jobs:
   build-controller:
-    name: Build ${{ matrix.label }}
+    name: Build Portable ${{ matrix.label }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -224,7 +224,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Publish portable release
+    name: Publish Portable Release
     runs-on: ubuntu-latest
     needs: [build-controller]
     steps:
@@ -244,7 +244,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: portable-latest
-          name: PT-BDtool 直接下载
+          name: PT-BDtool Portable Downloads
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
