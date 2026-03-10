@@ -523,14 +523,17 @@ class App:
         self.backend: PTBDRemoteBackend | None = None
         self.backend_thread: threading.Thread | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self.status_var = tk.StringVar(value="就绪：先填 VPS，扫描候选后双击条目或点“一步到位启动”")
+        self.status_var = tk.StringVar(value="就绪：先填 VPS，扫描候选后双击条目或点“启动所选条目”")
         self.selected_path_var = tk.StringVar(value="")
         self.config_vars = {}
         self.scan_items: list[dict] = []
+        self.filtered_scan_items: list[dict] = []
         self.auto_start_after_scan = False
         self.form_expanded = tk.BooleanVar(value=False)
         self.summary_host_var = tk.StringVar(value="VPS：未配置")
         self.summary_save_var = tk.StringVar(value="保存目录：未配置")
+        self.filter_type_var = tk.StringVar(value="全部类型")
+        self.filter_keyword_var = tk.StringVar(value="")
         self.path_tooltip: tk.Toplevel | None = None
         self.path_tooltip_label: tk.Label | None = None
         self.tooltip_item: str | None = None
@@ -660,7 +663,7 @@ class App:
         ).pack(side=LEFT)
         ttk.Button(
             primary_actions,
-            text="直接启动所选条目",
+            text="启动所选条目",
             command=self.start_remote,
             style="Accent.TButton",
         ).pack(side=LEFT, padx=(10, 0))
@@ -688,10 +691,35 @@ class App:
             command=self.open_log_file,
             style="Action.TButton",
         ).pack(side=LEFT, padx=(8, 0))
+        filter_bar = ttk.Frame(scan_body, style="Panel.TFrame")
+        filter_bar.pack(fill=X, pady=(0, 8))
+        ttk.Label(filter_bar, text="过滤", style="Field.TLabel").pack(side=LEFT)
+        type_box = ttk.Combobox(
+            filter_bar,
+            textvariable=self.filter_type_var,
+            values=("全部类型", "视频", "音频", "原盘", "镜像"),
+            state="readonly",
+            width=10,
+        )
+        type_box.pack(side=LEFT, padx=(10, 8))
+        type_box.bind("<<ComboboxSelected>>", lambda _event: self.apply_scan_filters())
+        keyword_entry = ttk.Entry(filter_bar, textvariable=self.filter_keyword_var, style="Cyber.TEntry")
+        keyword_entry.pack(side=LEFT, fill=X, expand=True)
+        keyword_entry.bind("<KeyRelease>", lambda _event: self.apply_scan_filters())
+        ttk.Button(filter_bar, text="清空过滤", command=self.clear_scan_filters, style="Action.TButton").pack(
+            side=LEFT, padx=(8, 0)
+        )
         scan_list = ttk.Frame(scan_body, style="Panel.TFrame")
         scan_list.pack(fill=BOTH, expand=True)
         columns = ("index", "type", "path")
-        self.scan_tree = ttk.Treeview(scan_list, columns=columns, show="headings", height=18, style="Cyber.Treeview")
+        self.scan_tree = ttk.Treeview(
+            scan_list,
+            columns=columns,
+            show="headings",
+            height=18,
+            style="Cyber.Treeview",
+            selectmode="extended",
+        )
         self.scan_tree.heading("index", text="#")
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
@@ -860,7 +888,7 @@ class App:
         self.summary_save_var.set(f"保存目录：{save_value or default_save_dir()}")
 
     def toggle_form_panel(self, force: bool | None = None) -> None:
-        expanded = self.form_expanded.get() if force is None else bool(force)
+        expanded = (not self.form_expanded.get()) if force is None else bool(force)
         self.form_expanded.set(expanded)
         if expanded:
             self.form_details.pack(fill=X, pady=(8, 0))
@@ -976,20 +1004,30 @@ class App:
             self.backend_thread = None
 
     def start_remote_with_backend(self, data: dict, save_dir: Path, selected_path: str) -> None:
+        self.start_remote_with_backend_batch(data, save_dir, [selected_path])
+
+    def start_remote_with_backend_batch(self, data: dict, save_dir: Path, selected_paths: list[str]) -> None:
         backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
         self.backend = backend
         self.append_log("")
         self.append_log("[gui] 启动方式：内置独立控制后端（本机不再依赖 bash / ssh / scp）")
         self.append_log(f"[gui] 本机保存目录：{save_dir}")
-        self.append_log(f"[gui] 自动处理选中候选：{selected_path}")
+        self.append_log(f"[gui] 已选 {len(selected_paths)} 个候选")
+        for index, path in enumerate(selected_paths, start=1):
+            self.append_log(f"[gui] 待处理 {index}/{len(selected_paths)}：{path}")
         if data["remote_bootstrap"]:
             self.append_log("[gui] 空白 VPS 自举已开启：先尝试系统依赖自动安装，不够时才回退上传内置运行包")
-        self.status_var.set("运行中：已直接下发生成/下载/清理任务")
+        self.status_var.set(f"运行中：准备顺序处理 {len(selected_paths)} 个条目")
 
         def worker() -> None:
             try:
-                local_path = backend.process_selected_path(selected_path, save_dir)
-                self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{local_path.parent}")
+                local_path = None
+                for index, selected_path in enumerate(selected_paths, start=1):
+                    self.log_queue.put(f"[gui] 开始处理 {index}/{len(selected_paths)}：{selected_path}")
+                    local_path = backend.process_selected_path(selected_path, save_dir)
+                    self.log_queue.put(f"[gui] 完成 {index}/{len(selected_paths)}：{selected_path}")
+                if local_path is not None:
+                    self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{local_path.parent}")
                 self.log_queue.put("[gui] 任务结束，退出码：0")
             except TaskCancelledError:
                 self.log_queue.put("[gui] 任务已取消")
@@ -1013,19 +1051,19 @@ class App:
         data = self.form_data()
         save_dir = Path(data["save_dir"]).expanduser()
         save_dir.mkdir(parents=True, exist_ok=True)
-        selected_path = self.current_selected_path()
-        if not selected_path and not self.scan_items:
+        selected_paths = self.current_selected_paths()
+        if not selected_paths and not self.scan_items:
             self.append_log("[gui] 尚未选择候选，先自动扫描一次 VPS")
             self.status_var.set("扫描中：先自动获取 VPS 候选列表")
             self.scan_remote(auto_start=True)
             return
 
         if backend_available():
-            if not selected_path:
-                messagebox.showinfo("先选条目", "请先在候选列表里选中或双击一个条目，再点“一步到位启动”。")
+            if not selected_paths:
+                messagebox.showinfo("先选条目", "请先在候选列表里选中一个或多个条目，再点“启动所选条目”。")
                 self.status_var.set("等待选择：先在候选列表里选中要处理的条目")
                 return
-            self.start_remote_with_backend(data, save_dir, selected_path)
+            self.start_remote_with_backend_batch(data, save_dir, selected_paths)
             return
 
         bash_bin = find_bash()
@@ -1063,35 +1101,62 @@ class App:
                 "PTBD_AUTO_CLEANUP": "1" if data["auto_cleanup"] else "0",
             }
         )
-        if selected_path:
-            env["PTBD_REMOTE_TARGET_PATH"] = selected_path
-
-        cmd = [bash_bin, str(remote_script)]
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = subprocess.CREATE_NO_WINDOW
-
-        self.append_log("")
-        self.append_log(f"[gui] 启动命令：{' '.join(cmd)}")
-        self.append_log(f"[gui] 本机保存目录：{save_dir}")
-        if selected_path:
-            self.append_log(f"[gui] 自动处理选中候选：{selected_path}")
-            self.status_var.set("运行中：已直接下发生成/下载/清理任务")
-        else:
+        if not selected_paths:
             self.status_var.set("运行中：未选中候选，将回退到远端菜单模式")
+            selected_paths = [""]
+        self.start_remote_with_shell_batch(bash_bin, remote_script, env, save_dir, selected_paths)
 
-        self.process = subprocess.Popen(
-            cmd,
-            cwd=str(APP_ROOT),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-            creationflags=creationflags,
-        )
-        self._start_reader(self.process)
+    def start_remote_with_shell_batch(
+        self,
+        bash_bin: str,
+        remote_script: Path,
+        env: dict[str, str],
+        save_dir: Path,
+        selected_paths: list[str],
+    ) -> None:
+        self.append_log("")
+        self.append_log(f"[gui] 启动命令：{bash_bin} {remote_script}")
+        self.append_log(f"[gui] 本机保存目录：{save_dir}")
+        real_paths = [path for path in selected_paths if path]
+        if real_paths:
+            self.append_log(f"[gui] 已选 {len(real_paths)} 个候选，旧版 shell 模式将顺序处理")
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+
+        def worker() -> None:
+            try:
+                for index, selected_path in enumerate(selected_paths, start=1):
+                    step_env = env.copy()
+                    if selected_path:
+                        step_env["PTBD_REMOTE_TARGET_PATH"] = selected_path
+                        self.log_queue.put(f"[gui] shell 模式开始处理 {index}/{len(selected_paths)}：{selected_path}")
+                    else:
+                        step_env.pop("PTBD_REMOTE_TARGET_PATH", None)
+                    proc = subprocess.Popen(
+                        [bash_bin, str(remote_script)],
+                        cwd=str(APP_ROOT),
+                        env=step_env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        stdin=subprocess.DEVNULL,
+                        text=True,
+                        bufsize=1,
+                        creationflags=creationflags,
+                    )
+                    self.process = proc
+                    assert proc.stdout is not None
+                    for line in proc.stdout:
+                        self.log_queue.put(line.rstrip("\n"))
+                    rc = proc.wait()
+                    if rc != 0:
+                        self.log_queue.put(f"[gui] 任务结束，退出码：{rc}")
+                        return
+                self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{save_dir}")
+                self.log_queue.put("[gui] 任务结束，退出码：0")
+            finally:
+                self.process = None
+
+        self.backend_thread = threading.Thread(target=worker, daemon=True)
+        self.backend_thread.start()
 
     def create_askpass_script(self, password: str) -> str:
         suffix = ".cmd" if os.name == "nt" else ".sh"
@@ -1276,16 +1341,59 @@ class App:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def clear_scan_filters(self) -> None:
+        self.filter_type_var.set("全部类型")
+        self.filter_keyword_var.set("")
+        self.apply_scan_filters()
+
+    def has_active_scan_filter(self) -> bool:
+        return bool(self.filter_keyword_var.get().strip()) or self.filter_type_var.get().strip() != "全部类型"
+
+    def visible_scan_items(self) -> list[dict]:
+        return self.filtered_scan_items if self.has_active_scan_filter() else self.scan_items
+
+    def apply_scan_filters(self) -> None:
+        type_filter = self.filter_type_var.get().strip()
+        keyword = self.filter_keyword_var.get().strip().lower()
+        self.filtered_scan_items = []
+        for item in self.scan_items:
+            type_label = str(item.get("type_label", item.get("type", "")))
+            path = str(item.get("path", ""))
+            if type_filter and type_filter != "全部类型" and type_label != type_filter:
+                continue
+            haystack = f"{type_label} {path}".lower()
+            if keyword and keyword not in haystack:
+                continue
+            self.filtered_scan_items.append(item)
+        self.refresh_scan_items()
+
     def refresh_scan_items(self, auto_start: bool = False) -> None:
+        previous_paths = set(self.current_selected_paths())
         for item in self.scan_tree.get_children():
             self.scan_tree.delete(item)
-        for item in self.scan_items:
+        source_items = self.visible_scan_items()
+        for item in source_items:
             self.scan_tree.insert("", END, values=(item["index"], item.get("type_label", item["type"]), item["path"]))
-        self.status_var.set(f"扫描完成：共 {len(self.scan_items)} 个候选")
-        if self.scan_items:
+        shown = len(source_items)
+        total = len(self.scan_items)
+        if self.has_active_scan_filter() and shown == 0:
+            self.status_var.set(f"过滤完成：0 / {total} 个候选匹配")
+        else:
+            self.status_var.set(f"扫描完成：显示 {shown} / 共 {total} 个候选")
+        to_select: list[str] = []
+        for item_id in self.scan_tree.get_children():
+            values = self.scan_tree.item(item_id, "values")
+            if values and len(values) >= 3 and str(values[2]).strip() in previous_paths:
+                to_select.append(item_id)
+        if to_select:
+            self.scan_tree.selection_set(tuple(to_select))
+            self.scan_tree.focus(to_select[0])
+        elif source_items:
             first = self.scan_tree.get_children()[0]
             self.scan_tree.selection_set(first)
             self.scan_tree.focus(first)
+        else:
+            self.selected_path_var.set("当前没有匹配的候选")
         if auto_start:
             self.auto_start_after_scan = False
             if len(self.scan_items) == 1:
@@ -1294,25 +1402,35 @@ class App:
             elif len(self.scan_items) == 0:
                 self.status_var.set("扫描完成：没有发现可处理候选")
             else:
-                self.status_var.set("扫描完成：已自动选中第一项，请双击或点“一步到位启动”继续")
+                self.status_var.set("扫描完成：已自动选中第一项，请双击或点“启动所选条目”继续")
 
     def on_scan_select(self, _event=None) -> None:
         selection = self.scan_tree.selection()
         if not selection:
             self.selected_path_var.set("")
             return
-        values = self.scan_tree.item(selection[0], "values")
-        if values:
-            self.selected_path_var.set(f"当前选中：{values[2]}")
+        paths = self.current_selected_paths()
+        if len(paths) == 1:
+            self.selected_path_var.set(f"当前选中：{paths[0]}")
+        else:
+            self.selected_path_var.set(f"当前已选 {len(paths)} 项，第一项：{paths[0]}")
 
     def current_selected_path(self) -> str:
-        selection = self.scan_tree.selection()
-        if not selection:
-            return ""
-        values = self.scan_tree.item(selection[0], "values")
-        if not values or len(values) < 3:
-            return ""
-        return str(values[2]).strip()
+        paths = self.current_selected_paths()
+        return paths[0] if paths else ""
+
+    def current_selected_paths(self) -> list[str]:
+        selection = set(self.scan_tree.selection())
+        paths: list[str] = []
+        for item_id in self.scan_tree.get_children():
+            if item_id not in selection:
+                continue
+            values = self.scan_tree.item(item_id, "values")
+            if values and len(values) >= 3:
+                path = str(values[2]).strip()
+                if path and path not in paths:
+                    paths.append(path)
+        return paths
 
     def selected_scan_item_path(self) -> str:
         return self.current_selected_path()
@@ -1338,6 +1456,9 @@ class App:
         if not selected_path:
             return
         self.hide_path_tooltip()
+        focus_item = self.scan_tree.focus()
+        if focus_item:
+            self.scan_tree.selection_set(focus_item)
         self.start_remote()
 
     def hide_path_tooltip(self, _event=None) -> None:
