@@ -26,6 +26,7 @@ from ptbd_remote_backend import (
 
 
 APP_NAME = "PT-BDtool"
+CONTENT_INSET_X = 14
 
 
 def resolve_script_path(path: str) -> Path:
@@ -337,7 +338,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         background=colors["panel_alt"],
         foreground=colors["warning"],
         font=("Arial", 10, "bold"),
-        padding=(12, 8),
+        padding=(CONTENT_INSET_X, 8),
     )
     style.configure(
         "Path.TLabel",
@@ -356,6 +357,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         background=colors["bg"],
         foreground=colors["accent_deep"],
         font=("Arial", 10, "bold"),
+        padding=(CONTENT_INSET_X, 0, 0, 0),
     )
     style.configure(
         "Cyber.TEntry",
@@ -559,7 +561,7 @@ class App:
 
         form_panel = ttk.LabelFrame(container, text="连接与保存设置", style="Section.TLabelframe", padding=0)
         form_panel.pack(fill=X, pady=(0, 6))
-        form_summary = ttk.Frame(form_panel, style="Panel.TFrame", padding=(14, 12))
+        form_summary = ttk.Frame(form_panel, style="Panel.TFrame", padding=(CONTENT_INSET_X, 12))
         form_summary.pack(fill=X)
         form_summary.columnconfigure(0, weight=1)
         ttk.Label(form_summary, textvariable=self.summary_host_var, style="Field.TLabel").grid(row=0, column=0, sticky=W)
@@ -589,7 +591,11 @@ class App:
         )
         self.form_toggle_button.grid(row=0, column=2, rowspan=2, padx=(10, 0))
 
-        self.form_details = ttk.Frame(form_panel, style="Panel.TFrame", padding=(14, 6, 14, 14))
+        self.form_details = ttk.Frame(
+            form_panel,
+            style="Panel.TFrame",
+            padding=(CONTENT_INSET_X, 6, CONTENT_INSET_X, 14),
+        )
         form = self.form_details
 
         self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4 或 ssh root@1.2.3.4")
@@ -658,7 +664,11 @@ class App:
 
         scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=0)
         scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
-        scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=(14, 12, 14, 12))
+        scan_body = ttk.Frame(
+            scan_panel,
+            style="Panel.TFrame",
+            padding=(CONTENT_INSET_X, 12, CONTENT_INSET_X, 12),
+        )
         scan_body.pack(fill=BOTH, expand=True)
         actions = ttk.Frame(scan_body, style="Toolbar.TFrame")
         actions.pack(fill=X, pady=(0, 8))
@@ -803,7 +813,7 @@ class App:
             self.hero_canvas.create_rectangle(x0, 0, x1 + 1, height, outline="", fill=color)
         self.hero_canvas.create_rectangle(0, height - 22, width, height, outline="", fill="#edf4ff")
         self.hero_canvas.create_text(
-            18,
+            CONTENT_INSET_X,
             12,
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
@@ -811,10 +821,10 @@ class App:
             font=("Arial", 15, "bold"),
         )
         self.hero_canvas.create_text(
-            18,
+            CONTENT_INSET_X,
             38,
             anchor="nw",
-            width=max(width - 36, 180),
+            width=max(width - CONTENT_INSET_X * 2, 180),
             text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
             fill="#18305f",
             font=("Arial", 10, "bold"),
