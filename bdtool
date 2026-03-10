@@ -83,6 +83,8 @@ setup_bundle_runtime "$ROOT_DIR"
 : "${BDTOOL_DOWNLOAD_DIR:=}"
 : "${BDTOOL_SCAN_FULL_ROOT:=/}"
 : "${BDTOOL_DEBUG:=0}"
+: "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
+: "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 ensure_output_root
 MAX_SCAN_DISPLAY=10
@@ -967,7 +969,9 @@ generate_item() {
 
     screen "生成进度: 50% (频谱图生成中)"
     if require_runtime_cmd ffmpeg; then
-      if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$out/频谱图.png" >/dev/null 2>&1; then
+      if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" \
+        -filter_complex "[0:a]aformat=channel_layouts=mono,atrim=end=${BDTOOL_AUDIO_SPECTRUM_SECONDS},showspectrumpic=s=${BDTOOL_AUDIO_SPECTRUM_SIZE}:legend=disabled" \
+        -frames:v 1 "$out/频谱图.png" >/dev/null 2>&1; then
         hard_fail=1
       fi
     else

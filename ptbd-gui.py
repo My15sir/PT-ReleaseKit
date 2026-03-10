@@ -528,6 +528,9 @@ class App:
         self.config_vars = {}
         self.scan_items: list[dict] = []
         self.auto_start_after_scan = False
+        self.form_expanded = tk.BooleanVar(value=False)
+        self.summary_host_var = tk.StringVar(value="VPS：未配置")
+        self.summary_save_var = tk.StringVar(value="保存目录：未配置")
         self.path_tooltip: tk.Toplevel | None = None
         self.path_tooltip_label: tk.Label | None = None
         self.tooltip_item: str | None = None
@@ -545,7 +548,7 @@ class App:
 
         self.hero_canvas = tk.Canvas(
             container,
-            height=76,
+            height=64,
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
@@ -555,10 +558,25 @@ class App:
         self.hero_canvas.bind("<Configure>", self._on_hero_resize)
         self._render_hero_banner(888)
 
-        form_panel = ttk.LabelFrame(container, text="连接配置", style="Section.TLabelframe", padding=8)
-        form_panel.pack(fill=X, pady=(0, 8))
-        form = ttk.Frame(form_panel, style="Panel.TFrame", padding=10)
-        form.pack(fill=X)
+        form_panel = ttk.LabelFrame(container, text="连接与保存设置", style="Section.TLabelframe", padding=8)
+        form_panel.pack(fill=X, pady=(0, 6))
+        form_summary = ttk.Frame(form_panel, style="Panel.TFrame", padding=(10, 8))
+        form_summary.pack(fill=X)
+        form_summary.columnconfigure(0, weight=1)
+        ttk.Label(form_summary, textvariable=self.summary_host_var, style="Field.TLabel").grid(row=0, column=0, sticky=W)
+        ttk.Label(form_summary, textvariable=self.summary_save_var, style="PanelHint.TLabel").grid(
+            row=1, column=0, sticky=W, pady=(2, 0)
+        )
+        self.form_toggle_button = ttk.Button(
+            form_summary,
+            text="展开设置",
+            command=self.toggle_form_panel,
+            style="Action.TButton",
+        )
+        self.form_toggle_button.grid(row=0, column=1, rowspan=2, padx=(10, 0))
+
+        self.form_details = ttk.Frame(form_panel, style="Panel.TFrame", padding=10)
+        form = self.form_details
 
         self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4 或 ssh root@1.2.3.4")
         self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 1, "默认 22")
@@ -578,6 +596,7 @@ class App:
         save_path_row.grid(row=2, column=0, sticky="ew")
         save_path_row.columnconfigure(0, weight=1)
         variable = tk.StringVar()
+        variable.trace_add("write", lambda *_args: self.refresh_config_summary())
         self.config_vars["save_dir"] = variable
         entry = ttk.Entry(save_path_row, textvariable=variable, style="Cyber.TEntry")
         entry.grid(row=0, column=0, sticky="ew")
@@ -585,7 +604,7 @@ class App:
             row=0, column=1, padx=(8, 0)
         )
 
-        option_group = ttk.Frame(form, style="Panel.TFrame", padding=(12, 10))
+        option_group = ttk.Frame(form, style="Panel.TFrame", padding=(10, 8))
         option_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         option_group.columnconfigure(0, weight=1)
         ttk.Label(option_group, text="运行选项", style="Field.TLabel").grid(row=0, column=0, sticky=W)
@@ -607,19 +626,27 @@ class App:
 
         form.columnconfigure(0, weight=1, uniform="form")
         form.columnconfigure(1, weight=1, uniform="form")
+        self.toggle_form_panel(force=False)
 
         tips = ttk.Label(
             container,
             text=(
-                f"说明：当前优先走 {standalone_backend_label()}。空白 VPS 会先尝试自动装依赖，不够时才回退内置运行包。"
+                f"当前优先走 {standalone_backend_label()}。如果只是反复扫描和启动，通常不用一直展开上面的低频配置。"
             ),
             style="Hint.TLabel",
             wraplength=860,
             justify="left",
         )
-        tips.pack(anchor=W, pady=(0, 8))
+        tips.pack(anchor=W, pady=(0, 6))
 
-        actions = ttk.Frame(container, style="Toolbar.TFrame")
+        status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
+        status.pack(anchor=W, pady=(2, 8))
+
+        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=8)
+        scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
+        scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=8)
+        scan_body.pack(fill=BOTH, expand=True)
+        actions = ttk.Frame(scan_body, style="Toolbar.TFrame")
         actions.pack(fill=X, pady=(0, 8))
         primary_actions = ttk.Frame(actions, style="Panel.TFrame", padding=10)
         primary_actions.pack(side=LEFT, fill=X, expand=True)
@@ -661,18 +688,10 @@ class App:
             command=self.open_log_file,
             style="Action.TButton",
         ).pack(side=LEFT, padx=(8, 0))
-
-        status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
-        status.pack(anchor=W, pady=(2, 8))
-
-        scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=8)
-        scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
-        scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=8)
-        scan_body.pack(fill=BOTH, expand=True)
         scan_list = ttk.Frame(scan_body, style="Panel.TFrame")
         scan_list.pack(fill=BOTH, expand=True)
         columns = ("index", "type", "path")
-        self.scan_tree = ttk.Treeview(scan_list, columns=columns, show="headings", height=14, style="Cyber.Treeview")
+        self.scan_tree = ttk.Treeview(scan_list, columns=columns, show="headings", height=18, style="Cyber.Treeview")
         self.scan_tree.heading("index", text="#")
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
@@ -701,6 +720,7 @@ class App:
         self.scan_context_menu = tk.Menu(self.root, tearoff=0)
         self.scan_context_menu.add_command(label="复制路径", command=self.copy_selected_scan_path)
         self.scan_context_menu.add_command(label="查看完整路径", command=self.show_selected_scan_path_dialog)
+        self.scan_context_menu.add_command(label="直接启动这个条目", command=self.start_selected_scan_item)
 
         log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
         log_panel.pack(fill=BOTH, expand=False)
@@ -711,7 +731,7 @@ class App:
             log_body,
             wrap="word",
             font=("Consolas", 10),
-            height=8,
+            height=5,
             background="#f8fbff",
             foreground="#23314d",
             insertbackground="#4f7cff",
@@ -811,6 +831,7 @@ class App:
         ttk.Label(field, text=label_text, style="Field.TLabel").grid(row=0, column=0, sticky=W)
         variable = tk.StringVar()
         self.config_vars[key] = variable
+        variable.trace_add("write", lambda *_args: self.refresh_config_summary())
         entry = ttk.Entry(field, textvariable=variable, show=show or "", style="Cyber.TEntry")
         entry.grid(row=1, column=0, sticky="ew", pady=(4, 2))
         ttk.Label(
@@ -828,6 +849,25 @@ class App:
                 var.set(bool(value))
             elif var is not None:
                 var.set(str(value))
+        self.refresh_config_summary()
+
+    def refresh_config_summary(self) -> None:
+        host = self.config_vars.get("remote_host")
+        save_dir = self.config_vars.get("save_dir")
+        host_value = host.get().strip() if isinstance(host, tk.StringVar) else ""
+        save_value = save_dir.get().strip() if isinstance(save_dir, tk.StringVar) else ""
+        self.summary_host_var.set(f"VPS：{host_value or '未配置'}")
+        self.summary_save_var.set(f"保存目录：{save_value or default_save_dir()}")
+
+    def toggle_form_panel(self, force: bool | None = None) -> None:
+        expanded = self.form_expanded.get() if force is None else bool(force)
+        self.form_expanded.set(expanded)
+        if expanded:
+            self.form_details.pack(fill=X, pady=(8, 0))
+            self.form_toggle_button.configure(text="收起设置")
+        else:
+            self.form_details.pack_forget()
+            self.form_toggle_button.configure(text="展开设置")
 
     def form_data(self) -> dict:
         return {
@@ -872,12 +912,14 @@ class App:
             return False
         self.status_var.set(f"已保存配置：{CONFIG_PATH}")
         self.append_log(f"[gui] 配置已保存到 {CONFIG_PATH}")
+        self.refresh_config_summary()
         return True
 
     def pick_save_dir(self) -> None:
         chosen = filedialog.askdirectory(initialdir=self.config_vars["save_dir"].get() or default_save_dir())
         if chosen:
             self.config_vars["save_dir"].set(chosen)
+            self.refresh_config_summary()
 
     def open_config_dir(self) -> None:
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -1290,6 +1332,13 @@ class App:
         if not selected_path:
             return
         self.show_full_path_dialog(selected_path)
+
+    def start_selected_scan_item(self) -> None:
+        selected_path = self.selected_scan_item_path()
+        if not selected_path:
+            return
+        self.hide_path_tooltip()
+        self.start_remote()
 
     def hide_path_tooltip(self, _event=None) -> None:
         if self.tooltip_after_id:

@@ -82,6 +82,8 @@ fi
 
 APP_NAME="bdtool"
 BT_VERSION="${BT_VERSION:-0.1.0}"
+: "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
+: "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 bt_die() { die "$*"; }
 bt_log() {
@@ -482,7 +484,10 @@ bt_make_audio_spectrum() {
   local info_dir="$2"
   bt_need_cmd ffmpeg
   mkdir -p "$info_dir"
-  execute_with_spinner "生成频谱图" ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" -lavfi "showspectrumpic=s=1600x900:legend=disabled" -frames:v 1 "$info_dir/频谱图.png" || bt_die "频谱图生成失败：$audio"
+  execute_with_spinner "生成频谱图" \
+    ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" \
+    -filter_complex "[0:a]aformat=channel_layouts=mono,atrim=end=${BDTOOL_AUDIO_SPECTRUM_SECONDS},showspectrumpic=s=${BDTOOL_AUDIO_SPECTRUM_SIZE}:legend=disabled" \
+    -frames:v 1 "$info_dir/频谱图.png" || bt_die "频谱图生成失败：$audio"
 }
 
 bt_finalize_audio_artifacts() {
