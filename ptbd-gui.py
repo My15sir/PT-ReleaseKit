@@ -654,7 +654,7 @@ class App:
         tips.pack(anchor=W, pady=(0, 6))
 
         status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
-        status.pack(anchor=W, pady=(2, 8))
+        status.pack(anchor=W, pady=(2, 12))
 
         scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=0)
         scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
