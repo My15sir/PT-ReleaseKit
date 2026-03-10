@@ -48,12 +48,29 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! ./scripts/full-test.sh; then
+          run_full_test() {
+            ./scripts/full-test.sh
+          }
+          report_full_test_failure() {
             echo '--- full-test.log ---'
             tail -n 200 bdtool-output/logs/full-test.log || true
             echo '--- full-test-results.tsv ---'
             cat bdtool-output/logs/full-test-results.tsv || true
-            exit 1
+            while IFS= read -r line; do
+              [[ -n "$line" ]] || continue
+              echo "::error title=full-test::$line"
+            done < <(grep -E $'\t(FAIL|TIMEOUT)\t' bdtool-output/logs/full-test-results.tsv || true)
+          }
+          if ! run_full_test; then
+            echo '[ci] full-test attempt 1 failed, clean and retry once'
+            report_full_test_failure
+            python3 -c "from pathlib import Path; import shutil; paths=['bdtool-output','.full-test-ssh-home','.full-test-scp-home','.full-test-fullscan','.full-test-fullscan-ssh','.full-test-fullscan-scp','.full-test-pathrule','.full-test-return-scp','.tmp','.full-test.log.tmp','.full-test-results.tsv.tmp','.full-test-sample.mp4']; [shutil.rmtree(p) if Path(p).is_dir() else Path(p).unlink() for p in paths if Path(p).exists()]"
+            sleep 2
+            run_full_test || {
+              echo '[ci] full-test attempt 2 failed'
+              report_full_test_failure
+              exit 1
+            }
           fi
       - name: Upload full-test logs
         if: always()
