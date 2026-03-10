@@ -74,7 +74,7 @@ if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
   echo "  bdtool --help" >&2
   exit 1
 fi
-# shellcheck source=lib/ui.sh
+# shellcheck disable=SC1091
 source "$ROOT_DIR/lib/ui.sh"
 setup_bundle_runtime "$ROOT_DIR"
 
@@ -1198,7 +1198,6 @@ post_process_item() {
       return 0
       ;;
   esac
-  return 0
 }
 
 handle_multi_select() {

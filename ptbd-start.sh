@@ -60,7 +60,7 @@ SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 APP_ROOT="$(find_app_root "$SCRIPT_DIR" || true)"
 if [[ -n "$APP_ROOT" && -f "$APP_ROOT/lib/ui.sh" ]]; then
-  # shellcheck source=lib/ui.sh
+  # shellcheck disable=SC1091
   source "$APP_ROOT/lib/ui.sh"
   setup_bundle_runtime "$APP_ROOT"
 fi

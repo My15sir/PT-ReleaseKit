@@ -53,7 +53,7 @@ BT_SCRIPT_PATH="$(bt_resolve_script_path "${BASH_SOURCE[0]}")"
 BT_SCRIPT_DIR="$(cd -P "$(dirname "$BT_SCRIPT_PATH")" && pwd)"
 BDTOOL_ROOT="$(bt_find_app_root "$BT_SCRIPT_DIR" || true)"
 if [[ -n "$BDTOOL_ROOT" && -f "$BDTOOL_ROOT/lib/ui.sh" ]]; then
-  # shellcheck source=lib/ui.sh
+  # shellcheck disable=SC1091
   source "$BDTOOL_ROOT/lib/ui.sh"
   setup_bundle_runtime "$BDTOOL_ROOT"
 else
