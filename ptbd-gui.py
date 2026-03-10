@@ -31,13 +31,24 @@ HEADER_TEXT_INSET_X = 16
 
 
 class _RoundButtonHandle:
-    def __init__(self, canvas: tk.Canvas, text_id: int) -> None:
+    def __init__(self, canvas: tk.Canvas, icon_id: int | None, label_id: int) -> None:
         self.canvas = canvas
-        self.text_id = text_id
+        self.icon_id = icon_id
+        self.label_id = label_id
 
     def configure(self, **kwargs) -> None:
         if "text" in kwargs:
-            self.canvas.itemconfigure(self.text_id, text=kwargs["text"])
+            icon, label = split_button_text(kwargs["text"])
+            if self.icon_id is not None:
+                self.canvas.itemconfigure(self.icon_id, text=icon or "")
+            self.canvas.itemconfigure(self.label_id, text=label)
+
+
+def split_button_text(text: str) -> tuple[str | None, str]:
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return None, text.strip()
 
 
 def resolve_script_path(path: str) -> Path:
@@ -606,9 +617,9 @@ class App:
         )
         summary_actions = ttk.Frame(form_summary, style="Panel.TFrame")
         summary_actions.grid(row=0, column=1, rowspan=2, padx=(10, 0), sticky="e")
-        self._pack_round_button(summary_actions, "▣ 保存", self.save_form, variant="action", width=8)
+        self._pack_round_button(summary_actions, "□ 保存", self.save_form, variant="action", width=8)
         self._pack_round_button(summary_actions, "⌂ 配置", self.open_config_dir, variant="action", width=8, padx=(8, 0))
-        self._pack_round_button(summary_actions, "≡ 日志", self.open_log_file, variant="action", width=8, padx=(8, 0))
+        self._pack_round_button(summary_actions, "≣ 日志", self.open_log_file, variant="action", width=8, padx=(8, 0))
         self.form_toggle_button_shell = tk.Frame(form_summary, bg="#ffffff")
         self.form_toggle_button_shell.grid(row=0, column=2, rowspan=2, padx=(10, 0))
         self.form_toggle_button = self._pack_round_button(
@@ -705,7 +716,7 @@ class App:
         primary_actions.pack(fill=X, expand=True)
         self._pack_round_button(primary_actions, "⌕ 扫描", self.scan_remote, variant="primary", width=8)
         self._pack_round_button(primary_actions, "▷ 启动", self.start_remote, variant="accent", width=8, padx=(10, 0))
-        self._pack_round_button(primary_actions, "□ 停止", self.stop_remote, variant="danger", width=8, padx=(10, 0))
+        self._pack_round_button(primary_actions, "▢ 停止", self.stop_remote, variant="danger", width=8, padx=(10, 0))
         ttk.Label(
             primary_actions,
             text="提示：左侧勾选即可多选",
@@ -981,6 +992,7 @@ class App:
         padx: tuple[int, int] | None = None,
     ):
         fill, hover, fg, outline = self._button_palette(variant)
+        icon_text, label_text = split_button_text(text)
         try:
             parent_bg = str(parent.cget("background"))
         except Exception:
@@ -999,11 +1011,21 @@ class App:
             pack_kwargs["padx"] = padx
         shell.pack(**pack_kwargs)
         shell.configure(cursor="hand2")
-        text_id = shell.create_text(
-            14,
+        icon_id = None
+        if icon_text:
+            icon_id = shell.create_text(
+                16,
+                19,
+                anchor="w",
+                text=icon_text,
+                fill=fg,
+                font=("Arial", 8, "bold"),
+            )
+        label_id = shell.create_text(
+            30 if icon_text else 14,
             19,
             anchor="w",
-            text=text,
+            text=label_text,
             fill=fg,
             font=("Arial", 9, "bold"),
         )
@@ -1025,7 +1047,9 @@ class App:
                 tags="btn-bg",
             )
             shell.tag_lower("btn-bg")
-            shell.coords(text_id, 14, height_px / 2)
+            if icon_id is not None:
+                shell.coords(icon_id, 16, height_px / 2)
+            shell.coords(label_id, 30 if icon_text else 14, height_px / 2)
 
         def on_enter(_event=None) -> None:
             shell.delete("btn-bg")
@@ -1053,11 +1077,12 @@ class App:
         shell.bind("<Enter>", on_enter)
         shell.bind("<Leave>", on_leave)
         shell.bind("<Button-1>", on_click)
-        shell.tag_bind(text_id, "<Enter>", on_enter)
-        shell.tag_bind(text_id, "<Leave>", on_leave)
-        shell.tag_bind(text_id, "<Button-1>", on_click)
+        for item_id in [item for item in (icon_id, label_id) if item is not None]:
+            shell.tag_bind(item_id, "<Enter>", on_enter)
+            shell.tag_bind(item_id, "<Leave>", on_leave)
+            shell.tag_bind(item_id, "<Button-1>", on_click)
         shell.after_idle(redraw)
-        return _RoundButtonHandle(shell, text_id)
+        return _RoundButtonHandle(shell, icon_id, label_id)
 
     def _render_hero_banner(self, width: int) -> None:
         width = max(width, 420)
