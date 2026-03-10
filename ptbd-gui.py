@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from tkinter import BOTH, END, LEFT, W, X, filedialog, messagebox, ttk
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter.scrolledtext import ScrolledText
 
 from ptbd_remote_backend import (
@@ -527,6 +528,11 @@ class App:
         self.config_vars = {}
         self.scan_items: list[dict] = []
         self.auto_start_after_scan = False
+        self.path_tooltip: tk.Toplevel | None = None
+        self.path_tooltip_label: tk.Label | None = None
+        self.tooltip_item: str | None = None
+        self.tooltip_after_id: str | None = None
+        self.tree_font = tkfont.nametofont("TkDefaultFont")
         self._build_ui()
         self._load_into_form(load_config())
         self._poll_logs()
@@ -680,9 +686,12 @@ class App:
         scan_scrollbar_x.pack(fill=X, pady=(8, 0))
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
         self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
+        self.scan_tree.bind("<Motion>", self.on_scan_tree_hover)
+        self.scan_tree.bind("<Leave>", self.hide_path_tooltip)
+        self.scan_tree.bind("<ButtonPress-1>", self.hide_path_tooltip)
         ttk.Label(
             scan_body,
-            text="路径列支持横向滚动。双击条目可直接启动处理。",
+            text="路径列支持横向滚动。悬停可预览完整路径，双击会弹窗显示完整路径。",
             style="PanelHint.TLabel",
         ).pack(anchor=W, pady=(6, 2))
         ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
@@ -1246,9 +1255,77 @@ class App:
             return ""
         return str(values[2]).strip()
 
+    def hide_path_tooltip(self, _event=None) -> None:
+        if self.tooltip_after_id:
+            self.root.after_cancel(self.tooltip_after_id)
+            self.tooltip_after_id = None
+        if self.path_tooltip is not None:
+            self.path_tooltip.destroy()
+            self.path_tooltip = None
+            self.path_tooltip_label = None
+        self.tooltip_item = None
+
+    def show_path_tooltip(self, text: str, x: int, y: int, item_id: str) -> None:
+        self.hide_path_tooltip()
+        tooltip = tk.Toplevel(self.root)
+        tooltip.wm_overrideredirect(True)
+        tooltip.wm_geometry(f"+{x}+{y}")
+        tooltip.configure(bg="#c7d8fb")
+        label = tk.Label(
+            tooltip,
+            text=text,
+            background="#f7fbff",
+            foreground="#23314d",
+            justify="left",
+            padx=10,
+            pady=6,
+            font=("Consolas", 9),
+            borderwidth=0,
+        )
+        label.pack()
+        self.path_tooltip = tooltip
+        self.path_tooltip_label = label
+        self.tooltip_item = item_id
+
+    def on_scan_tree_hover(self, event) -> None:
+        region = self.scan_tree.identify("region", event.x, event.y)
+        column = self.scan_tree.identify_column(event.x)
+        item_id = self.scan_tree.identify_row(event.y)
+        if region != "cell" or column != "#3" or not item_id:
+            self.hide_path_tooltip()
+            return
+        values = self.scan_tree.item(item_id, "values")
+        if not values or len(values) < 3:
+            self.hide_path_tooltip()
+            return
+        full_path = str(values[2]).strip()
+        bbox = self.scan_tree.bbox(item_id, column)
+        if not bbox:
+            self.hide_path_tooltip()
+            return
+        text_width = self.tree_font.measure(full_path)
+        visible_width = max(bbox[2] - 12, 0)
+        if text_width <= visible_width:
+            self.hide_path_tooltip()
+            return
+        if self.tooltip_item == item_id and self.path_tooltip is not None:
+            return
+
+        x = self.scan_tree.winfo_rootx() + min(event.x + 18, self.scan_tree.winfo_width() - 80)
+        y = self.scan_tree.winfo_rooty() + event.y + 22
+
+        if self.tooltip_after_id:
+            self.root.after_cancel(self.tooltip_after_id)
+        self.tooltip_after_id = self.root.after(
+            250,
+            lambda: self.show_path_tooltip(full_path, x, y, item_id),
+        )
+
     def on_scan_double_click(self, _event=None) -> None:
-        if self.current_selected_path():
-            self.start_remote()
+        selected_path = self.current_selected_path()
+        if selected_path:
+            self.hide_path_tooltip()
+            messagebox.showinfo("完整路径", selected_path)
 
     def _start_reader(self, proc: subprocess.Popen[str]) -> None:
         def read_stream() -> None:
