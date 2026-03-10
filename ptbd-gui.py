@@ -480,7 +480,7 @@ class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("PT-BDtool 小白启动器")
-        self.root.geometry("920x720")
+        self.root.geometry("920x760")
         self.root.minsize(920, 720)
         self.process: subprocess.Popen[str] | None = None
         self.reader_threads: list[threading.Thread] = []
@@ -503,67 +503,61 @@ class App:
 
         self.hero_canvas = tk.Canvas(
             container,
-            height=116,
+            height=76,
             highlightthickness=0,
             borderwidth=0,
             relief="flat",
             background="#eef3ff",
         )
-        self.hero_canvas.pack(fill=X, pady=(0, 12))
+        self.hero_canvas.pack(fill=X, pady=(0, 8))
         self.hero_canvas.bind("<Configure>", self._on_hero_resize)
         self._render_hero_banner(888)
 
         form_panel = ttk.LabelFrame(container, text="连接配置", style="Section.TLabelframe", padding=8)
-        form_panel.pack(fill=X, pady=(0, 10))
-        form = ttk.Frame(form_panel, style="Panel.TFrame", padding=12)
+        form_panel.pack(fill=X, pady=(0, 8))
+        form = ttk.Frame(form_panel, style="Panel.TFrame", padding=10)
         form.pack(fill=X)
 
-        self._add_entry(form, "VPS 地址", "remote_host", 0, "例如：root@1.2.3.4，也支持直接粘贴 ssh root@1.2.3.4")
-        self._add_entry(form, "SSH 端口", "remote_port", 1, "默认 22")
-        self._add_entry(form, "SSH 密码", "remote_password", 2, "留空表示走密钥", show="*")
-        self._add_entry(form, "远端命令", "remote_cmd", 3, "源码旧模式才需要，一般别改")
-        self._add_entry(form, "扫描白名单", "scan_include", 4, "留空=自动扫描 /home /root /data /mnt /media /srv")
-        self._add_entry(form, "额外排除", "scan_exclude", 5, "可留空")
-        self._add_entry(form, "本机保存目录", "save_dir", 6, "结果回到本机这里")
+        self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4 或 ssh root@1.2.3.4")
+        self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 3, "默认 22")
+        self._add_compact_entry(form, "SSH 密码", "remote_password", 1, 0, "留空表示走密钥", show="*")
+        self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 3, "源码旧模式才需要")
+        self._add_compact_entry(form, "扫描白名单", "scan_include", 2, 0, "留空=自动扫描常见媒体目录")
+        self._add_compact_entry(form, "额外排除", "scan_exclude", 2, 3, "可留空")
+        self._add_wide_entry(form, "本机保存目录", "save_dir", 3, "结果回到本机这里")
 
         save_row = ttk.Frame(form, style="Panel.TFrame")
-        save_row.grid(row=7, column=1, sticky="ew", pady=(2, 8))
+        save_row.grid(row=4, column=1, columnspan=5, sticky="ew", pady=(2, 0))
         ttk.Button(save_row, text="选择目录", command=self.pick_save_dir, style="Action.TButton").pack(side=LEFT)
         self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             save_row,
             text="成功后自动清理 VPS 生成目录",
             variable=self.config_vars["auto_cleanup"],
-        ).pack(side=LEFT, padx=(12, 0))
+        ).pack(side=LEFT, padx=(10, 0))
         self.config_vars["remote_bootstrap"] = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             save_row,
             text="空白 VPS 自动上传运行包（推荐）",
             variable=self.config_vars["remote_bootstrap"],
-        ).pack(side=LEFT, padx=(12, 0))
+        ).pack(side=LEFT, padx=(10, 0))
 
-        form.columnconfigure(1, weight=1)
-
-        tips_panel = ttk.LabelFrame(container, text="运行说明", style="Section.TLabelframe", padding=8)
-        tips_panel.pack(fill=X, pady=(0, 10))
-        tips_body = ttk.Frame(tips_panel, style="Panel.TFrame", padding=12)
-        tips_body.pack(fill=X)
+        form.columnconfigure(1, weight=3)
+        form.columnconfigure(4, weight=2)
 
         tips = ttk.Label(
-            tips_body,
+            container,
             text=(
-                f"说明：当前优先走 {standalone_backend_label()}。打包后的 Windows / macOS 独立版不再依赖本机 Python、Git、bash、ssh；"
-                "源码直跑时若缺少内置后端，才会回退旧版 shell 模式。空白 VPS 会优先尝试 Debian / Ubuntu / Alpine 自动装依赖，"
-                "只有不够时才回退内置运行包。"
+                f"说明：当前优先走 {standalone_backend_label()}。空白 VPS 会先尝试自动装依赖，不够时才回退内置运行包。"
             ),
-            style="Tips.TLabel",
-            wraplength=840,
+            style="Hint.TLabel",
+            wraplength=860,
             justify="left",
         )
-        tips.pack(anchor=W)
+        tips.pack(anchor=W, pady=(0, 8))
 
-        actions = ttk.Frame(container, style="Panel.TFrame", padding=12)
-        actions.pack(fill=X, pady=(0, 10))
+        actions = ttk.Frame(container, style="Panel.TFrame", padding=10)
+        actions.pack(fill=X, pady=(0, 8))
         ttk.Button(actions, text="保存配置", command=self.save_form, style="Action.TButton").pack(side=LEFT)
         ttk.Button(
             actions,
@@ -597,34 +591,40 @@ class App:
         ).pack(side=LEFT, padx=(8, 0))
 
         status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
-        status.pack(anchor=W, pady=(4, 8))
+        status.pack(anchor=W, pady=(2, 8))
 
         scan_panel = ttk.LabelFrame(container, text="VPS 候选列表（新接口预览）", style="Section.TLabelframe", padding=8)
-        scan_panel.pack(fill=BOTH, expand=False, pady=(0, 10))
+        scan_panel.pack(fill=BOTH, expand=True, pady=(0, 8))
         scan_body = ttk.Frame(scan_panel, style="Panel.TFrame", padding=8)
         scan_body.pack(fill=BOTH, expand=True)
+        scan_list = ttk.Frame(scan_body, style="Panel.TFrame")
+        scan_list.pack(fill=BOTH, expand=True)
         columns = ("index", "type", "path")
-        self.scan_tree = ttk.Treeview(scan_body, columns=columns, show="headings", height=8, style="Cyber.Treeview")
+        self.scan_tree = ttk.Treeview(scan_list, columns=columns, show="headings", height=14, style="Cyber.Treeview")
         self.scan_tree.heading("index", text="#")
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
         self.scan_tree.column("index", width=56, anchor="center")
         self.scan_tree.column("type", width=90, anchor="center")
         self.scan_tree.column("path", width=720, anchor="w")
-        self.scan_tree.pack(fill=BOTH, expand=True)
+        scan_scrollbar = ttk.Scrollbar(scan_list, orient="vertical", command=self.scan_tree.yview)
+        self.scan_tree.configure(yscrollcommand=scan_scrollbar.set)
+        self.scan_tree.pack(side=LEFT, fill=BOTH, expand=True)
+        scan_scrollbar.pack(side=LEFT, fill="y", padx=(6, 0))
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
         self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
         ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(6, 0))
 
         log_panel = ttk.LabelFrame(container, text="运行日志", style="Section.TLabelframe", padding=8)
-        log_panel.pack(fill=BOTH, expand=True)
-        log_body = ttk.Frame(log_panel, style="Panel.TFrame", padding=10)
+        log_panel.pack(fill=BOTH, expand=False)
+        log_body = ttk.Frame(log_panel, style="Panel.TFrame", padding=8)
         log_body.pack(fill=BOTH, expand=True)
 
         self.log_view = ScrolledText(
             log_body,
             wrap="word",
             font=("Consolas", 10),
+            height=8,
             background="#f8fbff",
             foreground="#23314d",
             insertbackground="#4f7cff",
@@ -669,27 +669,27 @@ class App:
             self.hero_canvas.create_rectangle(x0, 0, x1 + 1, height, outline="", fill=color)
         self.hero_canvas.create_rectangle(0, height - 22, width, height, outline="", fill="#edf4ff")
         self.hero_canvas.create_text(
-            22,
-            22,
+            18,
+            14,
             anchor="nw",
             text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
             fill="#ffffff",
-            font=("Arial", 16, "bold"),
+            font=("Arial", 14, "bold"),
         )
         self.hero_canvas.create_text(
-            22,
-            54,
+            18,
+            38,
             anchor="nw",
-            width=max(width - 44, 180),
-            text="第一次填好 VPS 和保存目录。扫描目录留空时，会自动优先扫常见媒体目录；扫到候选后可直接双击开跑。",
+            width=max(width - 36, 180),
+            text="先填 VPS 和保存目录，再扫描候选。列表区已放大，优先双击条目直接开跑。",
             fill="#eef5ff",
-            font=("Arial", 10),
+            font=("Arial", 9),
         )
         self.hero_canvas.create_text(
-            width - 22,
+            width - 18,
             height - 11,
             anchor="e",
-            text="渐变风格界面",
+            text="紧凑布局",
             fill="#4c6dcf",
             font=("Arial", 9, "bold"),
         )
@@ -704,6 +704,35 @@ class App:
         entry = ttk.Entry(parent, textvariable=variable, show=show or "", style="Cyber.TEntry")
         entry.grid(row=row, column=1, sticky="ew", pady=4)
         ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
+
+    def _add_compact_entry(
+        self,
+        parent,
+        label_text: str,
+        key: str,
+        row: int,
+        column: int,
+        hint: str,
+        show: str | None = None,
+    ) -> None:
+        ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=column, sticky=W, padx=(0, 8), pady=3)
+        variable = tk.StringVar()
+        self.config_vars[key] = variable
+        entry = ttk.Entry(parent, textvariable=variable, show=show or "", style="Cyber.TEntry")
+        entry.grid(row=row, column=column + 1, sticky="ew", pady=3)
+        ttk.Label(
+            parent,
+            text=hint,
+            style="Hint.TLabel",
+        ).grid(row=row, column=column + 2, sticky=W, padx=(8, 12 if column == 0 else 0), pady=3)
+
+    def _add_wide_entry(self, parent, label_text: str, key: str, row: int, hint: str) -> None:
+        ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 8), pady=3)
+        variable = tk.StringVar()
+        self.config_vars[key] = variable
+        entry = ttk.Entry(parent, textvariable=variable, style="Cyber.TEntry")
+        entry.grid(row=row, column=1, columnspan=4, sticky="ew", pady=3)
+        ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=5, sticky=W, padx=(8, 0), pady=3)
 
     def _load_into_form(self, data: dict) -> None:
         for key, value in data.items():

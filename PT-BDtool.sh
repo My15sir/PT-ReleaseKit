@@ -32,22 +32,40 @@ show_error() {
   printf '[ERROR] %s\n' "$message" >&2
 }
 
-run_with_python() {
-  local py_cmd="$1"
-  shift || true
-  command -v "$py_cmd" >/dev/null 2>&1 || return 1
-  [[ -f "$SCRIPT_DIR/ptbd-gui.py" ]] || return 1
-  if ! "$py_cmd" -c "import tkinter" >/dev/null 2>&1; then
-    show_error "检测到 Python，但缺少 tkinter 图形组件。Linux 常见修复是安装 python3-tk 后再重试。"
-    exit 1
-  fi
-  exec "$py_cmd" "$SCRIPT_DIR/ptbd-gui.py" "$@"
-}
-
 SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+GUI_LAUNCHER="$SCRIPT_DIR/ptbd-gui"
+CLI_LAUNCHER="$SCRIPT_DIR/ptbd-start.sh"
 
-run_with_python python3 "$@" || true
-run_with_python python "$@" || true
-show_error "找不到可用的 Python 解释器或 ptbd-gui.py。请确认你是在完整的 PT-BDtool 目录里运行，并且本机已安装 Python 3。"
+case "${1:-}" in
+  -h|--help|help)
+    cat <<'EOF'
+Usage:
+  ./PT-BDtool.sh
+  ./PT-BDtool.sh --self-check
+
+What it does:
+  - Prefer the GUI launcher in this directory
+  - Fallback to the CLI launcher when GUI wrapper is missing
+EOF
+    exit 0
+    ;;
+  --self-check)
+    printf 'script=%s\n' "$SCRIPT_PATH"
+    printf 'script_dir=%s\n' "$SCRIPT_DIR"
+    printf 'gui_launcher=%s\n' "$GUI_LAUNCHER"
+    printf 'cli_launcher=%s\n' "$CLI_LAUNCHER"
+    exit 0
+    ;;
+esac
+
+if [[ -x "$GUI_LAUNCHER" ]]; then
+  exec "$GUI_LAUNCHER" "$@"
+fi
+
+if [[ -x "$CLI_LAUNCHER" ]]; then
+  exec "$CLI_LAUNCHER" "$@"
+fi
+
+show_error "找不到 PT-BDtool 启动文件。请确认你是在完整的 PT-BDtool 目录里运行。"
 exit 1

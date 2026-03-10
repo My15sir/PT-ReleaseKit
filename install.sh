@@ -58,6 +58,7 @@ preflight_install_context() {
     "$SCRIPT_DIR/ptbd-start.sh"
     "$SCRIPT_DIR/ptbd-remote.sh"
     "$SCRIPT_DIR/ptbd-remote-start.sh"
+    "$SCRIPT_DIR/PT-BDtool.sh"
     "$SCRIPT_DIR/PT-BDtool.desktop"
     "$SCRIPT_DIR/PT-BDtool.command"
     "$SCRIPT_DIR/PT-BDtool.bat"
@@ -269,6 +270,7 @@ post_install_self_check() {
     "$install_root/ptbd-start.sh"
     "$install_root/ptbd-remote.sh"
     "$install_root/ptbd-remote-start.sh"
+    "$install_root/PT-BDtool.sh"
     "$install_root/lib/ui.sh"
     "$install_root/scripts/remote-upload-server.py"
     "$install_root/third_party/bundle/linux-amd64/bin/ffmpeg"
@@ -348,6 +350,10 @@ post_install_self_check() {
   fi
   if ! "$install_root/ptbd-start.sh" --help >/dev/null 2>&1; then
     err "self-check failed: $install_root/ptbd-start.sh --help"
+    fail=1
+  fi
+  if ! "$install_root/PT-BDtool.sh" --help >/dev/null 2>&1; then
+    err "self-check failed: $install_root/PT-BDtool.sh --help"
     fail=1
   fi
   if ! PATH="$self_check_path" "$bin_dir/bdtool" --help >/dev/null 2>&1; then
@@ -553,6 +559,7 @@ copy_if_changed "$SCRIPT_DIR/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd_remote_
 copy_if_changed "$SCRIPT_DIR/ptbd-start.sh" "$INSTALL_ROOT/ptbd-start.sh" "ptbd-start.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote.sh" "ptbd-remote.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote-start.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "ptbd-remote-start.sh"
+copy_if_changed "$SCRIPT_DIR/PT-BDtool.sh" "$INSTALL_ROOT/PT-BDtool.sh" "PT-BDtool.sh"
 copy_if_changed "$SCRIPT_DIR/install.sh" "$INSTALL_ROOT/install.sh" "install.sh"
 copy_if_changed "$SCRIPT_DIR/PT-BDtool.command" "$INSTALL_ROOT/PT-BDtool.command" "PT-BDtool.command"
 copy_if_changed "$SCRIPT_DIR/PT-BDtool.bat" "$INSTALL_ROOT/PT-BDtool.bat" "PT-BDtool.bat"
@@ -570,7 +577,7 @@ fi
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
 copy_if_changed "$SCRIPT_DIR/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "scripts/prepare-remote-runtime.sh"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/PT-BDtool.command" 2>/dev/null || true
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/PT-BDtool.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/PT-BDtool.command" 2>/dev/null || true
 if [[ -f "$INSTALL_ROOT/scripts/ensure-bundle.py" ]]; then
   chmod +x "$INSTALL_ROOT/scripts/ensure-bundle.py"
 fi
@@ -594,7 +601,7 @@ Version=1.0
 Type=Application
 Name=PT-BDtool
 Comment=Beginner-friendly PT-BDtool GUI launcher
-Exec=$bin_dir/ptbd-gui
+Exec=$install_root/PT-BDtool.sh
 Terminal=false
 StartupNotify=true
 Categories=Utility;

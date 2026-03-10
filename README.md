@@ -2,44 +2,112 @@
 
 PT-BDtool 是一个给 PT 用户整理发种素材的小工具。
 
-它做的事很直接：
+它会尽量把这几步串起来：
 
-- 连到你的 VPS
-- 扫描视频、音频、`BDMV`、`ISO`
-- 自动生成截图和媒体信息
-- 把结果打包下载回你的电脑
-- 按设置自动清理 VPS 上这次生成的临时结果
+1. 连接你的 VPS
+2. 扫描视频 / 音频 / `BDMV` / `ISO`
+3. 生成截图和媒体信息
+4. 打包结果
+5. 下载回你的电脑
+6. 按设置清理 VPS 上这次生成的临时结果
 
-你如果只是想用，**不要下载源码，直接下载成品便携包**。
+## 先分清两种用法
 
-## 下载
+### 1. 普通用户
 
-发布页：
+如果你只是想直接用，**不要把当前源码仓库当成成品包**。
+
+请去发布页下载便携版：
 
 - `https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest`
 
 按系统下载：
 
-- Windows：`PT-BDtool-windows-portable.zip`
-- macOS：`PT-BDtool-macos-portable.zip`
-- Linux：`PT-BDtool-linux-portable.tar.gz`
+- Windows: `PT-BDtool-windows-portable.zip`
+- macOS: `PT-BDtool-macos-portable.zip`
+- Linux: `PT-BDtool-linux-portable.tar.gz`
 
-## 安装前先准备
+发布包里才会有：
 
-先准备好这几样：
+- Windows 的 `PT-BDtool.exe`
+- macOS 的 `PT-BDtool.app`
+- Linux 适合双击的启动文件
 
-- 一台能 SSH 登录的 VPS
-- VPS 上已经放好你要处理的视频 / 音频 / `BDMV` / `ISO`
-- VPS 的 IP、端口、密码
-- 电脑上一个你想保存结果的目录
+### 2. 当前这个仓库
+
+当前仓库是源码目录，不是 Windows / macOS 成品目录。
+
+所以你在这里看不到：
+
+- `PT-BDtool.exe`
+- `PT-BDtool.app`
+
+如果你是在当前源码目录里直接运行，请按下面的“源码仓库怎么跑”操作。
+
+## 这个项目真实怎么运行
+
+### 实际入口
+
+- Linux 图形入口：`./PT-BDtool.sh`
+- 通用 GUI 包装：`./ptbd-gui`
+- 新手模式入口：`./ptbd`
+- 远端 shell 流程：`./ptbd-remote.sh`
+- 本地 CLI 菜单：`./ptbd-start.sh`
+
+### 实际本地依赖
+
+源码直跑时，至少需要这些：
+
+- `bash`
+- `python3`
+- `ssh`
+
+如果你要跑图形界面，还需要：
+
+- `tkinter`
 
 说明：
 
-- 远端 VPS 现在优先支持 `Debian` / `Ubuntu` / `Alpine`
-- 程序会先尝试自动安装远端依赖
-- 只有自动安装不够时，才会上传或下载 Linux 兜底运行包
+- `paramiko` 有就走内置 Python 后端
+- 没有 `paramiko` 时，GUI 会回退旧版 shell 后端
+- 所以 `paramiko` 不是必装项，但 `python3` 和 `tkinter` 对源码 GUI 很关键
 
-## Windows 怎么用
+Linux 上如果 GUI 启动时报缺少 `tkinter`，常见修复是安装 `python3-tk`。
+
+### 远端 VPS 真实依赖
+
+VPS 主流程至少依赖：
+
+- `tar`
+- `bash`
+- `python3`
+- `curl`
+- `ffmpeg`
+- `ffprobe`
+- `mediainfo`
+
+程序会优先尝试在 VPS 上自动安装这些依赖。
+
+当前自动安装优先支持：
+
+- `Debian`
+- `Ubuntu`
+- `Alpine`
+
+如果自动安装还是不够，才会回退上传内置 Linux 运行包。
+
+## 安装前先准备什么
+
+无论你是用发布包还是源码，至少要准备：
+
+- 一台能 SSH 登录的 VPS
+- VPS 上已经放好你要处理的视频 / 音频 / `BDMV` / `ISO`
+- VPS 的 IP、端口、账号和密码，或者可用的 SSH 密钥
+- 你电脑上的一个结果保存目录
+
+## 普通用户怎么用发布包
+
+### Windows
 
 1. 下载 `PT-BDtool-windows-portable.zip`
 2. 解压
@@ -47,10 +115,10 @@ PT-BDtool 是一个给 PT 用户整理发种素材的小工具。
 
 如果被系统拦住：
 
-- 点 `更多信息`
-- 再点 `仍要运行`
+- 点“更多信息”
+- 再点“仍要运行”
 
-## macOS 怎么用
+### macOS
 
 1. 下载 `PT-BDtool-macos-portable.zip`
 2. 解压
@@ -59,132 +127,193 @@ PT-BDtool 是一个给 PT 用户整理发种素材的小工具。
 如果第一次打不开：
 
 - 右键 `PT-BDtool.app`
-- 点一次 `打开`
+- 点一次“打开”
 - 按系统提示继续
 
-## Linux 怎么用
+### Linux
 
 1. 下载 `PT-BDtool-linux-portable.tar.gz`
 2. 解压
-3. 优先双击 `PT-BDtool.desktop`
-4. 如果桌面文件不生效，再双击 `启动PT-BDtool.sh`
+3. 先双击 `PT-BDtool.desktop`
+4. 如果桌面文件不生效，再双击 `PT-BDtool.sh`
 
 如果提示没权限，先在终端执行：
 
 ```bash
-chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool
+chmod +x PT-BDtool.sh PT-BDtool.command ptbd-gui ptbd-start.sh
 ```
 
-Linux 便携版说明：
+## 源码仓库怎么跑
 
-- 配置文件优先保存在程序同目录
-- 日志文件也优先保存在程序同目录
-- 常见文件名就是 `PT-BDtool-config.json` 和 `PT-BDtool.log`
+如果你当前就在这个仓库目录里：
 
-## 第一次打开后怎么配置
+### Linux
 
-打开程序后，先填这些：
+优先执行：
 
-- VPS 地址，例如 `root@1.2.3.4`
-- SSH 端口，默认一般是 `22`
-- SSH 密码
-- 本机保存目录
+```bash
+./PT-BDtool.sh
+```
+
+如果你只想走命令行菜单：
+
+```bash
+./ptbd
+```
+
+### macOS
+
+优先执行：
+
+```bash
+./PT-BDtool.command
+```
+
+### Windows
+
+优先双击：
+
+- `PT-BDtool.bat`
+
+但要注意：
+
+- 当前源码仓库里没有 `PT-BDtool.exe`
+- 所以它会回退到本机 Python 去启动 `ptbd-gui.py`
+- 也就是说，Windows 源码直跑需要你自己先装 Python 3
+
+## 第一次打开后怎么填
+
+图形界面里先填这些：
+
+- `VPS 地址`，例如 `root@1.2.3.4`
+- `SSH 端口`，一般默认 `22`
+- `SSH 密码`，如果你走密钥可以留空
+- `本机保存目录`
 
 其他项怎么理解：
 
-- `空白 VPS 自举`：建议保持开启。程序会先尝试自动装远端依赖。
-- `扫描白名单`：不懂就留空。留空时会按默认规则扫描常见目录。
-- `自动清理`：建议开启。处理完成后会清理这次生成的临时结果。
+- `空白 VPS 自动上传运行包（推荐）`
+  - 开着更省心
+  - 程序会先尝试远端自动装依赖
+  - 还不够时才回退上传运行包
+- `扫描白名单`
+  - 不懂就留空
+  - 留空时会按默认规则扫描常见目录
+- `成功后自动清理 VPS 生成目录`
+  - 建议开启
+  - 只清这次生成的结果目录和结果包，不删原始媒体文件
 
-填完后，程序会把配置保存起来。便携版优先保存在程序旁边；非便携环境通常保存在用户配置目录。
+## 主流程真实顺序
 
-## 怎么连接 VPS
+正常使用顺序就是：
 
-程序走的是 SSH。
+1. 保存配置
+2. 点“扫描 VPS 候选”
+3. 等程序连上 VPS
+4. 等程序检测远端系统和依赖
+5. 在候选列表里双击你要处理的条目
+6. 等程序在 VPS 上生成截图和媒体信息
+7. 等程序把结果包下载回本机
+8. 如果开启了自动清理，再清理 VPS 上这次生成的临时目录
 
-所以你至少要保证：
+## 文件会保存到哪里
 
-- VPS 地址能连通
-- 端口正确
-- 密码正确
-- VPS 允许这个账号登录
+### 结果包
 
-如果这里填错，后面扫描一定失败。
+优先保存到你在 GUI 里填的“本机保存目录”。
 
-## 怎么扫描
+如果你走的是 shell 远端流程：
 
-正常顺序就是：
+- 默认优先尝试桌面
+- 桌面不可用时会回退到 `~/PT-BDtool-downloads`
 
-1. 点 `扫描 VPS 候选`
-2. 等程序连上 VPS
-3. 等程序检测远端系统和依赖
-4. 等候选列表出来
+下载回来的通常是：
 
-第一次扫描时，程序可能会多做几件事：
+- `.zip`
+- `.tar.gz`
 
-- 检查远端是不是 `Debian` / `Ubuntu` / `Alpine`
-- 尝试自动安装 `bash`、`curl`、`python3`、`tar`、`ffmpeg`、`ffprobe`、`mediainfo`
-- 在 VPS 的 `~/.cache/ptbd-remote` 下准备运行时文件
+也就是说，它默认下载的是结果包，不是自动帮你解压成一堆散文件。
 
-这一步如果是第一次，通常会比后面几次慢。
+### 配置文件
 
-## 怎么选择条目并生成结果
+真实位置分三类：
 
-扫描结果出来后：
+- GUI 配置
+  - Linux: `~/.config/ptbd-gui/config.json`
+  - Windows 便携版: 程序旁边的 `PT-BDtool-config.json`
+  - macOS 便携版: `PT-BDtool.app` 同级目录的 `PT-BDtool-config.json`
+- `ptbd` 新手模式配置
+  - `~/.config/ptbd/config.env`
+- shell 远端模式配置
+  - `~/.config/ptbd-remote/config.env`
 
-1. 双击你要处理的条目
-2. 程序会在 VPS 上生成截图和媒体信息
-3. 程序会把结果打包
-4. 程序会把打包结果下载回你的电脑
+### 日志文件
 
-你不需要手动跑命令。
+- GUI 日志通常在 GUI 配置目录旁边的 `PT-BDtool.log`
+- CLI 日志通常在项目或安装目录下的 `bdtool-output/logs/`
 
-## 文件会下载到哪里
+## 自动清理到底会清什么
 
-下载到你在界面里填写的“本机保存目录”。
-
-注意：
-
-- 下载回来的通常是 `.zip` 或 `.tar.gz` 结果包
-- 不是自动帮你解压到桌面上一堆散文件
-- 如果你把保存目录设成桌面，那结果包就会出现在桌面
-
-## 用完后会不会自动清理 VPS
-
-默认会。
-
-清理的是：
+默认会清：
 
 - 这次生成的临时输出目录
 - 这次待下载的结果包
 
-不会删你原始视频、原始音频、原始 `BDMV`、原始 `ISO`。
+默认不会清：
 
-如果你不想自动清理，可以把 `自动清理` 关掉。
+- 你原始的视频文件
+- 你原始的音频文件
+- 你原始的 `BDMV`
+- 你原始的 `ISO`
 
 ## 常见报错怎么排查
 
 ### 1. 扫描失败 / 获取候选失败
 
-先做这几件事：
+先看这几项：
 
-1. 点程序里的“打开日志文件”
-2. 直接看 `PT-BDtool.log`
-3. 确认 SSH 地址、端口、密码有没有填错
-4. 确认 VPS 能联网，至少能安装依赖或执行已有依赖
+1. VPS 地址、端口、密码有没有填错
+2. 这个账号能不能 SSH 登录
+3. VPS 网络是不是正常
+4. VPS 软件源是不是可用
+5. 日志里是不是提示缺依赖或 SSH 失败
+
+GUI 里可以直接点：
+
+- “打开日志文件”
 
 ### 2. Linux 双击没反应
 
 先试：
 
-- 双击 `启动PT-BDtool.sh`
-- 或先执行一次：
-
 ```bash
-chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool
+chmod +x PT-BDtool.sh PT-BDtool.command ptbd-gui ptbd-start.sh
+./PT-BDtool.sh
 ```
 
-### 3. VPS 依赖装不上
+如果提示缺少 `tkinter`，先装 `python3-tk` 再试。
+
+### 3. Windows 源码仓库双击没反应
+
+重点确认：
+
+- 你现在用的是源码仓库，不是发布包
+- 本机已经安装 Python 3
+- `PT-BDtool.bat` 和 `ptbd-gui.py` 在同一个目录
+
+如果你不想装 Python，就不要跑源码仓库，直接改用发布页的 `PT-BDtool.exe`。
+
+### 4. macOS 源码仓库打不开
+
+重点确认：
+
+- 你运行的是 `PT-BDtool.command`
+- 本机已经安装 Python 3
+- 当前目录里确实有 `ptbd-gui`
+
+如果你只想双击即用，优先下载发布页里的 `PT-BDtool.app`。
+
+### 5. VPS 依赖装不上
 
 重点看 VPS 自己的问题：
 
@@ -200,34 +329,31 @@ chmod +x PT-BDtool.desktop 启动PT-BDtool.sh PT-BDtool
 
 其他发行版不保证自动安装一定成功。
 
-### 4. 扫描不到你要的文件
+### 6. 扫描不到你要的文件
 
 先确认：
 
 - 源文件确实已经放到 VPS 上
-- 账号对这些目录有读取权限
+- 当前账号对目录有读取权限
 - 你没有把白名单写错
 - 你没有把目标目录误加进排除列表
 
-## 现在这项目适合谁
+## 这项目现在更适合谁
 
 适合：
 
 - 已经有 VPS
-- 只是想少敲命令
-- 想把截图、媒体信息、下载、清理串成一套流程的人
+- 知道 SSH 是什么
+- 想把扫描、截图、媒体信息、下载、清理串起来的人
 
 不适合：
 
 - 完全没有 SSH / VPS 使用基础
-- 需要作者远程一对一排障的人
+- 希望任何系统都 100% 免配置即开即用的人
 
-## 说明
+## 给维护者
 
-- 本项目为 AI 生成项目
-- 不接受反馈，不做答疑，不单独适配个别环境
-
-维护者再看：
+维护说明看：
 
 - `docs/DEVELOPMENT.md`
 - `docs/README.en.md`
