@@ -790,7 +790,7 @@ INDEX_HTML = r"""<!doctype html>
 
     .workbench {
       display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+      grid-template-columns: minmax(0, 1fr) 360px;
       gap: 16px;
       align-items: start;
     }
@@ -799,6 +799,11 @@ INDEX_HTML = r"""<!doctype html>
     .main-stack {
       display: grid;
       gap: 16px;
+    }
+
+    .side-stack {
+      position: sticky;
+      top: 16px;
     }
 
     .panel {
@@ -824,6 +829,14 @@ INDEX_HTML = r"""<!doctype html>
       margin: 4px 0 0;
       color: var(--muted);
       font-size: 0.88rem;
+    }
+
+    .section-kicker {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--primary-strong);
+      font-size: 0.76rem;
+      font-weight: 800;
     }
 
     .panel-body {
@@ -976,7 +989,7 @@ INDEX_HTML = r"""<!doctype html>
 
     .filters {
       display: grid;
-      grid-template-columns: 160px minmax(220px, 1fr);
+      grid-template-columns: 150px minmax(260px, 1fr);
       gap: 10px;
       align-items: center;
     }
@@ -1093,6 +1106,11 @@ INDEX_HTML = r"""<!doctype html>
       text-overflow: ellipsis;
       white-space: nowrap;
       font-weight: 760;
+    }
+
+    .candidate-title.dir {
+      font-family: var(--mono);
+      font-size: 0.88rem;
     }
 
     .path {
@@ -1240,8 +1258,8 @@ INDEX_HTML = r"""<!doctype html>
   <main class="shell">
     <section class="topbar">
       <div>
-        <h1>PT-BDtool Web 控制端</h1>
-        <p class="lede">在浏览器里完成本机服务器或远端 VPS 的候选扫描、批量生成和结果回传。默认只监听本机地址。</p>
+        <h1>PT-BDtool 发种材料工作台</h1>
+        <p class="lede">按资源目录生成 PT 发布需要的 MediaInfo、BDInfo、截图和音乐频谱图。主流程只处理资源，连接和扫描细节放在高级配置。</p>
       </div>
       <div class="status-strip">
         <strong id="runtimeMode">读取运行状态中</strong>
@@ -1261,6 +1279,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="panel-head">
           <div class="toolbar">
             <div>
+              <span class="section-kicker">连接与路径</span>
               <h2>工作区</h2>
               <p>先确认处理位置，再扫描资源。常用路径直接显示，SSH 和排除目录放到高级配置。</p>
             </div>
@@ -1325,15 +1344,16 @@ INDEX_HTML = r"""<!doctype html>
             <div class="panel-head">
               <div class="toolbar">
                 <div>
+                  <span class="section-kicker">资源池</span>
                   <h2>选择资源</h2>
-                  <p id="candidateSummary">点击“扫描资源”后，从这里选择要发种的资源。</p>
+                  <p id="candidateSummary">点击“扫描资源”后，从这里选择要发种的资源。音乐目录会作为文件夹资源显示。</p>
                 </div>
                 <div class="filters">
                   <select id="typeFilter">
-                    <option value="">全部资源</option>
+                    <option value="">全部资源（音乐按目录合并）</option>
                     <option value="VIDEO">视频</option>
                     <option value="AUDIO_DIR">音乐目录</option>
-                    <option value="AUDIO">单曲音频</option>
+                    <option value="AUDIO">单曲音频（高级）</option>
                     <option value="BDMV">原盘</option>
                     <option value="ISO">ISO</option>
                   </select>
@@ -1372,6 +1392,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="panel-head">
               <div class="toolbar">
                 <div>
+                  <span class="section-kicker">运行状态</span>
                   <h2>任务日志</h2>
                   <p id="taskState">当前没有任务。</p>
                 </div>
@@ -1388,6 +1409,7 @@ INDEX_HTML = r"""<!doctype html>
         <aside class="side-stack">
           <div class="panel">
             <div class="panel-head">
+              <span class="section-kicker">材料方案</span>
               <h2>发布材料方案</h2>
               <p>默认用自动推荐。音乐目录可以一键切换整包总频谱或单曲频谱。</p>
             </div>
@@ -1411,6 +1433,7 @@ INDEX_HTML = r"""<!doctype html>
 
           <div class="panel">
             <div class="panel-head">
+              <span class="section-kicker">执行</span>
               <h2>生成确认</h2>
               <p>开始前确认将处理什么资源，以及会生成什么材料。</p>
             </div>
@@ -1448,6 +1471,7 @@ INDEX_HTML = r"""<!doctype html>
     const nextPageBtn = document.querySelector("#nextPageBtn");
 
     let candidates = [];
+    let rawCandidateCount = 0;
     let selectedPaths = new Set();
     let selectedMaterialPlan = "auto";
     let currentPage = 1;
@@ -1490,6 +1514,34 @@ INDEX_HTML = r"""<!doctype html>
       return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
     }
 
+    function dirname(path) {
+      const parts = String(path || "").split(/[\\/]/).filter(Boolean);
+      if (parts.length <= 1) return "";
+      const prefix = String(path || "").startsWith("/") ? "/" : "";
+      return prefix + parts.slice(0, -1).join("/");
+    }
+
+    function normalizePath(path) {
+      return String(path || "").replace(/\/+$/, "");
+    }
+
+    function prepareCandidates(items) {
+      rawCandidateCount = items.length;
+      const audioDirPaths = new Set(
+        items
+          .filter((item) => item.type === "AUDIO_DIR")
+          .map((item) => normalizePath(item.path))
+      );
+      return items.map((item) => {
+        const normalized = {...item};
+        normalized.path = String(normalized.path || "");
+        normalized.parent_audio_dir = dirname(normalized.path);
+        normalized.collapsed_into_album =
+          normalized.type === "AUDIO" && audioDirPaths.has(normalizePath(normalized.parent_audio_dir));
+        return normalized;
+      });
+    }
+
     function selectedItems() {
       return candidates.filter((item) => selectedPaths.has(item.path));
     }
@@ -1512,6 +1564,16 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (item.type === "AUDIO") return "MediaInfo + 单曲频谱图";
       return "按资源类型自动生成";
+    }
+
+    function displayTitle(item) {
+      return item.type === "AUDIO_DIR" ? item.path : basename(item.path);
+    }
+
+    function displayPath(item) {
+      if (item.type === "AUDIO_DIR") return "文件夹路径，生成时直接传入该目录";
+      if (item.collapsed_into_album) return `已归入音乐目录：${item.parent_audio_dir}`;
+      return item.path;
     }
 
     function recommendedSpectrumMode(items = selectedItems()) {
@@ -1607,8 +1669,9 @@ INDEX_HTML = r"""<!doctype html>
       const type = document.querySelector("#typeFilter").value;
       const keyword = document.querySelector("#keywordFilter").value.trim().toLowerCase();
       let items = candidates.filter((item) => {
+        if (!type && item.collapsed_into_album && !selectedPaths.has(item.path)) return false;
         if (type && item.type !== type) return false;
-        if (keyword && !item.path.toLowerCase().includes(keyword)) return false;
+        if (keyword && !`${item.path} ${basename(item.path)} ${item.parent_audio_dir || ""}`.toLowerCase().includes(keyword)) return false;
         return true;
       });
       if (showSelectedOnly) {
@@ -1640,8 +1703,12 @@ INDEX_HTML = r"""<!doctype html>
       const state = pageState(filtered);
       const visible = state.pageItems;
       candidateList.innerHTML = "";
+      const collapsedCount = candidates.filter((item) => item.collapsed_into_album).length;
+      const rawSuffix = collapsedCount
+        ? `，已把 ${collapsedCount} 首目录内单曲归入音乐目录`
+        : "";
       candidateSummary.textContent = candidates.length
-        ? `共 ${candidates.length} 个资源，匹配 ${state.total} 个，已选择 ${selectedPaths.size} 个。`
+        ? `扫描 ${rawCandidateCount} 个条目，主列表 ${candidates.length - collapsedCount} 个资源，匹配 ${state.total} 个，已选择 ${selectedPaths.size} 个${rawSuffix}。`
         : isLocalMode()
           ? "先扫描本机服务器，资源会显示在这里。"
           : "先扫描 VPS，资源会显示在这里。";
@@ -1671,12 +1738,13 @@ INDEX_HTML = r"""<!doctype html>
         const main = document.createElement("span");
         main.className = "candidate-main";
         const title = document.createElement("span");
-        title.className = "candidate-title";
-        title.textContent = basename(item.path);
+        title.className = item.type === "AUDIO_DIR" ? "candidate-title dir" : "candidate-title";
+        title.title = item.path;
+        title.textContent = displayTitle(item);
         const path = document.createElement("span");
         path.className = "path";
         path.title = item.path;
-        path.textContent = item.path;
+        path.textContent = displayPath(item);
         const materials = document.createElement("span");
         materials.className = "candidate-materials";
         materials.textContent = materialText(item, spectrumMode);
@@ -1712,7 +1780,7 @@ INDEX_HTML = r"""<!doctype html>
         outputsEl.appendChild(item);
       }
       if (task.kind === "scan" && task.status === "success") {
-        candidates = task.items || [];
+        candidates = prepareCandidates(task.items || []);
         selectedPaths.clear();
         currentPage = 1;
         showSelectedOnly = false;
