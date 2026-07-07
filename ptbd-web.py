@@ -1000,6 +1000,53 @@ INDEX_HTML = r"""<!doctype html>
       padding-right: 4px;
     }
 
+    .list-tools {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .bulk-actions,
+    .pager {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pager {
+      justify-content: flex-end;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .pager select {
+      min-height: 34px;
+      width: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--ink);
+      padding: 0 8px;
+    }
+
+    .inline-check {
+      display: inline-flex;
+      grid-template-columns: none;
+      align-items: center;
+      gap: 7px;
+      color: var(--ink);
+      font-size: 0.86rem;
+      font-weight: 600;
+    }
+
+    .inline-check input {
+      width: 16px;
+      height: 16px;
+    }
+
     .candidate {
       display: grid;
       grid-template-columns: auto minmax(0, 1fr) auto;
@@ -1157,9 +1204,14 @@ INDEX_HTML = r"""<!doctype html>
       .workbench,
       .flow,
       .quick-config,
-      .filters {
+      .filters,
+      .list-tools {
         display: grid;
         grid-template-columns: 1fr;
+      }
+
+      .pager {
+        justify-content: flex-start;
       }
 
       .status-strip {
@@ -1167,7 +1219,12 @@ INDEX_HTML = r"""<!doctype html>
       }
 
       .candidate {
-        grid-template-columns: auto 72px minmax(0, 1fr);
+        grid-template-columns: auto minmax(0, 1fr);
+      }
+
+      .candidate .type {
+        grid-column: 2;
+        justify-self: start;
       }
     }
 
@@ -1285,9 +1342,25 @@ INDEX_HTML = r"""<!doctype html>
               </div>
             </div>
             <div class="panel-body">
-              <div class="actions" style="margin-top: 0; margin-bottom: 12px">
-                <button class="button secondary" type="button" id="selectAllBtn">选择当前列表</button>
-                <button class="button secondary" type="button" id="clearSelectionBtn">清空选择</button>
+              <div class="list-tools">
+                <div class="bulk-actions">
+                  <button class="button secondary" type="button" id="selectPageBtn">选择本页</button>
+                  <button class="button secondary" type="button" id="selectFilteredBtn">选择全部匹配</button>
+                  <button class="button secondary" type="button" id="clearSelectionBtn">清空选择</button>
+                  <label class="inline-check"><input id="selectedOnlyToggle" type="checkbox"> 只看已选</label>
+                </div>
+                <div class="pager" aria-label="候选分页">
+                  <button class="button secondary" type="button" id="prevPageBtn">上一页</button>
+                  <span id="pageInfo">第 1 / 1 页</span>
+                  <button class="button secondary" type="button" id="nextPageBtn">下一页</button>
+                  <label class="inline-check">每页
+                    <select id="pageSizeSelect">
+                      <option value="50">50</option>
+                      <option value="100">100</option>
+                      <option value="200">200</option>
+                    </select>
+                  </label>
+                </div>
               </div>
               <div id="candidateList" class="candidate-list">
                 <div class="empty">还没有资源。先确认工作区，然后点击“扫描资源”。</div>
@@ -1368,10 +1441,18 @@ INDEX_HTML = r"""<!doctype html>
     const outputsEl = document.querySelector("#outputs");
     const runSummary = document.querySelector("#runSummary");
     const materialCards = Array.from(document.querySelectorAll(".material-card"));
+    const pageInfo = document.querySelector("#pageInfo");
+    const pageSizeSelect = document.querySelector("#pageSizeSelect");
+    const selectedOnlyToggle = document.querySelector("#selectedOnlyToggle");
+    const prevPageBtn = document.querySelector("#prevPageBtn");
+    const nextPageBtn = document.querySelector("#nextPageBtn");
 
     let candidates = [];
     let selectedPaths = new Set();
     let selectedMaterialPlan = "auto";
+    let currentPage = 1;
+    let pageSize = Number(pageSizeSelect.value || 50);
+    let showSelectedOnly = false;
     let activeTaskId = null;
     let pollTimer = null;
     const PTBD_BASE_PATH = __PTBD_BASE_PATH_JSON__;
@@ -1525,25 +1606,52 @@ INDEX_HTML = r"""<!doctype html>
     function filteredCandidates() {
       const type = document.querySelector("#typeFilter").value;
       const keyword = document.querySelector("#keywordFilter").value.trim().toLowerCase();
-      return candidates.filter((item) => {
+      let items = candidates.filter((item) => {
         if (type && item.type !== type) return false;
         if (keyword && !item.path.toLowerCase().includes(keyword)) return false;
         return true;
       });
+      if (showSelectedOnly) {
+        items = items.filter((item) => selectedPaths.has(item.path));
+      }
+      return items;
+    }
+
+    function pageState(items) {
+      const total = items.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      const start = total ? (currentPage - 1) * pageSize : 0;
+      const end = Math.min(start + pageSize, total);
+      return {total, totalPages, start, end, pageItems: items.slice(start, end)};
+    }
+
+    function updatePager(state) {
+      pageInfo.textContent = state.total
+        ? `第 ${currentPage} / ${state.totalPages} 页，${state.start + 1}-${state.end} / ${state.total}`
+        : "第 1 / 1 页，0 / 0";
+      prevPageBtn.disabled = currentPage <= 1;
+      nextPageBtn.disabled = currentPage >= state.totalPages;
     }
 
     function renderCandidates() {
-      const visible = filteredCandidates();
+      const filtered = filteredCandidates();
+      const state = pageState(filtered);
+      const visible = state.pageItems;
       candidateList.innerHTML = "";
       candidateSummary.textContent = candidates.length
-        ? `共 ${candidates.length} 个资源，当前显示 ${visible.length} 个，已选择 ${selectedPaths.size} 个。`
+        ? `共 ${candidates.length} 个资源，匹配 ${state.total} 个，已选择 ${selectedPaths.size} 个。`
         : isLocalMode()
           ? "先扫描本机服务器，资源会显示在这里。"
           : "先扫描 VPS，资源会显示在这里。";
+      updatePager(state);
       if (!visible.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = candidates.length ? "当前过滤条件没有匹配项。" : "还没有资源。确认工作区后点击“扫描资源”。";
+        empty.textContent = candidates.length
+          ? (showSelectedOnly ? "当前没有已选资源匹配过滤条件。" : "当前过滤条件没有匹配项。")
+          : "还没有资源。确认工作区后点击“扫描资源”。";
         candidateList.appendChild(empty);
         updateRunSummary();
         return;
@@ -1606,6 +1714,9 @@ INDEX_HTML = r"""<!doctype html>
       if (task.kind === "scan" && task.status === "success") {
         candidates = task.items || [];
         selectedPaths.clear();
+        currentPage = 1;
+        showSelectedOnly = false;
+        selectedOnlyToggle.checked = false;
         renderCandidates();
         updateRunSummary();
       }
@@ -1647,7 +1758,12 @@ INDEX_HTML = r"""<!doctype html>
     document.querySelector("#scanBtn").addEventListener("click", startScan);
     document.querySelector("#processBtn").addEventListener("click", startProcess);
     document.querySelector("#cancelBtn").addEventListener("click", cancelTask);
-    document.querySelector("#selectAllBtn").addEventListener("click", () => {
+    document.querySelector("#selectPageBtn").addEventListener("click", () => {
+      const state = pageState(filteredCandidates());
+      for (const item of state.pageItems) selectedPaths.add(item.path);
+      renderCandidates();
+    });
+    document.querySelector("#selectFilteredBtn").addEventListener("click", () => {
       for (const item of filteredCandidates()) selectedPaths.add(item.path);
       renderCandidates();
     });
@@ -1659,8 +1775,32 @@ INDEX_HTML = r"""<!doctype html>
       logBox.textContent = "前端日志已清空。";
       outputsEl.innerHTML = "";
     });
-    document.querySelector("#typeFilter").addEventListener("change", renderCandidates);
-    document.querySelector("#keywordFilter").addEventListener("input", renderCandidates);
+    document.querySelector("#typeFilter").addEventListener("change", () => {
+      currentPage = 1;
+      renderCandidates();
+    });
+    document.querySelector("#keywordFilter").addEventListener("input", () => {
+      currentPage = 1;
+      renderCandidates();
+    });
+    selectedOnlyToggle.addEventListener("change", () => {
+      showSelectedOnly = selectedOnlyToggle.checked;
+      currentPage = 1;
+      renderCandidates();
+    });
+    pageSizeSelect.addEventListener("change", () => {
+      pageSize = Number(pageSizeSelect.value || 50);
+      currentPage = 1;
+      renderCandidates();
+    });
+    prevPageBtn.addEventListener("click", () => {
+      currentPage = Math.max(1, currentPage - 1);
+      renderCandidates();
+    });
+    nextPageBtn.addEventListener("click", () => {
+      currentPage += 1;
+      renderCandidates();
+    });
     for (const card of materialCards) {
       card.addEventListener("click", () => {
         selectedMaterialPlan = card.dataset.plan || "auto";
