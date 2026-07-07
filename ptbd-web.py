@@ -86,6 +86,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "save_dir": default_save_dir(),
     "scan_include": "",
     "scan_exclude": "",
+    "audio_spectrum_mode": "single",
     "auto_cleanup": True,
 }
 
@@ -116,8 +117,16 @@ def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = No
 
     if "mode" in raw:
         data["mode"] = "local" if str(raw.get("mode") or "").strip().lower() == "local" else "remote"
+    if "audio_spectrum_mode" in raw:
+        requested_spectrum_mode = str(raw.get("audio_spectrum_mode") or "").strip().lower()
+        data["audio_spectrum_mode"] = requested_spectrum_mode if requested_spectrum_mode in {"single", "combined"} else "single"
 
     data["mode"] = "local" if str(data.get("mode") or "").strip().lower() == "local" else "remote"
+    data["audio_spectrum_mode"] = (
+        str(data.get("audio_spectrum_mode") or "single").strip().lower()
+        if str(data.get("audio_spectrum_mode") or "").strip().lower() in {"single", "combined"}
+        else "single"
+    )
     data["local_root"] = data["local_root"] or DEFAULT_CONFIG["local_root"]
     data["remote_host"] = data["remote_host"] or DEFAULT_CONFIG["remote_host"]
     data["remote_port"] = data["remote_port"] or "22"
@@ -408,6 +417,7 @@ def local_runtime_env(config: dict[str, Any]) -> dict[str, str]:
     env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = str(config.get("scan_exclude") or "")
     env["BDTOOL_DOWNLOAD_DIR"] = str(config.get("save_dir") or default_save_dir())
     env["BDTOOL_AUTO_CLEANUP"] = "1" if config.get("auto_cleanup", True) else "0"
+    env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(config.get("audio_spectrum_mode") or "single")
     env["BDTOOL_POST_ACTION"] = "0"
     env["LANG_CODE"] = "zh"
     return env
@@ -548,6 +558,7 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
                 "PTBD_SCAN_INCLUDE_ROOTS": str(config.get("scan_include") or ""),
                 "PTBD_SCAN_EXCLUDE_ROOTS": str(config.get("scan_exclude") or ""),
                 "PTBD_AUTO_CLEANUP": "1" if config.get("auto_cleanup", True) else "0",
+                "PTBD_AUDIO_SPECTRUM_MODE": str(config.get("audio_spectrum_mode") or "single"),
                 "PTBD_REMOTE_TARGET_PATH": selected_path,
             }
         )
@@ -564,6 +575,8 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
             str(config["save_dir"]),
             "--bootstrap",
             "1" if config.get("remote_bootstrap") else "0",
+            "--audio-spectrum",
+            str(config.get("audio_spectrum_mode") or "single"),
         ]
         password = str(config.get("remote_password") or "")
         if password:
@@ -594,7 +607,17 @@ def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
             raise TaskCancelledError("任务已取消。")
         ensure_local_path_allowed(config, selected_path)
         task.log(f"开始本地处理 {index}/{len(paths)}：{selected_path}")
-        cmd = [bash_bin, str(bdtool), "generate-path", "--path", selected_path, "--lang", "zh"]
+        cmd = [
+            bash_bin,
+            str(bdtool),
+            "generate-path",
+            "--path",
+            selected_path,
+            "--lang",
+            "zh",
+            "--audio-spectrum",
+            str(config.get("audio_spectrum_mode") or "single"),
+        ]
         rc = run_process_stream(cmd, env, task)
         if rc != 0:
             if task.cancel_event.is_set():
@@ -1072,6 +1095,12 @@ INDEX_HTML = r"""<!doctype html>
             <label>本机保存目录
               <input name="save_dir" type="text">
             </label>
+            <label>音乐频谱模式
+              <select name="audio_spectrum_mode">
+                <option value="single">单曲频谱图</option>
+                <option value="combined">整包总频谱图</option>
+              </select>
+            </label>
             <label>扫描白名单
               <textarea name="scan_include" placeholder="/home /data /mnt，留空时自动扫描常见目录"></textarea>
             </label>
@@ -1104,6 +1133,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="">全部类型</option>
                   <option value="VIDEO">视频</option>
                   <option value="AUDIO">音频</option>
+                  <option value="AUDIO_DIR">音乐目录</option>
                   <option value="BDMV">原盘</option>
                   <option value="ISO">ISO</option>
                 </select>

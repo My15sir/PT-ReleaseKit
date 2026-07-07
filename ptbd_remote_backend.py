@@ -979,6 +979,7 @@ rm -f "$archive_path"
             env["BDTOOL_SCAN_INCLUDE_ROOTS"] = scan_include
         if scan_exclude:
             env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = scan_exclude
+        env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(self.config.get("audio_spectrum_mode") or "single")
         return env
 
     def scan_items(self) -> list[dict]:
@@ -1048,7 +1049,7 @@ rm -f "$archive_path"
         )
         self.run_script(f"mkdir -p {quote_sh(stage_dir)}")
         result = self.run_script(
-            f"exec {quote_sh(remote_cmd)} generate-path --path {quote_sh(selected_path)} --lang zh",
+            f"exec {quote_sh(remote_cmd)} generate-path --path {quote_sh(selected_path)} --lang zh --audio-spectrum {quote_sh(str(self.config.get('audio_spectrum_mode') or 'single'))}",
             use_bash=True,
             env=env,
             stream_output=True,

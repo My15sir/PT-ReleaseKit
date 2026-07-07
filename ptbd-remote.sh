@@ -11,6 +11,7 @@ PTBD_LOCAL_HTTP_PORT="${PTBD_LOCAL_HTTP_PORT:-18080}"
 PTBD_LOCAL_SAVE_DIR="${PTBD_LOCAL_SAVE_DIR:-}"
 PTBD_SCAN_INCLUDE_ROOTS="${PTBD_SCAN_INCLUDE_ROOTS:-}"
 PTBD_SCAN_EXCLUDE_ROOTS="${PTBD_SCAN_EXCLUDE_ROOTS:-}"
+PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE:-single}"
 PTBD_AUTO_CLEANUP="${PTBD_AUTO_CLEANUP:-1}"
 PTBD_KEEP_BRIDGE="${PTBD_KEEP_BRIDGE:-0}"
 PTBD_REMOTE_TARGET_PATH="${PTBD_REMOTE_TARGET_PATH:-}"
@@ -88,6 +89,7 @@ Options:
   --remote-return-port N    Remote reverse tunnel port (default: 18080)
   --scan-include "DIRS"     Remote whitelist roots, separated by spaces or commas
   --scan-exclude "DIRS"     Remote extra exclude roots, separated by spaces or commas
+  --audio-spectrum MODE     Audio spectrum mode: single or combined (default: single)
   --path TARGET             Process this remote candidate directly, no menu interaction
   --config FILE             Config file path
   --setup                   Interactive first-run setup
@@ -104,6 +106,7 @@ Environment variables:
   PTBD_LOCAL_SAVE_DIR
   PTBD_SCAN_INCLUDE_ROOTS
   PTBD_SCAN_EXCLUDE_ROOTS
+  PTBD_AUDIO_SPECTRUM_MODE
   PTBD_REMOTE_TARGET_PATH
   PTBD_REMOTE_CONFIG_FILE
 EOF
@@ -158,6 +161,7 @@ PTBD_REMOTE_BOOTSTRAP=$(quote_sh "$PTBD_REMOTE_BOOTSTRAP")
 PTBD_LOCAL_SAVE_DIR=$(quote_sh "$PTBD_LOCAL_SAVE_DIR")
 PTBD_SCAN_INCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS")
 PTBD_SCAN_EXCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS")
+PTBD_AUDIO_SPECTRUM_MODE=$(quote_sh "$PTBD_AUDIO_SPECTRUM_MODE")
 PTBD_AUTO_CLEANUP=$(quote_sh "$PTBD_AUTO_CLEANUP")
 EOF
   chmod 600 "$file"
@@ -198,6 +202,7 @@ run_setup() {
   PTBD_REMOTE_BOOTSTRAP="$(prompt_value "空白 VPS 自动自举？1=是 0=否 [${PTBD_REMOTE_BOOTSTRAP:-1}]: " "${PTBD_REMOTE_BOOTSTRAP:-1}")"
   PTBD_SCAN_INCLUDE_ROOTS="$(prompt_value "默认扫描目录白名单（留空=智能扫描常见目录） [${PTBD_SCAN_INCLUDE_ROOTS:-}]: " "${PTBD_SCAN_INCLUDE_ROOTS:-}")"
   PTBD_SCAN_EXCLUDE_ROOTS="$(prompt_value "额外排除目录（可留空） [${PTBD_SCAN_EXCLUDE_ROOTS:-}]: " "${PTBD_SCAN_EXCLUDE_ROOTS:-}")"
+  PTBD_AUDIO_SPECTRUM_MODE="$(prompt_value "音乐频谱模式 single=单曲图 combined=整包总图 [${PTBD_AUDIO_SPECTRUM_MODE:-single}]: " "${PTBD_AUDIO_SPECTRUM_MODE:-single}")"
   PTBD_LOCAL_SAVE_DIR="$(prompt_value "本机保存目录 [${PTBD_LOCAL_SAVE_DIR:-$current_save_dir}]: " "${PTBD_LOCAL_SAVE_DIR:-$current_save_dir}")"
   PTBD_AUTO_CLEANUP="$(prompt_value "处理完成后自动清理 VPS 生成目录？1=是 0=否 [${PTBD_AUTO_CLEANUP:-1}]: " "${PTBD_AUTO_CLEANUP:-1}")"
 
@@ -222,6 +227,7 @@ Current config
   local save dir:   ${save_dir}
   scan include:     ${PTBD_SCAN_INCLUDE_ROOTS:-<unset>}
   scan exclude:     ${PTBD_SCAN_EXCLUDE_ROOTS:-<unset>}
+  audio spectrum:   ${PTBD_AUDIO_SPECTRUM_MODE:-single}
   auto cleanup:     ${PTBD_AUTO_CLEANUP:-1}
   password:         ${masked_password}
 EOF
@@ -258,6 +264,7 @@ while [[ $# -gt 0 ]]; do
     --remote-return-port) PTBD_REMOTE_RETURN_PORT="${2:-}"; shift 2 ;;
     --scan-include) PTBD_SCAN_INCLUDE_ROOTS="${2:-}"; shift 2 ;;
     --scan-exclude) PTBD_SCAN_EXCLUDE_ROOTS="${2:-}"; shift 2 ;;
+    --audio-spectrum) PTBD_AUDIO_SPECTRUM_MODE="${2:-}"; shift 2 ;;
     --path) PTBD_REMOTE_TARGET_PATH="${2:-}"; shift 2 ;;
     --config) PTBD_REMOTE_CONFIG_FILE="${2:-}"; shift 2; load_config_file "$PTBD_REMOTE_CONFIG_FILE" ;;
     --setup) SETUP_MODE=1; shift ;;
@@ -279,6 +286,12 @@ command -v ssh >/dev/null 2>&1 || { err "missing ssh"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { err "missing python3"; exit 1; }
 PTBD_REMOTE_BOOTSTRAP="$(normalize_bool "$PTBD_REMOTE_BOOTSTRAP" 2>/dev/null || true)"
 [[ -n "$PTBD_REMOTE_BOOTSTRAP" ]] || { err "invalid --bootstrap value, expected 0 or 1"; exit 2; }
+PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE:-single}"
+PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE,,}"
+case "$PTBD_AUDIO_SPECTRUM_MODE" in
+  single|combined) ;;
+  *) err "invalid --audio-spectrum value, expected single or combined"; exit 2 ;;
+esac
 if [[ "$PTBD_REMOTE_BOOTSTRAP" == "1" && ! -f "$REMOTE_PREPARE_SCRIPT" ]]; then
   err "missing remote bootstrap helper: $REMOTE_PREPARE_SCRIPT"
   exit 1
@@ -316,7 +329,7 @@ sleep 3
 kill -0 "$TUNNEL_PID" 2>/dev/null || { err "failed to create reverse SSH tunnel"; exit 1; }
 log "reverse tunnel ready: remote 127.0.0.1:${PTBD_REMOTE_RETURN_PORT} -> local ${PTBD_LOCAL_HTTP_PORT}"
 
-REMOTE_SCRIPT="export BDTOOL_RETURN_MODE=http; export BDTOOL_RETURN_HTTP_URL=$(quote_sh "http://127.0.0.1:${PTBD_REMOTE_RETURN_PORT}/upload"); export BDTOOL_AUTO_CLEANUP=$(quote_sh "$PTBD_AUTO_CLEANUP");"
+REMOTE_SCRIPT="export BDTOOL_RETURN_MODE=http; export BDTOOL_RETURN_HTTP_URL=$(quote_sh "http://127.0.0.1:${PTBD_REMOTE_RETURN_PORT}/upload"); export BDTOOL_AUTO_CLEANUP=$(quote_sh "$PTBD_AUTO_CLEANUP"); export BDTOOL_AUDIO_SPECTRUM_MODE=$(quote_sh "${PTBD_AUDIO_SPECTRUM_MODE:-single}");"
 if [[ -n "$PTBD_SCAN_INCLUDE_ROOTS" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_INCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS");"
 fi
@@ -324,7 +337,7 @@ if [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_EXCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS");"
 fi
 if [[ -n "$PTBD_REMOTE_TARGET_PATH" ]]; then
-  REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$EFFECTIVE_REMOTE_CMD") generate-path --path $(quote_sh "$PTBD_REMOTE_TARGET_PATH") --lang zh"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$EFFECTIVE_REMOTE_CMD") generate-path --path $(quote_sh "$PTBD_REMOTE_TARGET_PATH") --lang zh --audio-spectrum $(quote_sh "${PTBD_AUDIO_SPECTRUM_MODE:-single}")"
   log "processing remote path directly: $PTBD_REMOTE_TARGET_PATH"
 else
   REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$EFFECTIVE_REMOTE_CMD")"

@@ -555,7 +555,7 @@ resolve_source_output_layout() {
     VIDEO|AUDIO|ISO)
       base_dir="$(dirname "$src_path")"
       ;;
-    BDMV)
+    BDMV|AUDIO_DIR)
       if [[ "$(basename "$src_path")" == "BDMV" ]]; then
         base_dir="$(dirname "$src_path")"
       else

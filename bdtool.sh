@@ -83,7 +83,9 @@ fi
 
 APP_NAME="bdtool"
 BT_VERSION="${BT_VERSION:-0.1.0}"
+: "${BDTOOL_AUDIO_SPECTRUM_MODE:=single}"
 : "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
+: "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 bt_die() { die "$*"; }
@@ -192,6 +194,26 @@ bt_find_audio_files() {
     -iname "*.mp3" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.m4a" -o \
     -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" \
   \) 2>/dev/null | sort -u
+}
+
+bt_find_direct_audio_files() {
+  local base="$1"
+  find "$base" -maxdepth 1 -type f \( \
+    -iname "*.mp3" -o -iname "*.flac" -o -iname "*.wav" -o -iname "*.m4a" -o \
+    -iname "*.aac" -o -iname "*.ogg" -o -iname "*.opus" \
+  \) -print0 2>/dev/null | LC_ALL=C sort -z
+}
+
+bt_is_audio_dir() {
+  local dir="$1"
+  local audio=""
+  local count=0
+  [[ -d "$dir" ]] || return 1
+  while IFS= read -r -d '' audio; do
+    count=$((count + 1))
+    (( count >= 2 )) && return 0
+  done < <(bt_find_direct_audio_files "$dir")
+  return 1
 }
 
 bt_bdmv_root_from_stream_file() {
@@ -480,15 +502,69 @@ bt_finalize_video_artifacts() {
   [[ "$cnt" == "7" ]] || bt_die "生成失败：产物数量异常（期望7，实际$cnt）：$info_dir"
 }
 
+bt_audio_spectrum_tail_filter() {
+  local seconds="${1:-0}"
+  if [[ "$seconds" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'atrim=end=%s,showspectrumpic=s=%s:legend=disabled' "$seconds" "$BDTOOL_AUDIO_SPECTRUM_SIZE"
+  else
+    printf 'showspectrumpic=s=%s:legend=disabled' "$BDTOOL_AUDIO_SPECTRUM_SIZE"
+  fi
+}
+
 bt_make_audio_spectrum() {
   local audio="$1"
   local info_dir="$2"
+  local filter_tail=""
+  filter_tail="$(bt_audio_spectrum_tail_filter "$BDTOOL_AUDIO_SPECTRUM_SECONDS")"
   bt_need_cmd ffmpeg
   mkdir -p "$info_dir"
   execute_with_spinner "生成频谱图" \
     ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" \
-    -filter_complex "[0:a]aformat=channel_layouts=mono,atrim=end=${BDTOOL_AUDIO_SPECTRUM_SECONDS},showspectrumpic=s=${BDTOOL_AUDIO_SPECTRUM_SIZE}:legend=disabled" \
+    -filter_complex "[0:a]aformat=channel_layouts=mono,${filter_tail}" \
     -frames:v 1 "$info_dir/频谱图.png" || bt_die "频谱图生成失败：$audio"
+}
+
+bt_make_audio_spectrum_combined() {
+  local info_dir="$1"
+  shift
+  local audio=""
+  local count="$#"
+  local i=0
+  local prep=""
+  local inputs=""
+  local filter_tail=""
+  local filter_complex=""
+  local -a cmd=(ffmpeg -nostdin -hide_banner -loglevel error -y)
+
+  (( count > 0 )) || bt_die "整包频谱图生成失败：音频列表为空"
+  bt_need_cmd ffmpeg
+  mkdir -p "$info_dir"
+  for audio in "$@"; do
+    cmd+=(-i "$audio")
+    prep+="[${i}:a]aformat=channel_layouts=mono,aresample=44100[a${i}];"
+    inputs+="[a${i}]"
+    i=$((i + 1))
+  done
+  filter_tail="$(bt_audio_spectrum_tail_filter "$BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS")"
+  filter_complex="${prep}${inputs}concat=n=${count}:v=0:a=1,${filter_tail}"
+  cmd+=(-filter_complex "$filter_complex" -frames:v 1 "$info_dir/频谱图.png")
+  execute_with_spinner "生成整包总频谱图" "${cmd[@]}" || bt_die "整包频谱图生成失败：$info_dir"
+}
+
+bt_run_mediainfo_report_combined() {
+  local info_dir="$1"
+  shift
+  local audio=""
+  mkdir -p "$info_dir"
+  : > "$info_dir/mediainfo.txt"
+  bt_need_cmd mediainfo
+  for audio in "$@"; do
+    {
+      printf '===== %s =====\n' "$(basename "$audio")"
+      mediainfo "$audio"
+      printf '\n'
+    } >> "$info_dir/mediainfo.txt" 2>> "$BDTOOL_RUN_LOG" || bt_die "MediaInfo 生成失败：$audio"
+  done
 }
 
 bt_finalize_audio_artifacts() {
@@ -705,6 +781,31 @@ bt_process_audio_file() {
   bt_debug "artifact check ok type=AUDIO dir=$info_dir"
 }
 
+bt_process_audio_dir_combined() {
+  local audio_dir="$1"
+  local base_out="${2:-}"
+  local audio=""
+  local audio_files=()
+
+  while IFS= read -r -d '' audio; do
+    audio_files+=("$audio")
+  done < <(bt_find_direct_audio_files "$audio_dir")
+  [[ "${#audio_files[@]}" -ge 2 ]] || bt_die "音乐目录至少需要 2 个音频文件：$audio_dir"
+
+  bt_prepare_output_layout "AUDIO_DIR" "$audio_dir" "$base_out" "$(basename "$audio_dir")"
+  local info_dir="$BT_INFO_DIR"
+  find "$info_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+
+  bt_log "AUDIO_DIR: $audio_dir"
+  bt_log "OUT:       $BT_JOB_DIR"
+  bt_log "MODE:      combined (${#audio_files[@]} tracks)"
+
+  bt_run_mediainfo_report_combined "$info_dir" "${audio_files[@]}"
+  bt_make_audio_spectrum_combined "$info_dir" "${audio_files[@]}"
+  bt_finalize_audio_artifacts "$info_dir"
+  bt_debug "artifact check ok type=AUDIO_DIR dir=$info_dir"
+}
+
 bt_worker_entry() {
   OPT_MEDIAINFO="${OPT_MEDIAINFO:-1}"
   OPT_SHOTS="${OPT_SHOTS:-1}"
@@ -748,11 +849,17 @@ bt_process_local_scan() {
     return 0
   fi
 
+  if [[ -d "$scan_path" && "${BDTOOL_AUDIO_SPECTRUM_MODE:-single}" == "combined" ]] && bt_is_audio_dir "$scan_path"; then
+    bt_process_audio_dir_combined "$scan_path" "$out_base"
+    echo "$BT_JOB_DIR"
+    return 0
+  fi
+
   if [[ -f "$scan_path" ]]; then
     if ! bt_is_video_file "$scan_path" && ! bt_is_audio_file "$scan_path"; then
       bt_die "不支持的文件类型：$scan_path（仅视频/音频文件或 Blu-ray BDMV/ISO）"
     fi
-    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
+    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
     local worker_cmd
     worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
     execute_with_spinner "处理媒体 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
@@ -772,7 +879,7 @@ bt_process_local_scan() {
 
   local cmds=()
   local v
-  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT
+  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
   for v in "${media_list[@]}"; do
     cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$out_base")")
   done
@@ -813,11 +920,14 @@ options:
   -s N               等价于 --shots N
   --jobs N           并行任务数（默认 1）
   -j N               等价于 --jobs N
+  --audio-spectrum MODE
+                    音频频谱模式：single=单曲图，combined=目录整包总图（默认 single）
   --out DIR          输出目录（默认按源路径上层目录/信息；显式指定时覆盖）
 
 examples:
   ./bdtool.sh movie.mkv
   ./bdtool.sh song.flac
+  ./bdtool.sh /data/music/album --audio-spectrum combined
   ./bdtool.sh /data/videos -s 6 -j 2
   ./bdtool.sh movie.mkv --log-level debug
   ./bdtool.sh scan /data/videos --out output
@@ -1013,6 +1123,14 @@ bt_main_scan() {
         OPT_JOBS="${2:-}"
         shift 2
         ;;
+      --audio-spectrum)
+        [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "--audio-spectrum requires a value. Example: ./bdtool.sh <path> --audio-spectrum combined"
+        case "${2,,}" in
+          single|combined) BDTOOL_AUDIO_SPECTRUM_MODE="${2,,}" ;;
+          *) bt_die "invalid audio spectrum mode: $2. Use single|combined" ;;
+        esac
+        shift 2
+        ;;
       -j)
         [[ $# -ge 2 && -n "${2:-}" && "${2:0:1}" != "-" ]] || bt_die "-j requires a value. Example: ./bdtool.sh <path> -j 2"
         OPT_JOBS="${2:-}"
@@ -1030,8 +1148,13 @@ bt_main_scan() {
 
   [[ -e "$scan_path" ]] || bt_die "路径不存在：$scan_path。示例：./bdtool.sh ./movie.mkv --mode dry"
   [[ -n "$out_dir" ]] || bt_log "OUT(auto): 源文件上层目录/信息"
+  case "${BDTOOL_AUDIO_SPECTRUM_MODE,,}" in
+    single|combined) BDTOOL_AUDIO_SPECTRUM_MODE="${BDTOOL_AUDIO_SPECTRUM_MODE,,}" ;;
+    *) bt_die "invalid audio spectrum mode: $BDTOOL_AUDIO_SPECTRUM_MODE. Use single|combined" ;;
+  esac
 
-  bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL"
+  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
+  bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL audio_spectrum=$BDTOOL_AUDIO_SPECTRUM_MODE"
   OPT_SHOTS_N=6
   bt_validate_options
 

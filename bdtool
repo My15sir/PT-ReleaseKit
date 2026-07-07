@@ -85,7 +85,9 @@ setup_bundle_runtime "$ROOT_DIR"
 : "${BDTOOL_DOWNLOAD_DIR:=}"
 : "${BDTOOL_SCAN_FULL_ROOT:=/}"
 : "${BDTOOL_DEBUG:=0}"
+: "${BDTOOL_AUDIO_SPECTRUM_MODE:=single}"
 : "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
+: "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 ensure_output_root
@@ -150,6 +152,7 @@ msg() {
       bye) echo "Bye" ;;
       type_video) echo "video" ;;
       type_audio) echo "audio" ;;
+      type_audio_dir) echo "music directory" ;;
       type_bdmv) echo "bluray" ;;
       type_iso) echo "iso" ;;
       *) echo "$key" ;;
@@ -193,6 +196,7 @@ msg() {
       bye) echo "已退出" ;;
       type_video) echo "视频" ;;
       type_audio) echo "音频" ;;
+      type_audio_dir) echo "音乐目录" ;;
       type_bdmv) echo "原盘" ;;
       type_iso) echo "ISO" ;;
       *) echo "$key" ;;
@@ -321,6 +325,137 @@ is_audio() {
     *.mp3|*.flac|*.wav|*.m4a|*.aac|*.ogg|*.opus) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+normalize_audio_spectrum_mode() {
+  case "${1,,}" in
+    single|combined) printf '%s' "${1,,}" ;;
+    *) return 1 ;;
+  esac
+}
+
+audio_spectrum_tail_filter() {
+  local seconds="${1:-0}"
+  if [[ "$seconds" =~ ^[1-9][0-9]*$ ]]; then
+    printf 'atrim=end=%s,showspectrumpic=s=%s:legend=disabled' "$seconds" "$BDTOOL_AUDIO_SPECTRUM_SIZE"
+  else
+    printf 'showspectrumpic=s=%s:legend=disabled' "$BDTOOL_AUDIO_SPECTRUM_SIZE"
+  fi
+}
+
+find_audio_files_in_dir() {
+  local dir="$1"
+  find "$dir" -maxdepth 1 -type f \( \
+    -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o \
+    -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \
+  \) -print0 2>/dev/null | LC_ALL=C sort -z
+}
+
+is_audio_dir() {
+  local dir="$1"
+  local audio=""
+  local count=0
+  [[ -d "$dir" ]] || return 1
+  while IFS= read -r -d '' audio; do
+    count=$((count + 1))
+    (( count >= 2 )) && return 0
+  done < <(find_audio_files_in_dir "$dir")
+  return 1
+}
+
+emit_audio_dir_candidates() {
+  local scan_root="$1"
+  local audio=""
+  local dir=""
+  local -A dir_counts=()
+
+  while IFS= read -r -d '' audio; do
+    dir="$(dirname "$audio")"
+    dir_counts["$dir"]=$(( ${dir_counts["$dir"]:-0} + 1 ))
+  done < <(
+    find "$scan_root" \( -type d \( \
+      -name proc -o -name sys -o -name dev -o -name run -o -name tmp -o \
+      -name node_modules -o -name .git -o -name .svn -o -name .cache -o -name .npm -o -name .pnpm-store \
+    \) -prune \) -o \
+    \( -type f \( -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) -print0 \) 2>/dev/null
+  )
+
+  for dir in "${!dir_counts[@]}"; do
+    if (( dir_counts["$dir"] >= 2 )); then
+      printf '%s\n' "$dir"
+    fi
+  done | LC_ALL=C sort
+}
+
+write_audio_mediainfo_report() {
+  local out="$1"
+  shift
+  local audio=""
+  local hard_fail=0
+  : > "$out/mediainfo.txt"
+  for audio in "$@"; do
+    {
+      printf '===== %s =====\n' "$(basename "$audio")"
+      if require_runtime_cmd mediainfo; then
+        mediainfo "$audio" || hard_fail=1
+      else
+        printf '未安装 mediainfo，无法生成有效信息。\n'
+        hard_fail=1
+      fi
+      printf '\n'
+    } >> "$out/mediainfo.txt" 2>/dev/null
+  done
+  return "$hard_fail"
+}
+
+make_audio_spectrum_single() {
+  local audio="$1"
+  local image="$2"
+  local filter_tail=""
+  filter_tail="$(audio_spectrum_tail_filter "$BDTOOL_AUDIO_SPECTRUM_SECONDS")"
+  require_runtime_cmd ffmpeg || return 1
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" \
+    -filter_complex "[0:a]aformat=channel_layouts=mono,${filter_tail}" \
+    -frames:v 1 "$image" >/dev/null 2>&1
+}
+
+make_audio_spectrum_combined() {
+  local image="$1"
+  shift
+  local audio=""
+  local count="$#"
+  local i=0
+  local prep=""
+  local inputs=""
+  local filter_tail=""
+  local filter_complex=""
+  local -a cmd=(ffmpeg -nostdin -hide_banner -loglevel error -y)
+
+  (( count > 0 )) || return 1
+  require_runtime_cmd ffmpeg || return 1
+  for audio in "$@"; do
+    cmd+=(-i "$audio")
+    prep+="[${i}:a]aformat=channel_layouts=mono,aresample=44100[a${i}];"
+    inputs+="[a${i}]"
+    i=$((i + 1))
+  done
+  filter_tail="$(audio_spectrum_tail_filter "$BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS")"
+  filter_complex="${prep}${inputs}concat=n=${count}:v=0:a=1,${filter_tail}"
+  cmd+=(-filter_complex "$filter_complex" -frames:v 1 "$image")
+  "${cmd[@]}" >/dev/null 2>&1
+}
+
+finalize_audio_dir_single_output() {
+  local dir="$1"
+  local track_dir=""
+  local count=0
+  while IFS= read -r track_dir; do
+    [[ -d "$track_dir" ]] || continue
+    [[ -s "$track_dir/频谱图.png" ]] || return 1
+    [[ -s "$track_dir/mediainfo.txt" ]] || return 1
+    count=$((count + 1))
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+  (( count > 0 ))
 }
 
 bdmv_root_from_stream_file() {
@@ -496,6 +631,7 @@ collect_results() {
       -name node_modules -o -name .git -o -name .svn -o -name .cache -o -name .npm -o -name .pnpm-store \
     \) -prune \) -o \
     \( -type f \( -iname '*.mkv' -o -iname '*.mp4' -o -iname '*.avi' -o -iname '*.mov' -o -iname '*.ts' -o -iname '*.m2ts' -o -iname '*.wmv' -o -iname '*.webm' -o -iname '*.mpg' -o -iname '*.mpeg' -o -iname '*.iso' -o -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.m4a' -o -iname '*.aac' -o -iname '*.ogg' -o -iname '*.opus' \) ! -iname '*.d.ts' -print -o -type d -name BDMV -print \) 2>/dev/null
+    emit_audio_dir_candidates "$scan_root"
   }
 
   SCAN_TYPES=()
@@ -594,6 +730,7 @@ show_result_item() {
   case "${SCAN_TYPES[idx-1]}" in
     VIDEO) label="$(msg type_video)" ;;
     AUDIO) label="$(msg type_audio)" ;;
+    AUDIO_DIR) label="$(msg type_audio_dir)" ;;
     BDMV) label="$(msg type_bdmv)" ;;
     ISO) label="$(msg type_iso)" ;;
     *) label="${SCAN_TYPES[idx-1]}" ;;
@@ -630,6 +767,9 @@ resolve_scan_candidate() {
     resolved_path="$raw_path"
   elif [[ -d "$raw_path" && -d "$raw_path/BDMV" ]]; then
     candidate_type="BDMV"
+    resolved_path="$raw_path"
+  elif [[ -d "$raw_path" ]] && is_audio_dir "$raw_path"; then
+    candidate_type="AUDIO_DIR"
     resolved_path="$raw_path"
   else
     return 1
@@ -696,6 +836,7 @@ scan_type_label() {
   case "$type" in
     VIDEO) [[ "$LANG_CODE" == "en" ]] && echo "video" || echo "视频" ;;
     AUDIO) [[ "$LANG_CODE" == "en" ]] && echo "audio" || echo "音频" ;;
+    AUDIO_DIR) [[ "$LANG_CODE" == "en" ]] && echo "music directory" || echo "音乐目录" ;;
     BDMV) [[ "$LANG_CODE" == "en" ]] && echo "bluray" || echo "原盘" ;;
     ISO) [[ "$LANG_CODE" == "en" ]] && echo "iso" || echo "镜像" ;;
     *) printf '%s' "$type" ;;
@@ -804,6 +945,7 @@ handle_generate_path_command() {
   local target=""
   local item_type=""
   local item_path=""
+  local spectrum_mode="${BDTOOL_AUDIO_SPECTRUM_MODE:-single}"
 
   shift || true
   while [[ $# -gt 0 ]]; do
@@ -824,11 +966,19 @@ handle_generate_path_command() {
         LANG_CODE="${1#*=}"
         shift
         ;;
+      --audio-spectrum)
+        spectrum_mode="${2:-}"
+        shift 2
+        ;;
+      --audio-spectrum=*)
+        spectrum_mode="${1#*=}"
+        shift
+        ;;
       --help|-h)
         if [[ "$LANG_CODE" == "en" ]]; then
-          echo "Usage: bdtool generate-path --path TARGET [--lang zh|en]"
+          echo "Usage: bdtool generate-path --path TARGET [--lang zh|en] [--audio-spectrum single|combined]"
         else
-          echo "用法: bdtool generate-path --path 目标路径 [--lang zh|en]"
+          echo "用法: bdtool generate-path --path 目标路径 [--lang zh|en] [--audio-spectrum single|combined]"
         fi
         return 0
         ;;
@@ -853,6 +1003,11 @@ handle_generate_path_command() {
     screen_error "不支持的目标路径：$target"
     return 2
   }
+  if ! BDTOOL_AUDIO_SPECTRUM_MODE="$(normalize_audio_spectrum_mode "$spectrum_mode")"; then
+    screen_error "无效音频频谱模式：$spectrum_mode（可选 single 或 combined）"
+    return 2
+  fi
+  export BDTOOL_AUDIO_SPECTRUM_MODE
 
   preflight_post_process || return 1
   generate_item "$item_type" "$item_path" || return 1
@@ -970,17 +1125,51 @@ generate_item() {
     screen "生成进度: 45% (mediainfo 生成完成)"
 
     screen "生成进度: 50% (频谱图生成中)"
-    if require_runtime_cmd ffmpeg; then
-      if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$src" \
-        -filter_complex "[0:a]aformat=channel_layouts=mono,atrim=end=${BDTOOL_AUDIO_SPECTRUM_SECONDS},showspectrumpic=s=${BDTOOL_AUDIO_SPECTRUM_SIZE}:legend=disabled" \
-        -frames:v 1 "$out/频谱图.png" >/dev/null 2>&1; then
-        hard_fail=1
-      fi
-    else
+    if ! make_audio_spectrum_single "$src" "$out/频谱图.png"; then
       hard_fail=1
     fi
     screen "生成进度: 96% (生成结果校验中)"
     finalize_audio_output "$out" || hard_fail=1
+  elif [[ "$type" == "AUDIO_DIR" ]]; then
+    local audio_files=()
+    local audio=""
+    local track_out=""
+    local track_name=""
+    while IFS= read -r -d '' audio; do
+      audio_files+=("$audio")
+    done < <(find_audio_files_in_dir "$src")
+    find "$out" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+    if (( ${#audio_files[@]} < 2 )); then
+      screen_error "音乐目录至少需要 2 个音频文件：$src"
+      hard_fail=1
+    elif [[ "${BDTOOL_AUDIO_SPECTRUM_MODE:-single}" == "combined" ]]; then
+      screen "生成进度: 10% (整包 mediainfo 生成中)"
+      if ! write_audio_mediainfo_report "$out" "${audio_files[@]}"; then
+        hard_fail=1
+      fi
+      screen "生成进度: 45% (整包 mediainfo 生成完成)"
+      screen "生成进度: 50% (整包总频谱图生成中，共 ${#audio_files[@]} 首)"
+      if ! make_audio_spectrum_combined "$out/频谱图.png" "${audio_files[@]}"; then
+        hard_fail=1
+      fi
+      screen "生成进度: 96% (生成结果校验中)"
+      finalize_audio_output "$out" || hard_fail=1
+    else
+      screen "生成进度: 10% (单曲频谱图生成中，共 ${#audio_files[@]} 首)"
+      for audio in "${audio_files[@]}"; do
+        track_name="$(safe_name "$(basename "${audio%.*}")")"
+        track_out="$(unique_dir "$out" "$track_name")"
+        mkdir -p "$track_out"
+        if ! write_audio_mediainfo_report "$track_out" "$audio"; then
+          hard_fail=1
+        fi
+        if ! make_audio_spectrum_single "$audio" "$track_out/频谱图.png"; then
+          hard_fail=1
+        fi
+      done
+      screen "生成进度: 96% (生成结果校验中)"
+      finalize_audio_dir_single_output "$out" || hard_fail=1
+    fi
   else
     screen "生成进度: 10% (BDInfo 生成中)"
     local bd_source="$src"
