@@ -973,10 +973,16 @@ rm -f "$archive_path"
 
     def build_scan_env(self) -> dict[str, str]:
         env: dict[str, str] = {}
+        scan_root = str(self.config.get("local_root") or "/").strip() or "/"
         scan_include = self.config.get("scan_include", "")
         scan_exclude = self.config.get("scan_exclude", "")
+        env["BDTOOL_SCAN_FULL_ROOT"] = scan_root
         if scan_include:
-            env["BDTOOL_SCAN_INCLUDE_ROOTS"] = scan_include
+            roots = [scan_root]
+            for item in str(scan_include).replace(",", " ").split():
+                if item and item not in roots:
+                    roots.append(item)
+            env["BDTOOL_SCAN_INCLUDE_ROOTS"] = " ".join(roots)
         if scan_exclude:
             env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = scan_exclude
         env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(self.config.get("audio_spectrum_mode") or "single")

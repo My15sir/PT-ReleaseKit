@@ -347,11 +347,13 @@ def build_scan_command(config: dict[str, Any], remote_cmd: str) -> list[str]:
     ssh_bin = shutil.which("ssh")
     if not ssh_bin:
         raise RuntimeError("本机缺少 ssh。")
+    include_roots = scan_include_env_value(config)
     remote_script = " ".join(
         part
         for part in (
-            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(str(config['scan_include']))};"
-            if config.get("scan_include")
+            f"export BDTOOL_SCAN_FULL_ROOT={shlex.quote(effective_scan_root(config))};",
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(include_roots)};"
+            if include_roots
             else "",
             f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(str(config['scan_exclude']))};"
             if config.get("scan_exclude")
@@ -411,9 +413,13 @@ def shell_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
 def local_runtime_env(config: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("HOME", str(Path.home()))
-    local_root = str(config.get("local_root") or "/")
+    local_root = effective_scan_root(config)
+    include_roots = scan_include_env_value(config)
     env["BDTOOL_SCAN_FULL_ROOT"] = local_root
-    env["BDTOOL_SCAN_INCLUDE_ROOTS"] = str(config.get("scan_include") or local_root)
+    if include_roots:
+        env["BDTOOL_SCAN_INCLUDE_ROOTS"] = include_roots
+    else:
+        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS", None)
     env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = str(config.get("scan_exclude") or "")
     env["BDTOOL_DOWNLOAD_DIR"] = str(config.get("save_dir") or default_save_dir())
     env["BDTOOL_AUTO_CLEANUP"] = "1" if config.get("auto_cleanup", True) else "0"
@@ -427,9 +433,31 @@ def split_path_roots(raw: str) -> list[str]:
     return [item for item in raw.replace(",", " ").split() if item]
 
 
+def effective_scan_root(config: dict[str, Any]) -> str:
+    return str(config.get("local_root") or DEFAULT_CONFIG["local_root"] or "/").strip() or "/"
+
+
+def extra_scan_roots(config: dict[str, Any]) -> list[str]:
+    root = effective_scan_root(config)
+    seen = {root}
+    extras: list[str] = []
+    for item in split_path_roots(str(config.get("scan_include") or "")):
+        if item and item not in seen:
+            seen.add(item)
+            extras.append(item)
+    return extras
+
+
+def scan_include_env_value(config: dict[str, Any]) -> str:
+    extras = extra_scan_roots(config)
+    if not extras:
+        # Keep the main scan root out of BDTOOL_SCAN_INCLUDE_ROOTS so paths with spaces still work.
+        return ""
+    return " ".join([effective_scan_root(config), *extras])
+
+
 def local_allowed_roots(config: dict[str, Any]) -> list[Path]:
-    raw = str(config.get("scan_include") or "").strip()
-    roots = split_path_roots(raw) if raw else [str(config.get("local_root") or "/")]
+    roots = [effective_scan_root(config), *extra_scan_roots(config)]
     resolved: list[Path] = []
     for root in roots:
         try:
@@ -455,7 +483,10 @@ def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
     if not bdtool.is_file():
         raise RuntimeError(f"找不到 bdtool：{bdtool}")
     env = local_runtime_env(config)
-    task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_INCLUDE_ROOTS']}")
+    if env.get("BDTOOL_SCAN_INCLUDE_ROOTS"):
+        task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}；额外目录：{env['BDTOOL_SCAN_INCLUDE_ROOTS']}")
+    else:
+        task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}")
     result = subprocess.run(
         [bash_bin, str(bdtool), "scan-json", "--full", "--lang", "zh"],
         cwd=str(APP_ROOT),
@@ -555,7 +586,7 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
                 "PTBD_REMOTE_PT_CMD": str(config.get("remote_cmd") or "pt"),
                 "PTBD_REMOTE_BOOTSTRAP": "1" if config.get("remote_bootstrap") else "0",
                 "PTBD_LOCAL_SAVE_DIR": str(config["save_dir"]),
-                "PTBD_SCAN_INCLUDE_ROOTS": str(config.get("scan_include") or ""),
+                "PTBD_SCAN_INCLUDE_ROOTS": scan_include_env_value(config),
                 "PTBD_SCAN_EXCLUDE_ROOTS": str(config.get("scan_exclude") or ""),
                 "PTBD_AUTO_CLEANUP": "1" if config.get("auto_cleanup", True) else "0",
                 "PTBD_AUDIO_SPECTRUM_MODE": str(config.get("audio_spectrum_mode") or "single"),
@@ -1322,8 +1353,8 @@ INDEX_HTML = r"""<!doctype html>
               <label>结果保存目录
                 <input name="save_dir" type="text">
               </label>
-              <label>扫描白名单
-                <textarea name="scan_include" placeholder="/home /data /mnt，留空时使用资源根目录"></textarea>
+              <label>额外扫描目录
+                <textarea name="scan_include" placeholder="可留空。需要同时扫描多个根目录时再填，例如 /data,/mnt/media"></textarea>
               </label>
               <label>额外排除目录
                 <textarea name="scan_exclude" placeholder="/mnt/cache /data/tmp，可留空"></textarea>
@@ -1478,6 +1509,7 @@ INDEX_HTML = r"""<!doctype html>
     let rawCandidateCount = 0;
     let selectedPaths = new Set();
     let selectedMaterialPlan = "auto";
+    let loadedConfig = {};
     let currentPage = 1;
     let pageSize = Number(pageSizeSelect.value || 50);
     let showSelectedOnly = false;
@@ -1492,6 +1524,14 @@ INDEX_HTML = r"""<!doctype html>
 
     function formData() {
       const data = Object.fromEntries(new FormData(form).entries());
+      if (
+        loadedConfig.local_root !== undefined &&
+        data.local_root !== loadedConfig.local_root &&
+        data.scan_include === (loadedConfig.scan_include || "")
+      ) {
+        data.scan_include = "";
+        form.scan_include.value = "";
+      }
       data.remote_bootstrap = form.remote_bootstrap.checked;
       data.auto_cleanup = form.auto_cleanup.checked;
       data.clear_password = form.clear_password.checked;
@@ -1689,6 +1729,7 @@ INDEX_HTML = r"""<!doctype html>
     async function loadConfig() {
       const payload = await api("/api/config");
       const config = payload.config;
+      loadedConfig = {...config};
       for (const [key, value] of Object.entries(config)) {
         if (!(key in form) || key === "remote_password") continue;
         const field = form[key];
@@ -1714,6 +1755,7 @@ INDEX_HTML = r"""<!doctype html>
       form.clear_password.checked = false;
       form.remote_password.placeholder = payload.config.password_saved ? "已保存密码，留空不修改" : "未保存密码";
       appendFrontendLog("[web] 配置已保存");
+      loadedConfig = {...payload.config};
       return payload.config;
     }
 
