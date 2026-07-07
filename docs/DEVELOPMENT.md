@@ -34,6 +34,7 @@
 - `PT-BDtool.exe`
 - `PT-BDtool.app`
 - `ptbd-gui.py`
+- `ptbd-web.py`
 
 ### 远端主流程
 
@@ -71,6 +72,8 @@
 - `PT-BDtool.sh`
 - `ptbd-gui`
 - `ptbd-gui.py`
+- `ptbd-web`
+- `ptbd-web.py`
 - `ptbd`
 - `ptbd-remote.sh`
 - `ptbd-start.sh`
@@ -141,7 +144,19 @@
 ### 语法与基础检查
 
 ```bash
-python3 -m py_compile ptbd-gui.py ptbd_remote_backend.py scripts/build-controller-app.py scripts/remote-upload-server.py
+python3 -m py_compile ptbd-gui.py ptbd-web.py ptbd_remote_backend.py scripts/build-controller-app.py scripts/remote-upload-server.py
+```
+
+### Web 控制端自检
+
+```bash
+./ptbd-web --host 127.0.0.1 --port 8899
+```
+
+打开：
+
+```text
+http://127.0.0.1:8899/
 ```
 
 ### 全量回归

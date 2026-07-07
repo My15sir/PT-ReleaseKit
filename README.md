@@ -54,6 +54,7 @@ PT-BDtool 是一个给 PT 用户整理发种素材的小工具。
 
 - Linux 图形入口：`./PT-BDtool.sh`
 - 通用 GUI 包装：`./ptbd-gui`
+- 本机 Web 控制端：`./ptbd-web`
 - 新手模式入口：`./ptbd`
 - 远端 shell 流程：`./ptbd-remote.sh`
 - 本地 CLI 菜单：`./ptbd-start.sh`
@@ -163,6 +164,32 @@ chmod +x PT-BDtool.sh PT-BDtool.command ptbd-gui ptbd-start.sh
 
 ```bash
 ./ptbd
+```
+
+如果你想在浏览器里操作：
+
+```bash
+./ptbd-web --open
+```
+
+默认地址是：
+
+```text
+http://127.0.0.1:8899/
+```
+
+Web 控制端默认只监听本机地址。它会复用远端扫描和生成流程，支持填写 VPS、扫描候选、选择视频 / 音频 / `BDMV` / `ISO`，并启动素材生成。
+
+如果部署在 VPS 并由 Nginx / FileBrowser 反向代理到子路径，可以指定前缀：
+
+```bash
+./ptbd-web --host 127.0.0.1 --port 8899 --base-path /ptbd
+```
+
+VPS 本机处理模式可通过配置文件或环境变量启用，用于直接扫描当前服务器上的 FileBrowser 根目录：
+
+```bash
+PTBD_WEB_MODE=local PTBD_WEB_LOCAL_ROOT=/data/downloads ./ptbd-web --base-path /ptbd
 ```
 
 ### macOS

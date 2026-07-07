@@ -30,6 +30,10 @@
   - GUI 包装器
 - `ptbd-gui.py`
   - GUI 主程序
+- `ptbd-web`
+  - 本机 Web 控制端入口
+- `ptbd-web.py`
+  - Web 控制端主程序
 - `ptbd`
   - 新手模式入口
 - `ptbd-remote.sh`
@@ -60,6 +64,8 @@
 
 - `ptbd-gui`
 - `ptbd-gui.py`
+- `ptbd-web`
+- `ptbd-web.py`
 - `ptbd_remote_backend.py`
 
 ### 远端运行与回传

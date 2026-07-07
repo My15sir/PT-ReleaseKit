@@ -307,8 +307,8 @@ run_step() {
   cp -f "$TMP_RESULTS_TSV" "$RESULTS_TSV"
 }
 
-run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
-run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
+run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-web" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
+run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd-web.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
 run_step "placeholder-png-valid" success python3 "$PLACEHOLDER_PNG_TEST" "$ROOT_DIR"
 run_step "remote-runtime-render" success python3 "$RUNTIME_RENDER_TEST" "$ROOT_DIR"
 run_step "workflow-ci-markers" success bash -c "grep -q 'name: Validate Project' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Release Portable Apps' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'name: Release Linux Bundle' '$ROOT_DIR/.github/workflows/bundle-release.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
@@ -320,6 +320,7 @@ run_step "ptbd-start-help" success "$ROOT_DIR/ptbd-start.sh" --help
 run_step "ptbd-remote-help" success "$ROOT_DIR/ptbd-remote.sh" --help
 run_step "ptbd-remote-start-help" success "$ROOT_DIR/ptbd-remote-start.sh" --help
 run_step "ptbd-gui-self-check" success "$ROOT_DIR/ptbd-gui" --self-check
+run_step "ptbd-web-help" success "$ROOT_DIR/ptbd-web" --help
 run_step "build-controller-help" success python3 "$ROOT_DIR/scripts/build-controller-app.py" --help
 run_step "ensure-bundle-help" success python3 "$ROOT_DIR/scripts/ensure-bundle.py" --help
 run_step "prepare-remote-runtime-help" success bash "$ROOT_DIR/scripts/prepare-remote-runtime.sh" --help
