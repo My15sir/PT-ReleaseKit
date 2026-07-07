@@ -671,20 +671,23 @@ INDEX_HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      --bg: oklch(1 0 0);
-      --surface: oklch(0.975 0.006 200);
-      --surface-strong: oklch(0.93 0.018 200);
-      --ink: oklch(0.18 0.018 210);
-      --muted: oklch(0.43 0.025 210);
-      --primary: oklch(0.45 0.074 200);
-      --primary-strong: oklch(0.36 0.084 200);
-      --accent: oklch(0.58 0.13 154);
-      --danger: oklch(0.55 0.17 27);
-      --warning: oklch(0.67 0.14 75);
-      --success: oklch(0.52 0.12 150);
-      --line: oklch(0.88 0.012 210);
-      --shadow: 0 10px 24px oklch(0.18 0.018 210 / 0.08);
-      --radius: 14px;
+      --bg: oklch(0.985 0.004 230);
+      --surface: oklch(1 0 0);
+      --surface-strong: oklch(0.955 0.008 230);
+      --surface-soft: oklch(0.973 0.006 230);
+      --ink: oklch(0.19 0.018 235);
+      --muted: oklch(0.45 0.023 235);
+      --faint: oklch(0.62 0.018 235);
+      --primary: oklch(0.44 0.105 246);
+      --primary-strong: oklch(0.34 0.11 246);
+      --accent: oklch(0.56 0.12 154);
+      --danger: oklch(0.52 0.15 28);
+      --warning: oklch(0.68 0.13 76);
+      --success: oklch(0.50 0.11 150);
+      --line: oklch(0.88 0.012 235);
+      --line-strong: oklch(0.78 0.018 235);
+      --shadow: 0 1px 3px oklch(0.19 0.018 235 / 0.11);
+      --radius: 12px;
       --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     }
@@ -696,9 +699,7 @@ INDEX_HTML = r"""<!doctype html>
     body {
       margin: 0;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at top left, oklch(0.88 0.045 200 / 0.52), transparent 32rem),
-        linear-gradient(180deg, var(--surface), var(--bg) 24rem);
+      background: var(--bg);
       color: var(--ink);
       font-family: var(--font);
       font-size: 15px;
@@ -713,22 +714,22 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .shell {
-      width: min(1380px, calc(100vw - 32px));
+      width: min(1440px, calc(100vw - 32px));
       margin: 0 auto;
-      padding: 28px 0 48px;
+      padding: 24px 0 42px;
     }
 
     .topbar {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 24px;
-      margin-bottom: 22px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      margin-bottom: 16px;
     }
 
     h1 {
       margin: 0 0 6px;
-      font-size: 2rem;
+      font-size: 1.68rem;
       line-height: 1.12;
       letter-spacing: -0.025em;
       text-wrap: balance;
@@ -741,10 +742,11 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .status-strip {
-      min-width: 260px;
-      padding: 12px 14px;
-      background: var(--ink);
-      color: white;
+      min-width: 300px;
+      padding: 11px 13px;
+      background: var(--surface);
+      color: var(--ink);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
     }
@@ -757,19 +759,50 @@ INDEX_HTML = r"""<!doctype html>
     .status-strip span {
       display: block;
       margin-top: 2px;
-      color: oklch(0.88 0.01 210);
+      color: var(--muted);
       font-size: 0.82rem;
     }
 
-    .layout {
+    .flow {
       display: grid;
-      grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-      gap: 18px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .step {
+      display: grid;
+      gap: 3px;
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+
+    .step strong {
+      font-size: 0.86rem;
+    }
+
+    .step span {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .workbench {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+      gap: 16px;
       align-items: start;
     }
 
+    .side-stack,
+    .main-stack {
+      display: grid;
+      gap: 16px;
+    }
+
     .panel {
-      background: oklch(1 0 0 / 0.86);
+      background: var(--surface);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
@@ -777,7 +810,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .panel-head {
-      padding: 16px 18px 12px;
+      padding: 15px 16px 12px;
       border-bottom: 1px solid var(--line);
     }
 
@@ -794,12 +827,37 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .panel-body {
-      padding: 16px 18px 18px;
+      padding: 15px 16px 16px;
     }
 
     .form-grid {
       display: grid;
       gap: 12px;
+    }
+
+    .quick-config {
+      display: grid;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 10px;
+      align-items: end;
+    }
+
+    .advanced-config {
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+
+    .advanced-config summary {
+      cursor: pointer;
+      color: var(--primary-strong);
+      font-weight: 750;
+      list-style-position: inside;
+    }
+
+    .advanced-grid {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
     }
 
     label {
@@ -813,7 +871,8 @@ INDEX_HTML = r"""<!doctype html>
     input[type="text"],
     input[type="password"],
     input[type="number"],
-    textarea {
+    textarea,
+    select {
       width: 100%;
       min-height: 40px;
       padding: 9px 11px;
@@ -831,7 +890,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     input:focus,
-    textarea:focus {
+    textarea:focus,
+    select:focus {
       border-color: var(--primary);
       box-shadow: 0 0 0 3px oklch(0.45 0.074 200 / 0.16);
     }
@@ -870,8 +930,8 @@ INDEX_HTML = r"""<!doctype html>
 
     .button {
       min-height: 40px;
-      border: 0;
-      border-radius: 999px;
+      border: 1px solid transparent;
+      border-radius: 10px;
       padding: 0 16px;
       color: var(--ink);
       background: var(--surface-strong);
@@ -881,7 +941,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .button:hover {
-      transform: translateY(-1px);
+      background: oklch(0.93 0.012 235);
     }
 
     .button:disabled {
@@ -901,13 +961,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .button.secondary {
-      background: var(--ink);
-      color: white;
-    }
-
-    .workspace {
-      display: grid;
-      gap: 18px;
+      background: var(--surface);
+      border-color: var(--line-strong);
+      color: var(--ink);
     }
 
     .toolbar {
@@ -919,8 +975,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .filters {
-      display: flex;
-      flex-wrap: wrap;
+      display: grid;
+      grid-template-columns: 160px minmax(220px, 1fr);
       gap: 10px;
       align-items: center;
     }
@@ -929,7 +985,7 @@ INDEX_HTML = r"""<!doctype html>
     .filters select {
       min-height: 38px;
       border: 1px solid var(--line);
-      border-radius: 999px;
+      border-radius: 10px;
       background: var(--bg);
       color: var(--ink);
       padding: 0 12px;
@@ -938,21 +994,26 @@ INDEX_HTML = r"""<!doctype html>
 
     .candidate-list {
       display: grid;
-      gap: 8px;
-      max-height: 420px;
+      gap: 6px;
+      max-height: 560px;
       overflow: auto;
       padding-right: 4px;
     }
 
     .candidate {
       display: grid;
-      grid-template-columns: auto 84px minmax(0, 1fr);
-      gap: 10px;
-      align-items: center;
-      padding: 10px 12px;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding: 11px 12px;
       border: 1px solid var(--line);
-      border-radius: 12px;
+      border-radius: 10px;
       background: var(--bg);
+    }
+
+    .candidate:has(input:checked) {
+      border-color: var(--primary);
+      background: oklch(0.96 0.018 246);
     }
 
     .candidate input {
@@ -965,11 +1026,26 @@ INDEX_HTML = r"""<!doctype html>
       align-items: center;
       justify-content: center;
       min-height: 26px;
-      border-radius: 999px;
-      background: oklch(0.91 0.035 200);
+      border-radius: 8px;
+      background: oklch(0.92 0.035 246);
       color: var(--primary-strong);
       font-size: 0.78rem;
       font-weight: 800;
+      padding: 0 8px;
+    }
+
+    .candidate-main {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    .candidate-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 760;
     }
 
     .path {
@@ -979,6 +1055,12 @@ INDEX_HTML = r"""<!doctype html>
       white-space: nowrap;
       font-family: var(--mono);
       font-size: 0.84rem;
+      color: var(--muted);
+    }
+
+    .candidate-materials {
+      color: var(--faint);
+      font-size: 0.82rem;
     }
 
     .empty {
@@ -989,14 +1071,60 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 12px;
     }
 
+    .material-options {
+      display: grid;
+      gap: 8px;
+    }
+
+    .material-card {
+      width: 100%;
+      display: grid;
+      gap: 3px;
+      text-align: left;
+      padding: 11px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--bg);
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .material-card strong {
+      font-size: 0.92rem;
+    }
+
+    .material-card span {
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    .material-card.active {
+      border-color: var(--primary);
+      background: oklch(0.96 0.018 246);
+    }
+
+    .run-summary {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border-radius: 10px;
+      background: var(--surface-soft);
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .run-summary strong {
+      color: var(--ink);
+    }
+
     .logbox {
-      min-height: 320px;
-      max-height: 500px;
+      min-height: 240px;
+      max-height: 420px;
       overflow: auto;
       margin: 0;
       padding: 14px;
       border-radius: 12px;
-      background: oklch(0.13 0.015 210);
+      background: oklch(0.15 0.016 235);
       color: oklch(0.9 0.01 210);
       font-family: var(--mono);
       font-size: 0.82rem;
@@ -1026,7 +1154,10 @@ INDEX_HTML = r"""<!doctype html>
       }
 
       .topbar,
-      .layout {
+      .workbench,
+      .flow,
+      .quick-config,
+      .filters {
         display: grid;
         grid-template-columns: 1fr;
       }
@@ -1061,116 +1192,169 @@ INDEX_HTML = r"""<!doctype html>
       </div>
     </section>
 
-    <section class="layout">
-      <aside class="panel">
+    <section class="flow" aria-label="发种材料生成流程">
+      <div class="step"><strong>1. 连接位置</strong><span>本机或 VPS，只在高级配置里改一次</span></div>
+      <div class="step"><strong>2. 扫描资源</strong><span>列出视频、音乐目录、原盘和 ISO</span></div>
+      <div class="step"><strong>3. 选择方案</strong><span>按资源类型决定要生成哪些材料</span></div>
+      <div class="step"><strong>4. 生成下载</strong><span>日志和结果包固定显示</span></div>
+    </section>
+
+    <form id="configForm" class="main-stack">
+      <section class="panel">
         <div class="panel-head">
-          <h2>运行配置</h2>
-          <p>VPS 模式需要 SSH；本机模式会直接处理当前服务器上的 FileBrowser 根目录。</p>
+          <div class="toolbar">
+            <div>
+              <h2>工作区</h2>
+              <p>先确认处理位置，再扫描资源。常用路径直接显示，SSH 和排除目录放到高级配置。</p>
+            </div>
+            <div class="actions" style="margin-top: 0">
+              <button class="button secondary" type="submit">保存设置</button>
+              <button class="button primary" type="button" id="scanBtn">扫描资源</button>
+            </div>
+          </div>
         </div>
         <div class="panel-body">
-          <form id="configForm" class="form-grid">
-            <label>运行模式
+          <div class="quick-config">
+            <label>处理位置
               <select name="mode">
-                <option value="remote">远端 VPS 模式</option>
-                <option value="local">本机服务器模式</option>
+                <option value="local">本机服务器</option>
+                <option value="remote">远端 VPS</option>
               </select>
             </label>
-            <label>本机扫描根目录
+            <label>资源根目录
               <input name="local_root" type="text" placeholder="/data/downloads">
             </label>
-            <label>VPS 地址
-              <input name="remote_host" type="text" autocomplete="off" placeholder="root@1.2.3.4">
-            </label>
-            <div class="row">
-              <label>SSH 端口
-                <input name="remote_port" type="number" min="1" max="65535">
+          </div>
+          <input name="audio_spectrum_mode" type="hidden" value="single">
+          <details class="advanced-config">
+            <summary>高级配置</summary>
+            <div class="advanced-grid">
+              <label>VPS 地址
+                <input name="remote_host" type="text" autocomplete="off" placeholder="root@1.2.3.4">
               </label>
-              <label>远端命令
-                <input name="remote_cmd" type="text" placeholder="pt">
+              <div class="row">
+                <label>SSH 端口
+                  <input name="remote_port" type="number" min="1" max="65535">
+                </label>
+                <label>远端命令
+                  <input name="remote_cmd" type="text" placeholder="pt">
+                </label>
+              </div>
+              <label>SSH 密码
+                <input name="remote_password" type="password" autocomplete="new-password" placeholder="留空保留已保存密码">
               </label>
-            </div>
-            <label>SSH 密码
-              <input name="remote_password" type="password" autocomplete="new-password" placeholder="留空保留已保存密码">
-            </label>
-            <label>本机保存目录
-              <input name="save_dir" type="text">
-            </label>
-            <label>音乐频谱模式
-              <select name="audio_spectrum_mode">
-                <option value="single">单曲频谱图</option>
-                <option value="combined">整包总频谱图</option>
-              </select>
-            </label>
-            <label>扫描白名单
-              <textarea name="scan_include" placeholder="/home /data /mnt，留空时自动扫描常见目录"></textarea>
-            </label>
-            <label>额外排除目录
-              <textarea name="scan_exclude" placeholder="/mnt/cache /data/tmp，可留空"></textarea>
-            </label>
-            <div class="checks">
-              <label class="check"><input name="remote_bootstrap" type="checkbox"> 空白 VPS 自动自举</label>
-              <label class="check"><input name="auto_cleanup" type="checkbox"> 成功后清理远端临时结果</label>
-              <label class="check"><input name="clear_password" type="checkbox"> 清空已保存密码</label>
-            </div>
-            <div class="actions">
-              <button class="button primary" type="submit">保存配置</button>
-              <button class="button secondary" type="button" id="scanBtn">扫描候选</button>
-            </div>
-          </form>
-        </div>
-      </aside>
-
-      <section class="workspace">
-        <div class="panel">
-          <div class="panel-head">
-            <div class="toolbar">
-              <div>
-                <h2>候选条目</h2>
-                <p id="candidateSummary">先扫描候选，扫描结果会显示在这里。</p>
-              </div>
-              <div class="filters">
-                <select id="typeFilter">
-                  <option value="">全部类型</option>
-                  <option value="VIDEO">视频</option>
-                  <option value="AUDIO">音频</option>
-                  <option value="AUDIO_DIR">音乐目录</option>
-                  <option value="BDMV">原盘</option>
-                  <option value="ISO">ISO</option>
-                </select>
-                <input id="keywordFilter" type="text" placeholder="按路径过滤">
+              <label>结果保存目录
+                <input name="save_dir" type="text">
+              </label>
+              <label>扫描白名单
+                <textarea name="scan_include" placeholder="/home /data /mnt，留空时使用资源根目录"></textarea>
+              </label>
+              <label>额外排除目录
+                <textarea name="scan_exclude" placeholder="/mnt/cache /data/tmp，可留空"></textarea>
+              </label>
+              <div class="checks">
+                <label class="check"><input name="remote_bootstrap" type="checkbox"> 空白 VPS 自动自举</label>
+                <label class="check"><input name="auto_cleanup" type="checkbox"> 成功后清理远端临时结果</label>
+                <label class="check"><input name="clear_password" type="checkbox"> 清空已保存密码</label>
               </div>
             </div>
-          </div>
-          <div class="panel-body">
-            <div class="actions" style="margin-top: 0; margin-bottom: 12px">
-              <button class="button" type="button" id="selectAllBtn">全选当前结果</button>
-              <button class="button" type="button" id="clearSelectionBtn">清空选择</button>
-              <button class="button primary" type="button" id="processBtn">生成所选素材</button>
-              <button class="button danger" type="button" id="cancelBtn">停止当前任务</button>
-            </div>
-            <div id="candidateList" class="candidate-list">
-              <div class="empty">还没有候选。填写配置后点击“扫描候选”。</div>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head">
-            <div class="toolbar">
-              <div>
-                <h2>任务日志</h2>
-                <p id="taskState">当前没有任务。</p>
-              </div>
-              <button class="button" type="button" id="clearLogBtn">清空前端日志</button>
-            </div>
-          </div>
-          <div class="panel-body">
-            <pre id="logBox" class="logbox">等待任务。</pre>
-            <div id="outputs" class="outputs"></div>
-          </div>
+          </details>
         </div>
       </section>
-    </section>
+
+      <section class="workbench">
+        <div class="main-stack">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="toolbar">
+                <div>
+                  <h2>选择资源</h2>
+                  <p id="candidateSummary">点击“扫描资源”后，从这里选择要发种的资源。</p>
+                </div>
+                <div class="filters">
+                  <select id="typeFilter">
+                    <option value="">全部资源</option>
+                    <option value="VIDEO">视频</option>
+                    <option value="AUDIO_DIR">音乐目录</option>
+                    <option value="AUDIO">单曲音频</option>
+                    <option value="BDMV">原盘</option>
+                    <option value="ISO">ISO</option>
+                  </select>
+                  <input id="keywordFilter" type="text" placeholder="按路径或名称过滤">
+                </div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <div class="actions" style="margin-top: 0; margin-bottom: 12px">
+                <button class="button secondary" type="button" id="selectAllBtn">选择当前列表</button>
+                <button class="button secondary" type="button" id="clearSelectionBtn">清空选择</button>
+              </div>
+              <div id="candidateList" class="candidate-list">
+                <div class="empty">还没有资源。先确认工作区，然后点击“扫描资源”。</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div class="toolbar">
+                <div>
+                  <h2>任务日志</h2>
+                  <p id="taskState">当前没有任务。</p>
+                </div>
+                <button class="button secondary" type="button" id="clearLogBtn">清空日志</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <pre id="logBox" class="logbox">等待任务。</pre>
+              <div id="outputs" class="outputs"></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="side-stack">
+          <div class="panel">
+            <div class="panel-head">
+              <h2>发布材料方案</h2>
+              <p>默认用自动推荐。音乐目录可以一键切换整包总频谱或单曲频谱。</p>
+            </div>
+            <div class="panel-body">
+              <div class="material-options" role="group" aria-label="发布材料方案">
+                <button class="material-card active" type="button" data-plan="auto" data-spectrum="auto">
+                  <strong>自动推荐</strong>
+                  <span>视频生成 MediaInfo 和截图；原盘生成 BDInfo；音乐目录默认整包总频谱。</span>
+                </button>
+                <button class="material-card" type="button" data-plan="music-combined" data-spectrum="combined">
+                  <strong>音乐整包总频谱</strong>
+                  <span>适合专辑或合集，输出一个总频谱图和多段 MediaInfo。</span>
+                </button>
+                <button class="material-card" type="button" data-plan="music-single" data-spectrum="single">
+                  <strong>音乐单曲频谱</strong>
+                  <span>每首歌单独生成频谱图，保留旧逻辑。</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <h2>生成确认</h2>
+              <p>开始前确认将处理什么资源，以及会生成什么材料。</p>
+            </div>
+            <div class="panel-body">
+              <div id="runSummary" class="run-summary">
+                <strong>还没有选择资源。</strong>
+                <span>先扫描并选择一个资源，系统会给出材料预览。</span>
+              </div>
+              <div class="actions">
+                <button class="button primary" type="button" id="processBtn">生成发布材料</button>
+                <button class="button danger" type="button" id="cancelBtn">停止任务</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </section>
+    </form>
   </main>
 
   <script>
@@ -1182,9 +1366,12 @@ INDEX_HTML = r"""<!doctype html>
     const runtimeMode = document.querySelector("#runtimeMode");
     const runtimeDetail = document.querySelector("#runtimeDetail");
     const outputsEl = document.querySelector("#outputs");
+    const runSummary = document.querySelector("#runSummary");
+    const materialCards = Array.from(document.querySelectorAll(".material-card"));
 
     let candidates = [];
     let selectedPaths = new Set();
+    let selectedMaterialPlan = "auto";
     let activeTaskId = null;
     let pollTimer = null;
     const PTBD_BASE_PATH = __PTBD_BASE_PATH_JSON__;
@@ -1218,13 +1405,77 @@ INDEX_HTML = r"""<!doctype html>
       return form.mode.value === "local";
     }
 
+    function basename(path) {
+      return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
+    }
+
+    function selectedItems() {
+      return candidates.filter((item) => selectedPaths.has(item.path));
+    }
+
+    function typeName(type) {
+      return {
+        VIDEO: "视频",
+        AUDIO: "单曲音频",
+        AUDIO_DIR: "音乐目录",
+        BDMV: "原盘",
+        ISO: "ISO",
+      }[type] || type || "未知";
+    }
+
+    function materialText(item, spectrumMode = "single") {
+      if (item.type === "VIDEO") return "MediaInfo + 6 张截图";
+      if (item.type === "BDMV" || item.type === "ISO") return "BDInfo + 6 张截图";
+      if (item.type === "AUDIO_DIR") {
+        return spectrumMode === "combined" ? "整包 MediaInfo + 1 张总频谱图" : "每首歌 MediaInfo + 单曲频谱图";
+      }
+      if (item.type === "AUDIO") return "MediaInfo + 单曲频谱图";
+      return "按资源类型自动生成";
+    }
+
+    function recommendedSpectrumMode(items = selectedItems()) {
+      if (selectedMaterialPlan === "music-combined") return "combined";
+      if (selectedMaterialPlan === "music-single") return "single";
+      return items.some((item) => item.type === "AUDIO_DIR") ? "combined" : "single";
+    }
+
+    function syncPlanCards() {
+      for (const card of materialCards) {
+        card.classList.toggle("active", card.dataset.plan === selectedMaterialPlan);
+      }
+    }
+
+    function updateRunSummary() {
+      const items = selectedItems();
+      const spectrumMode = recommendedSpectrumMode(items);
+      form.audio_spectrum_mode.value = spectrumMode;
+      if (!items.length) {
+        runSummary.innerHTML = "<strong>还没有选择资源。</strong><span>先扫描并选择一个资源，系统会给出材料预览。</span>";
+        return;
+      }
+      const typeCounts = items.reduce((acc, item) => {
+        acc[item.type] = (acc[item.type] || 0) + 1;
+        return acc;
+      }, {});
+      const types = Object.entries(typeCounts)
+        .map(([type, count]) => `${typeName(type)} ${count} 个`)
+        .join("，");
+      const materialLines = Array.from(new Set(items.map((item) => materialText(item, spectrumMode))));
+      runSummary.innerHTML = [
+        `<strong>已选择 ${items.length} 个资源。</strong>`,
+        `<span>${types}</span>`,
+        `<span>将生成：${materialLines.join("；")}</span>`,
+        `<span>音乐频谱模式：${spectrumMode === "combined" ? "整包总频谱" : "单曲频谱"}</span>`,
+      ].join("");
+    }
+
     function updateModeCopy() {
       const scanBtn = document.querySelector("#scanBtn");
-      scanBtn.textContent = isLocalMode() ? "扫描本机候选" : "扫描 VPS 候选";
+      scanBtn.textContent = isLocalMode() ? "扫描本机资源" : "扫描 VPS 资源";
       if (!candidates.length) {
         candidateSummary.textContent = isLocalMode()
-          ? "先扫描本机服务器，扫描结果会显示在这里。"
-          : "先扫描 VPS，扫描结果会显示在这里。";
+          ? "先扫描本机服务器，资源会显示在这里。"
+          : "先扫描 VPS，资源会显示在这里。";
       }
     }
 
@@ -1253,6 +1504,9 @@ INDEX_HTML = r"""<!doctype html>
         }
       }
       form.remote_password.placeholder = config.password_saved ? "已保存密码，留空不修改" : "未保存密码";
+      selectedMaterialPlan = config.audio_spectrum_mode === "combined" ? "music-combined" : "auto";
+      syncPlanCards();
+      updateRunSummary();
       updateModeCopy();
     }
 
@@ -1282,17 +1536,19 @@ INDEX_HTML = r"""<!doctype html>
       const visible = filteredCandidates();
       candidateList.innerHTML = "";
       candidateSummary.textContent = candidates.length
-        ? `共 ${candidates.length} 个候选，当前显示 ${visible.length} 个，已选择 ${selectedPaths.size} 个。`
+        ? `共 ${candidates.length} 个资源，当前显示 ${visible.length} 个，已选择 ${selectedPaths.size} 个。`
         : isLocalMode()
-          ? "先扫描本机服务器，扫描结果会显示在这里。"
-          : "先扫描 VPS，扫描结果会显示在这里。";
+          ? "先扫描本机服务器，资源会显示在这里。"
+          : "先扫描 VPS，资源会显示在这里。";
       if (!visible.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = candidates.length ? "当前过滤条件没有匹配项。" : "还没有候选。填写配置后点击“扫描候选”。";
+        empty.textContent = candidates.length ? "当前过滤条件没有匹配项。" : "还没有资源。确认工作区后点击“扫描资源”。";
         candidateList.appendChild(empty);
+        updateRunSummary();
         return;
       }
+      const spectrumMode = recommendedSpectrumMode();
       for (const item of visible) {
         const row = document.createElement("label");
         row.className = "candidate";
@@ -1304,16 +1560,26 @@ INDEX_HTML = r"""<!doctype html>
           else selectedPaths.delete(item.path);
           renderCandidates();
         });
-        const type = document.createElement("span");
-        type.className = "type";
-        type.textContent = item.type_label || item.type;
+        const main = document.createElement("span");
+        main.className = "candidate-main";
+        const title = document.createElement("span");
+        title.className = "candidate-title";
+        title.textContent = basename(item.path);
         const path = document.createElement("span");
         path.className = "path";
         path.title = item.path;
         path.textContent = item.path;
-        row.append(checkbox, type, path);
+        const materials = document.createElement("span");
+        materials.className = "candidate-materials";
+        materials.textContent = materialText(item, spectrumMode);
+        main.append(title, path, materials);
+        const type = document.createElement("span");
+        type.className = "type";
+        type.textContent = item.type_label || item.type;
+        row.append(checkbox, main, type);
         candidateList.appendChild(row);
       }
+      updateRunSummary();
     }
 
     function setTask(payload) {
@@ -1341,6 +1607,7 @@ INDEX_HTML = r"""<!doctype html>
         candidates = task.items || [];
         selectedPaths.clear();
         renderCandidates();
+        updateRunSummary();
       }
       if (!["queued", "running"].includes(task.status) && pollTimer) {
         clearInterval(pollTimer);
@@ -1356,12 +1623,13 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function startProcess() {
-      await saveConfig();
       const paths = Array.from(selectedPaths);
       if (!paths.length) {
-        appendFrontendLog("[web] 请先选择至少一个候选。");
+        appendFrontendLog("[web] 请先选择至少一个资源。");
         return;
       }
+      form.audio_spectrum_mode.value = recommendedSpectrumMode();
+      await saveConfig();
       const payload = await api("/api/process", {
         method: "POST",
         body: JSON.stringify({paths}),
@@ -1393,6 +1661,13 @@ INDEX_HTML = r"""<!doctype html>
     });
     document.querySelector("#typeFilter").addEventListener("change", renderCandidates);
     document.querySelector("#keywordFilter").addEventListener("input", renderCandidates);
+    for (const card of materialCards) {
+      card.addEventListener("click", () => {
+        selectedMaterialPlan = card.dataset.plan || "auto";
+        syncPlanCards();
+        renderCandidates();
+      });
+    }
     form.mode.addEventListener("change", () => {
       updateModeCopy();
       renderCandidates();
