@@ -989,7 +989,7 @@ INDEX_HTML = r"""<!doctype html>
 
     .filters {
       display: grid;
-      grid-template-columns: 150px minmax(260px, 1fr);
+      grid-template-columns: 150px minmax(210px, 1fr) minmax(220px, 1fr);
       gap: 10px;
       align-items: center;
     }
@@ -1357,6 +1357,9 @@ INDEX_HTML = r"""<!doctype html>
                     <option value="BDMV">原盘</option>
                     <option value="ISO">ISO</option>
                   </select>
+                  <select id="directoryFilter">
+                    <option value="">全部目录</option>
+                  </select>
                   <input id="keywordFilter" type="text" placeholder="按路径或名称过滤">
                 </div>
               </div>
@@ -1385,23 +1388,6 @@ INDEX_HTML = r"""<!doctype html>
               <div id="candidateList" class="candidate-list">
                 <div class="empty">还没有资源。先确认工作区，然后点击“扫描资源”。</div>
               </div>
-            </div>
-          </div>
-
-          <div class="panel">
-            <div class="panel-head">
-              <div class="toolbar">
-                <div>
-                  <span class="section-kicker">运行状态</span>
-                  <h2>任务日志</h2>
-                  <p id="taskState">当前没有任务。</p>
-                </div>
-                <button class="button secondary" type="button" id="clearLogBtn">清空日志</button>
-              </div>
-            </div>
-            <div class="panel-body">
-              <pre id="logBox" class="logbox">等待任务。</pre>
-              <div id="outputs" class="outputs"></div>
             </div>
           </div>
         </div>
@@ -1448,6 +1434,23 @@ INDEX_HTML = r"""<!doctype html>
               </div>
             </div>
           </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <div class="toolbar">
+                <div>
+                  <span class="section-kicker">运行状态</span>
+                  <h2>任务日志</h2>
+                  <p id="taskState">当前没有任务。</p>
+                </div>
+                <button class="button secondary" type="button" id="clearLogBtn">清空日志</button>
+              </div>
+            </div>
+            <div class="panel-body">
+              <pre id="logBox" class="logbox">等待任务。</pre>
+              <div id="outputs" class="outputs"></div>
+            </div>
+          </div>
         </aside>
       </section>
     </form>
@@ -1466,6 +1469,7 @@ INDEX_HTML = r"""<!doctype html>
     const materialCards = Array.from(document.querySelectorAll(".material-card"));
     const pageInfo = document.querySelector("#pageInfo");
     const pageSizeSelect = document.querySelector("#pageSizeSelect");
+    const directoryFilter = document.querySelector("#directoryFilter");
     const selectedOnlyToggle = document.querySelector("#selectedOnlyToggle");
     const prevPageBtn = document.querySelector("#prevPageBtn");
     const nextPageBtn = document.querySelector("#nextPageBtn");
@@ -1514,6 +1518,13 @@ INDEX_HTML = r"""<!doctype html>
       return String(path || "").split(/[\\/]/).filter(Boolean).pop() || String(path || "");
     }
 
+    function compactPath(path, keep = 3) {
+      const text = String(path || "");
+      const parts = text.split(/[\\/]/).filter(Boolean);
+      if (parts.length <= keep) return text || "/";
+      return "…/" + parts.slice(-keep).join("/");
+    }
+
     function dirname(path) {
       const parts = String(path || "").split(/[\\/]/).filter(Boolean);
       if (parts.length <= 1) return "";
@@ -1523,6 +1534,11 @@ INDEX_HTML = r"""<!doctype html>
 
     function normalizePath(path) {
       return String(path || "").replace(/\/+$/, "");
+    }
+
+    function resourceDirectory(item) {
+      if (item.type === "AUDIO_DIR" || item.type === "BDMV") return item.path;
+      return dirname(item.path);
     }
 
     function prepareCandidates(items) {
@@ -1536,10 +1552,46 @@ INDEX_HTML = r"""<!doctype html>
         const normalized = {...item};
         normalized.path = String(normalized.path || "");
         normalized.parent_audio_dir = dirname(normalized.path);
+        normalized.resource_dir = resourceDirectory(normalized);
         normalized.collapsed_into_album =
           normalized.type === "AUDIO" && audioDirPaths.has(normalizePath(normalized.parent_audio_dir));
+        if (normalized.collapsed_into_album) {
+          normalized.resource_dir = normalized.parent_audio_dir;
+        }
         return normalized;
       });
+    }
+
+    function primaryResources() {
+      return candidates.filter((item) => !item.collapsed_into_album);
+    }
+
+    function rebuildDirectoryFilter() {
+      const current = directoryFilter.value;
+      const counts = new Map();
+      for (const item of primaryResources()) {
+        const dir = item.resource_dir || dirname(item.path);
+        if (!dir) continue;
+        counts.set(dir, (counts.get(dir) || 0) + 1);
+      }
+      const dirs = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+      directoryFilter.innerHTML = "";
+      const all = document.createElement("option");
+      all.value = "";
+      all.textContent = `全部目录（${dirs.length}）`;
+      directoryFilter.appendChild(all);
+      for (const dir of dirs) {
+        const option = document.createElement("option");
+        option.value = dir;
+        option.textContent = `${compactPath(dir)} (${counts.get(dir)})`;
+        directoryFilter.appendChild(option);
+      }
+      directoryFilter.value = dirs.includes(current) ? current : "";
+    }
+
+    function resetResourceView() {
+      currentPage = 1;
+      rebuildDirectoryFilter();
     }
 
     function selectedItems() {
@@ -1573,7 +1625,7 @@ INDEX_HTML = r"""<!doctype html>
     function displayPath(item) {
       if (item.type === "AUDIO_DIR") return "文件夹路径，生成时直接传入该目录";
       if (item.collapsed_into_album) return `已归入音乐目录：${item.parent_audio_dir}`;
-      return item.path;
+      return item.resource_dir ? `所在目录：${item.resource_dir}` : item.path;
     }
 
     function recommendedSpectrumMode(items = selectedItems()) {
@@ -1667,10 +1719,12 @@ INDEX_HTML = r"""<!doctype html>
 
     function filteredCandidates() {
       const type = document.querySelector("#typeFilter").value;
+      const directory = directoryFilter.value;
       const keyword = document.querySelector("#keywordFilter").value.trim().toLowerCase();
       let items = candidates.filter((item) => {
         if (!type && item.collapsed_into_album && !selectedPaths.has(item.path)) return false;
         if (type && item.type !== type) return false;
+        if (directory && item.resource_dir !== directory) return false;
         if (keyword && !`${item.path} ${basename(item.path)} ${item.parent_audio_dir || ""}`.toLowerCase().includes(keyword)) return false;
         return true;
       });
@@ -1785,6 +1839,7 @@ INDEX_HTML = r"""<!doctype html>
         currentPage = 1;
         showSelectedOnly = false;
         selectedOnlyToggle.checked = false;
+        rebuildDirectoryFilter();
         renderCandidates();
         updateRunSummary();
       }
@@ -1844,6 +1899,10 @@ INDEX_HTML = r"""<!doctype html>
       outputsEl.innerHTML = "";
     });
     document.querySelector("#typeFilter").addEventListener("change", () => {
+      resetResourceView();
+      renderCandidates();
+    });
+    directoryFilter.addEventListener("change", () => {
       currentPage = 1;
       renderCandidates();
     });
