@@ -1474,7 +1474,10 @@ INDEX_HTML = r"""<!doctype html>
                   <h2>任务日志</h2>
                   <p id="taskState">当前没有任务。</p>
                 </div>
-                <button class="button secondary" type="button" id="clearLogBtn">清空日志</button>
+                <div class="actions" style="margin-top: 0">
+                  <button class="button secondary" type="button" id="copyLogBtn">复制日志</button>
+                  <button class="button secondary" type="button" id="clearLogBtn">清空日志</button>
+                </div>
               </div>
             </div>
             <div class="panel-body">
@@ -1920,6 +1923,28 @@ INDEX_HTML = r"""<!doctype html>
       appendFrontendLog("[web] 已发送停止请求。");
     }
 
+    async function copyLog() {
+      const text = logBox.textContent || "";
+      if (!text.trim()) {
+        appendFrontendLog("[web] 当前没有可复制的日志。");
+        return;
+      }
+      try {
+        if (!navigator.clipboard || !window.isSecureContext) {
+          throw new Error("clipboard unavailable");
+        }
+        await navigator.clipboard.writeText(text);
+        appendFrontendLog("[web] 日志已复制到剪贴板。");
+      } catch (_) {
+        const range = document.createRange();
+        range.selectNodeContents(logBox);
+        const selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        appendFrontendLog("[web] 浏览器禁止直接复制，已选中日志，请按 Ctrl+C。");
+      }
+    }
+
     document.querySelector("#scanBtn").addEventListener("click", startScan);
     document.querySelector("#processBtn").addEventListener("click", startProcess);
     document.querySelector("#cancelBtn").addEventListener("click", cancelTask);
@@ -1936,6 +1961,7 @@ INDEX_HTML = r"""<!doctype html>
       selectedPaths.clear();
       renderCandidates();
     });
+    document.querySelector("#copyLogBtn").addEventListener("click", copyLog);
     document.querySelector("#clearLogBtn").addEventListener("click", () => {
       logBox.textContent = "前端日志已清空。";
       outputsEl.innerHTML = "";
