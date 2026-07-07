@@ -93,7 +93,7 @@ Options:
   --scan-exclude "DIRS"     Remote extra exclude roots, separated by spaces or commas
   --audio-spectrum MODE     Audio spectrum mode: single or combined (default: single)
   --audio-spectrum-backend  Spectrum backend: auto, sox, sox_ng or ffmpeg (default: auto)
-  --audio-spectrum-seconds  Combined mode sample seconds per track (default: 12)
+  --audio-spectrum-seconds  Combined mode sample seconds per track; 0 means full tracks (default: 12)
   --path TARGET             Process this remote candidate directly, no menu interaction
   --config FILE             Config file path
   --setup                   Interactive first-run setup
@@ -306,7 +306,7 @@ case "$PTBD_AUDIO_SPECTRUM_BACKEND" in
   auto|sox|sox_ng|ffmpeg) ;;
   *) err "invalid --audio-spectrum-backend value, expected auto, sox, sox_ng or ffmpeg"; exit 2 ;;
 esac
-[[ "$PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS" =~ ^[1-9][0-9]*$ ]] || PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS=12
+[[ "$PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS" =~ ^[0-9]+$ ]] || PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS=12
 if [[ "$PTBD_REMOTE_BOOTSTRAP" == "1" && ! -f "$REMOTE_PREPARE_SCRIPT" ]]; then
   err "missing remote bootstrap helper: $REMOTE_PREPARE_SCRIPT"
   exit 1

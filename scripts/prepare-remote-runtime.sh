@@ -211,6 +211,7 @@ members = [
     (app_root / "bdtool", "bdtool"),
     (app_root / "bdtool.sh", "bdtool.sh"),
     (app_root / "lib" / "ui.sh", "lib/ui.sh"),
+    (app_root / "scripts" / "audio-spectrum.py", "scripts/audio-spectrum.py"),
 ]
 
 if archive_mode == "bundle":
@@ -282,6 +283,19 @@ has_cmd() {
   fi
 }
 
+has_py_mod() {
+  if python3 - "$1" <<'PY' >/dev/null 2>&1
+import importlib.util
+import sys
+raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
+PY
+  then
+    printf '1'
+  else
+    printf '0'
+  fi
+}
+
 printf 'REMOTE_OS=%s\n' "$(uname -s 2>/dev/null || echo unknown)"
 printf 'REMOTE_ARCH=%s\n' "$(uname -m 2>/dev/null || echo unknown)"
 printf 'REMOTE_HOME=%s\n' "${HOME:-}"
@@ -295,6 +309,8 @@ printf 'REMOTE_HAS_CURL=%s\n' "$(has_cmd curl)"
 printf 'REMOTE_HAS_FFMPEG=%s\n' "$(has_cmd ffmpeg)"
 printf 'REMOTE_HAS_FFPROBE=%s\n' "$(has_cmd ffprobe)"
 printf 'REMOTE_HAS_MEDIAINFO=%s\n' "$(has_cmd mediainfo)"
+printf 'REMOTE_HAS_NUMPY=%s\n' "$(has_py_mod numpy)"
+printf 'REMOTE_HAS_PIL=%s\n' "$(has_py_mod PIL)"
 printf 'REMOTE_HAS_BDINFO=%s\n' "$(has_cmd BDInfo)"
 printf 'REMOTE_HAS_BD_INFO=%s\n' "$(has_cmd bd_info)"
 EOF
@@ -320,6 +336,8 @@ parse_remote_info() {
   REMOTE_HAS_FFMPEG="0"
   REMOTE_HAS_FFPROBE="0"
   REMOTE_HAS_MEDIAINFO="0"
+  REMOTE_HAS_NUMPY="0"
+  REMOTE_HAS_PIL="0"
 
   while IFS='=' read -r key value; do
     case "$key" in
@@ -336,6 +354,8 @@ parse_remote_info() {
       REMOTE_HAS_FFMPEG) REMOTE_HAS_FFMPEG="$value" ;;
       REMOTE_HAS_FFPROBE) REMOTE_HAS_FFPROBE="$value" ;;
       REMOTE_HAS_MEDIAINFO) REMOTE_HAS_MEDIAINFO="$value" ;;
+      REMOTE_HAS_NUMPY) REMOTE_HAS_NUMPY="$value" ;;
+      REMOTE_HAS_PIL) REMOTE_HAS_PIL="$value" ;;
     esac
   done <<< "$raw"
 }
@@ -355,6 +375,8 @@ remote_core_deps_ready() {
   [[ "${REMOTE_HAS_FFMPEG:-0}" == "1" ]] || return 1
   [[ "${REMOTE_HAS_FFPROBE:-0}" == "1" ]] || return 1
   [[ "${REMOTE_HAS_MEDIAINFO:-0}" == "1" ]] || return 1
+  [[ "${REMOTE_HAS_NUMPY:-0}" == "1" ]] || return 1
+  [[ "${REMOTE_HAS_PIL:-0}" == "1" ]] || return 1
   return 0
 }
 
@@ -476,10 +498,10 @@ if is_debian_like; then
   fi
   echo "[remote] Debian/Ubuntu detected; installing system packages for PT-BDtool" >&2
   as_root apt-get update >/dev/null
-  if ! as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 tar ffmpeg mediainfo zip >/dev/null 2>&1; then
+  if ! as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 python3-numpy python3-pil tar ffmpeg mediainfo zip >/dev/null 2>&1; then
     enable_ubuntu_universe
     as_root apt-get update >/dev/null
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 tar ffmpeg mediainfo zip >/dev/null
+    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 python3-numpy python3-pil tar ffmpeg mediainfo zip >/dev/null
   fi
   as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y libbluray-bin >/dev/null 2>&1 || true
   echo "status=installed"
@@ -492,10 +514,10 @@ if is_alpine_like; then
     exit 0
   fi
   echo "[remote] Alpine detected; installing system packages for PT-BDtool" >&2
-  if ! as_root apk add --no-cache bash curl python3 tar ffmpeg mediainfo zip >/dev/null 2>&1; then
+  if ! as_root apk add --no-cache bash curl python3 py3-numpy py3-pillow tar ffmpeg mediainfo zip >/dev/null 2>&1; then
     enable_alpine_community
     as_root apk update >/dev/null
-    as_root apk add --no-cache bash curl python3 tar ffmpeg mediainfo zip >/dev/null
+    as_root apk add --no-cache bash curl python3 py3-numpy py3-pillow tar ffmpeg mediainfo zip >/dev/null
   fi
   as_root apk add --no-cache libbluray >/dev/null 2>&1 || true
   echo "status=installed"

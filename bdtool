@@ -90,7 +90,6 @@ setup_bundle_runtime "$ROOT_DIR"
 : "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:=12}"
-: "${BDTOOL_AUDIO_SPECTRUM_TILE_SIZE:=320x180}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 ensure_output_root
@@ -533,44 +532,16 @@ make_audio_spectrum_single() {
 make_audio_spectrum_combined() {
   local image="$1"
   shift
-  local audio=""
   local count="$#"
   local sample_seconds="${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}"
-  local i=0
-  local cols=1
-  local rows=1
-  local tmp_dir=""
-  local slice=""
-  local width="${BDTOOL_AUDIO_SPECTRUM_SIZE%x*}"
-  local height="${BDTOOL_AUDIO_SPECTRUM_SIZE#*x}"
-  local tile_filter=""
+  local spectrum_script="$ROOT_DIR/scripts/audio-spectrum.py"
 
   (( count > 0 )) || return 1
-  [[ "$sample_seconds" =~ ^[1-9][0-9]*$ ]] || sample_seconds=12
-  [[ "$width" =~ ^[1-9][0-9]*$ && "$height" =~ ^[1-9][0-9]*$ ]] || { width=1280; height=720; }
+  [[ "$sample_seconds" =~ ^[0-9]+$ ]] || sample_seconds=12
   require_runtime_cmd ffmpeg || return 1
-  tmp_dir="$(mktemp -d)"
-  for audio in "$@"; do
-    slice="$tmp_dir/slice-$(printf '%05d' "$i").png"
-    screen "生成进度: $((50 + (i * 40 / count)))% (整包总频谱切片 $((i + 1))/${count})"
-    if ! make_audio_spectrum_bounded "$audio" "$slice" "$BDTOOL_AUDIO_SPECTRUM_TILE_SIZE" "$sample_seconds" "$(basename "$audio")"; then
-      rm -rf "$tmp_dir"
-      return 1
-    fi
-    i=$((i + 1))
-  done
-  while (( cols * cols < count )); do
-    cols=$((cols + 1))
-  done
-  rows=$(( (count + cols - 1) / cols ))
-  tile_filter="tile=${cols}x${rows}:nb_frames=${count},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black"
-  if ! ffmpeg -nostdin -hide_banner -loglevel error -y -framerate 1 -i "$tmp_dir/slice-%05d.png" \
-    -vf "$tile_filter" -frames:v 1 "$image" >/dev/null 2>&1; then
-    rm -rf "$tmp_dir"
-    return 1
-  fi
-  rm -rf "$tmp_dir"
-  return 0
+  command -v python3 >/dev/null 2>&1 || return 1
+  [[ -f "$spectrum_script" ]] || return 1
+  python3 "$spectrum_script" --output "$image" --size "$BDTOOL_AUDIO_SPECTRUM_SIZE" --seconds "$sample_seconds" "$@"
 }
 
 finalize_audio_dir_single_output() {
@@ -1135,7 +1106,7 @@ handle_generate_path_command() {
     screen_error "无效音频频谱模式：$spectrum_mode（可选 single 或 combined）"
     return 2
   fi
-  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE
+  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS
 
   preflight_post_process || return 1
   generate_item "$item_type" "$item_path" || return 1
@@ -1271,12 +1242,16 @@ generate_item() {
       screen_error "音乐目录至少需要 2 个音频文件：$src"
       hard_fail=1
     elif [[ "${BDTOOL_AUDIO_SPECTRUM_MODE:-single}" == "combined" ]]; then
+      local combined_scope="每首采样 ${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12} 秒"
+      if [[ "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}" == "0" ]]; then
+        combined_scope="每首完整音频"
+      fi
       screen "生成进度: 10% (整包 mediainfo 生成中)"
       if ! write_audio_mediainfo_report "$out" "${audio_files[@]}"; then
         hard_fail=1
       fi
       screen "生成进度: 45% (整包 mediainfo 生成完成)"
-      screen "生成进度: 50% (整包总频谱图生成中，共 ${#audio_files[@]} 首，每首采样 ${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12} 秒)"
+      screen "生成进度: 50% (连续整包总频谱图生成中，共 ${#audio_files[@]} 首，${combined_scope})"
       if ! make_audio_spectrum_combined "$out/频谱图.png" "${audio_files[@]}"; then
         hard_fail=1
       fi

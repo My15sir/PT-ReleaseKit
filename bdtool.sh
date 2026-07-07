@@ -88,7 +88,6 @@ BT_VERSION="${BT_VERSION:-0.1.0}"
 : "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:=12}"
-: "${BDTOOL_AUDIO_SPECTRUM_TILE_SIZE:=320x180}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 bt_die() { die "$*"; }
@@ -638,45 +637,20 @@ bt_make_audio_spectrum() {
 bt_make_audio_spectrum_combined() {
   local info_dir="$1"
   shift
-  local audio=""
   local count="$#"
   local sample_seconds="${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}"
-  local i=0
-  local cols=1
-  local rows=1
-  local tmp_dir=""
-  local slice=""
-  local width="${BDTOOL_AUDIO_SPECTRUM_SIZE%x*}"
-  local height="${BDTOOL_AUDIO_SPECTRUM_SIZE#*x}"
-  local tile_filter=""
+  local spectrum_script="$BDTOOL_ROOT/scripts/audio-spectrum.py"
 
   (( count > 0 )) || bt_die "整包频谱图生成失败：音频列表为空"
-  [[ "$sample_seconds" =~ ^[1-9][0-9]*$ ]] || sample_seconds=12
-  [[ "$width" =~ ^[1-9][0-9]*$ && "$height" =~ ^[1-9][0-9]*$ ]] || { width=1280; height=720; }
+  [[ "$sample_seconds" =~ ^[0-9]+$ ]] || sample_seconds=12
   bt_need_cmd ffmpeg
+  command -v python3 >/dev/null 2>&1 || bt_die "缺少依赖命令：python3"
+  [[ -f "$spectrum_script" ]] || bt_die "缺少连续频谱脚本：$spectrum_script"
   mkdir -p "$info_dir"
-  tmp_dir="$(mktemp -d)"
-  for audio in "$@"; do
-    slice="$tmp_dir/slice-$(printf '%05d' "$i").png"
-    bt_log "整包总频谱切片 $((i + 1))/${count}: $(basename "$audio")"
-    if ! bt_make_audio_spectrum_bounded "$audio" "$slice" "$BDTOOL_AUDIO_SPECTRUM_TILE_SIZE" "$sample_seconds" "$(basename "$audio")"; then
-      rm -rf "$tmp_dir"
-      bt_die "整包频谱图切片生成失败：$audio"
-    fi
-    i=$((i + 1))
-  done
-  while (( cols * cols < count )); do
-    cols=$((cols + 1))
-  done
-  rows=$(( (count + cols - 1) / cols ))
-  tile_filter="tile=${cols}x${rows}:nb_frames=${count},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black"
-  if ! execute_with_spinner "生成整包总频谱图" \
-    ffmpeg -nostdin -hide_banner -loglevel error -y -framerate 1 -i "$tmp_dir/slice-%05d.png" \
-    -vf "$tile_filter" -frames:v 1 "$info_dir/频谱图.png"; then
-    rm -rf "$tmp_dir"
-    bt_die "整包频谱图生成失败：$info_dir"
+  if ! execute_with_spinner "生成连续整包总频谱图" \
+    python3 "$spectrum_script" --output "$info_dir/频谱图.png" --size "$BDTOOL_AUDIO_SPECTRUM_SIZE" --seconds "$sample_seconds" "$@"; then
+    bt_die "连续整包总频谱图生成失败：$info_dir"
   fi
-  rm -rf "$tmp_dir"
 }
 
 bt_run_mediainfo_report_combined() {
@@ -926,7 +900,11 @@ bt_process_audio_dir_combined() {
 
   bt_log "AUDIO_DIR: $audio_dir"
   bt_log "OUT:       $BT_JOB_DIR"
-  bt_log "MODE:      combined (${#audio_files[@]} tracks, ${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}s sample each)"
+  local combined_scope="${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}s sample each"
+  if [[ "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}" == "0" ]]; then
+    combined_scope="full track audio"
+  fi
+  bt_log "MODE:      combined (${#audio_files[@]} tracks, ${combined_scope})"
 
   bt_run_mediainfo_report_combined "$info_dir" "${audio_files[@]}"
   bt_make_audio_spectrum_combined "$info_dir" "${audio_files[@]}"
@@ -987,7 +965,7 @@ bt_process_local_scan() {
     if ! bt_is_video_file "$scan_path" && ! bt_is_audio_file "$scan_path"; then
       bt_die "不支持的文件类型：$scan_path（仅视频/音频文件或 Blu-ray BDMV/ISO）"
     fi
-    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE BDTOOL_AUDIO_SPECTRUM_SIZE
+    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
     local worker_cmd
     worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
     execute_with_spinner "处理媒体 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
@@ -1007,7 +985,7 @@ bt_process_local_scan() {
 
   local cmds=()
   local v
-  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE BDTOOL_AUDIO_SPECTRUM_SIZE
+  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
   for v in "${media_list[@]}"; do
     cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$out_base")")
   done
@@ -1281,7 +1259,7 @@ bt_main_scan() {
     *) bt_die "invalid audio spectrum mode: $BDTOOL_AUDIO_SPECTRUM_MODE. Use single|combined" ;;
   esac
 
-  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE BDTOOL_AUDIO_SPECTRUM_SIZE
+  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
   bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL audio_spectrum=$BDTOOL_AUDIO_SPECTRUM_MODE"
   OPT_SHOTS_N=6
   bt_validate_options

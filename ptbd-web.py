@@ -127,8 +127,9 @@ def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = No
         requested_backend = str(raw.get("audio_spectrum_backend") or "").strip().lower()
         data["audio_spectrum_backend"] = requested_backend if requested_backend in {"auto", "sox", "sox_ng", "ffmpeg"} else "auto"
     if "audio_spectrum_combined_track_seconds" in raw:
-        requested_seconds = str(raw.get("audio_spectrum_combined_track_seconds") or "").strip()
-        data["audio_spectrum_combined_track_seconds"] = requested_seconds if requested_seconds.isdigit() and int(requested_seconds) > 0 else "12"
+        raw_seconds = raw.get("audio_spectrum_combined_track_seconds")
+        requested_seconds = str(raw_seconds if raw_seconds is not None else "").strip()
+        data["audio_spectrum_combined_track_seconds"] = requested_seconds if requested_seconds.isdigit() and int(requested_seconds) >= 0 else "12"
 
     data["mode"] = "local" if str(data.get("mode") or "").strip().lower() == "local" else "remote"
     data["audio_spectrum_mode"] = (
@@ -141,8 +142,9 @@ def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = No
         if str(data.get("audio_spectrum_backend") or "").strip().lower() in {"auto", "sox", "sox_ng", "ffmpeg"}
         else "auto"
     )
-    spectrum_seconds = str(data.get("audio_spectrum_combined_track_seconds") or "12").strip()
-    data["audio_spectrum_combined_track_seconds"] = spectrum_seconds if spectrum_seconds.isdigit() and int(spectrum_seconds) > 0 else "12"
+    raw_spectrum_seconds = data.get("audio_spectrum_combined_track_seconds")
+    spectrum_seconds = str(raw_spectrum_seconds if raw_spectrum_seconds is not None else "12").strip()
+    data["audio_spectrum_combined_track_seconds"] = spectrum_seconds if spectrum_seconds.isdigit() and int(spectrum_seconds) >= 0 else "12"
     data["local_root"] = data["local_root"] or DEFAULT_CONFIG["local_root"]
     data["remote_host"] = data["remote_host"] or DEFAULT_CONFIG["remote_host"]
     data["remote_port"] = data["remote_port"] or "22"
