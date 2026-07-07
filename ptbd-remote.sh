@@ -12,6 +12,8 @@ PTBD_LOCAL_SAVE_DIR="${PTBD_LOCAL_SAVE_DIR:-}"
 PTBD_SCAN_INCLUDE_ROOTS="${PTBD_SCAN_INCLUDE_ROOTS:-}"
 PTBD_SCAN_EXCLUDE_ROOTS="${PTBD_SCAN_EXCLUDE_ROOTS:-}"
 PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE:-single}"
+PTBD_AUDIO_SPECTRUM_BACKEND="${PTBD_AUDIO_SPECTRUM_BACKEND:-auto}"
+PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS="${PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}"
 PTBD_AUTO_CLEANUP="${PTBD_AUTO_CLEANUP:-1}"
 PTBD_KEEP_BRIDGE="${PTBD_KEEP_BRIDGE:-0}"
 PTBD_REMOTE_TARGET_PATH="${PTBD_REMOTE_TARGET_PATH:-}"
@@ -90,6 +92,8 @@ Options:
   --scan-include "DIRS"     Remote whitelist roots, separated by spaces or commas
   --scan-exclude "DIRS"     Remote extra exclude roots, separated by spaces or commas
   --audio-spectrum MODE     Audio spectrum mode: single or combined (default: single)
+  --audio-spectrum-backend  Spectrum backend: auto, sox, sox_ng or ffmpeg (default: auto)
+  --audio-spectrum-seconds  Combined mode sample seconds per track (default: 12)
   --path TARGET             Process this remote candidate directly, no menu interaction
   --config FILE             Config file path
   --setup                   Interactive first-run setup
@@ -107,6 +111,8 @@ Environment variables:
   PTBD_SCAN_INCLUDE_ROOTS
   PTBD_SCAN_EXCLUDE_ROOTS
   PTBD_AUDIO_SPECTRUM_MODE
+  PTBD_AUDIO_SPECTRUM_BACKEND
+  PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS
   PTBD_REMOTE_TARGET_PATH
   PTBD_REMOTE_CONFIG_FILE
 EOF
@@ -265,6 +271,8 @@ while [[ $# -gt 0 ]]; do
     --scan-include) PTBD_SCAN_INCLUDE_ROOTS="${2:-}"; shift 2 ;;
     --scan-exclude) PTBD_SCAN_EXCLUDE_ROOTS="${2:-}"; shift 2 ;;
     --audio-spectrum) PTBD_AUDIO_SPECTRUM_MODE="${2:-}"; shift 2 ;;
+    --audio-spectrum-backend) PTBD_AUDIO_SPECTRUM_BACKEND="${2:-}"; shift 2 ;;
+    --audio-spectrum-seconds) PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS="${2:-}"; shift 2 ;;
     --path) PTBD_REMOTE_TARGET_PATH="${2:-}"; shift 2 ;;
     --config) PTBD_REMOTE_CONFIG_FILE="${2:-}"; shift 2; load_config_file "$PTBD_REMOTE_CONFIG_FILE" ;;
     --setup) SETUP_MODE=1; shift ;;
@@ -292,6 +300,13 @@ case "$PTBD_AUDIO_SPECTRUM_MODE" in
   single|combined) ;;
   *) err "invalid --audio-spectrum value, expected single or combined"; exit 2 ;;
 esac
+PTBD_AUDIO_SPECTRUM_BACKEND="${PTBD_AUDIO_SPECTRUM_BACKEND:-auto}"
+PTBD_AUDIO_SPECTRUM_BACKEND="${PTBD_AUDIO_SPECTRUM_BACKEND,,}"
+case "$PTBD_AUDIO_SPECTRUM_BACKEND" in
+  auto|sox|sox_ng|ffmpeg) ;;
+  *) err "invalid --audio-spectrum-backend value, expected auto, sox, sox_ng or ffmpeg"; exit 2 ;;
+esac
+[[ "$PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS" =~ ^[1-9][0-9]*$ ]] || PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS=12
 if [[ "$PTBD_REMOTE_BOOTSTRAP" == "1" && ! -f "$REMOTE_PREPARE_SCRIPT" ]]; then
   err "missing remote bootstrap helper: $REMOTE_PREPARE_SCRIPT"
   exit 1
@@ -329,7 +344,7 @@ sleep 3
 kill -0 "$TUNNEL_PID" 2>/dev/null || { err "failed to create reverse SSH tunnel"; exit 1; }
 log "reverse tunnel ready: remote 127.0.0.1:${PTBD_REMOTE_RETURN_PORT} -> local ${PTBD_LOCAL_HTTP_PORT}"
 
-REMOTE_SCRIPT="export BDTOOL_RETURN_MODE=http; export BDTOOL_RETURN_HTTP_URL=$(quote_sh "http://127.0.0.1:${PTBD_REMOTE_RETURN_PORT}/upload"); export BDTOOL_AUTO_CLEANUP=$(quote_sh "$PTBD_AUTO_CLEANUP"); export BDTOOL_AUDIO_SPECTRUM_MODE=$(quote_sh "${PTBD_AUDIO_SPECTRUM_MODE:-single}");"
+REMOTE_SCRIPT="export BDTOOL_RETURN_MODE=http; export BDTOOL_RETURN_HTTP_URL=$(quote_sh "http://127.0.0.1:${PTBD_REMOTE_RETURN_PORT}/upload"); export BDTOOL_AUTO_CLEANUP=$(quote_sh "$PTBD_AUTO_CLEANUP"); export BDTOOL_AUDIO_SPECTRUM_MODE=$(quote_sh "${PTBD_AUDIO_SPECTRUM_MODE:-single}"); export BDTOOL_AUDIO_SPECTRUM_BACKEND=$(quote_sh "${PTBD_AUDIO_SPECTRUM_BACKEND:-auto}"); export BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS=$(quote_sh "${PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}");"
 if [[ -n "$PTBD_SCAN_INCLUDE_ROOTS" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_INCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS");"
 fi

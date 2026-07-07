@@ -986,6 +986,10 @@ rm -f "$archive_path"
         if scan_exclude:
             env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = scan_exclude
         env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(self.config.get("audio_spectrum_mode") or "single")
+        env["BDTOOL_AUDIO_SPECTRUM_BACKEND"] = str(self.config.get("audio_spectrum_backend") or "auto")
+        env["BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS"] = str(
+            self.config.get("audio_spectrum_combined_track_seconds") or "12"
+        )
         return env
 
     def scan_items(self) -> list[dict]:

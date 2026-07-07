@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
 import shlex
 import shutil
 import subprocess
@@ -87,6 +88,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "scan_include": "",
     "scan_exclude": "",
     "audio_spectrum_mode": "single",
+    "audio_spectrum_backend": "auto",
+    "audio_spectrum_combined_track_seconds": "12",
     "auto_cleanup": True,
 }
 
@@ -120,6 +123,12 @@ def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = No
     if "audio_spectrum_mode" in raw:
         requested_spectrum_mode = str(raw.get("audio_spectrum_mode") or "").strip().lower()
         data["audio_spectrum_mode"] = requested_spectrum_mode if requested_spectrum_mode in {"single", "combined"} else "single"
+    if "audio_spectrum_backend" in raw:
+        requested_backend = str(raw.get("audio_spectrum_backend") or "").strip().lower()
+        data["audio_spectrum_backend"] = requested_backend if requested_backend in {"auto", "sox", "sox_ng", "ffmpeg"} else "auto"
+    if "audio_spectrum_combined_track_seconds" in raw:
+        requested_seconds = str(raw.get("audio_spectrum_combined_track_seconds") or "").strip()
+        data["audio_spectrum_combined_track_seconds"] = requested_seconds if requested_seconds.isdigit() and int(requested_seconds) > 0 else "12"
 
     data["mode"] = "local" if str(data.get("mode") or "").strip().lower() == "local" else "remote"
     data["audio_spectrum_mode"] = (
@@ -127,6 +136,13 @@ def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = No
         if str(data.get("audio_spectrum_mode") or "").strip().lower() in {"single", "combined"}
         else "single"
     )
+    data["audio_spectrum_backend"] = (
+        str(data.get("audio_spectrum_backend") or "auto").strip().lower()
+        if str(data.get("audio_spectrum_backend") or "").strip().lower() in {"auto", "sox", "sox_ng", "ffmpeg"}
+        else "auto"
+    )
+    spectrum_seconds = str(data.get("audio_spectrum_combined_track_seconds") or "12").strip()
+    data["audio_spectrum_combined_track_seconds"] = spectrum_seconds if spectrum_seconds.isdigit() and int(spectrum_seconds) > 0 else "12"
     data["local_root"] = data["local_root"] or DEFAULT_CONFIG["local_root"]
     data["remote_host"] = data["remote_host"] or DEFAULT_CONFIG["remote_host"]
     data["remote_port"] = data["remote_port"] or "22"
@@ -206,6 +222,24 @@ def cleanup_askpass(path: Path | None) -> None:
         pass
 
 
+def terminate_process_tree(process: subprocess.Popen[str], *, force: bool = False) -> None:
+    if os.name != "nt":
+        try:
+            os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    try:
+        if force:
+            process.kill()
+        else:
+            process.terminate()
+    except OSError:
+        pass
+
+
 def normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for offset, item in enumerate(items, start=1):
@@ -266,8 +300,8 @@ class WebTask:
         self.cancel_event.set()
         if self.backend is not None:
             self.backend.cancel()
-        if self.process is not None and self.process.poll() is None:
-            self.process.terminate()
+        if self.process is not None:
+            terminate_process_tree(self.process)
 
     def to_public(self) -> dict[str, Any]:
         with TASK_LOCK:
@@ -295,6 +329,26 @@ def running_task() -> WebTask | None:
             if task.status in {"queued", "running"}:
                 return task
     return None
+
+
+def cancel_active_tasks(reason: str) -> None:
+    with TASK_LOCK:
+        tasks = [task for task in TASKS.values() if task.status in {"queued", "running"}]
+    for task in tasks:
+        task.log(reason)
+        task.cancel()
+
+
+def install_shutdown_handlers(server: ThreadingHTTPServer) -> None:
+    def handle_shutdown(signum: int, _frame: Any) -> None:
+        cancel_active_tasks(f"收到关闭信号 {signum}，正在终止后台生成任务")
+        threading.Thread(target=server.shutdown, daemon=True).start()
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            signal.signal(sig, handle_shutdown)
+        except (OSError, ValueError):
+            pass
 
 
 def register_task(task: WebTask) -> None:
@@ -424,6 +478,8 @@ def local_runtime_env(config: dict[str, Any]) -> dict[str, str]:
     env["BDTOOL_DOWNLOAD_DIR"] = str(config.get("save_dir") or default_save_dir())
     env["BDTOOL_AUTO_CLEANUP"] = "1" if config.get("auto_cleanup", True) else "0"
     env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(config.get("audio_spectrum_mode") or "single")
+    env["BDTOOL_AUDIO_SPECTRUM_BACKEND"] = str(config.get("audio_spectrum_backend") or "auto")
+    env["BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS"] = str(config.get("audio_spectrum_combined_track_seconds") or "12")
     env["BDTOOL_POST_ACTION"] = "0"
     env["LANG_CODE"] = "zh"
     return env
@@ -551,17 +607,24 @@ def run_process_stream(cmd: list[str], env: dict[str, str], task: WebTask) -> in
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
         bufsize=1,
+        start_new_session=(os.name != "nt"),
     )
     task.process = process
     try:
         assert process.stdout is not None
         for line in process.stdout:
             if task.cancel_event.is_set():
-                process.terminate()
+                terminate_process_tree(process)
                 break
             task.log(line.rstrip("\r\n"))
-        return process.wait()
+        try:
+            return process.wait(timeout=5 if task.cancel_event.is_set() else None)
+        except subprocess.TimeoutExpired:
+            terminate_process_tree(process, force=True)
+            return process.wait(timeout=5)
     finally:
+        if task.cancel_event.is_set():
+            terminate_process_tree(process, force=True)
         task.process = None
 
 
@@ -590,6 +653,8 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
                 "PTBD_SCAN_EXCLUDE_ROOTS": str(config.get("scan_exclude") or ""),
                 "PTBD_AUTO_CLEANUP": "1" if config.get("auto_cleanup", True) else "0",
                 "PTBD_AUDIO_SPECTRUM_MODE": str(config.get("audio_spectrum_mode") or "single"),
+                "PTBD_AUDIO_SPECTRUM_BACKEND": str(config.get("audio_spectrum_backend") or "auto"),
+                "PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS": str(config.get("audio_spectrum_combined_track_seconds") or "12"),
                 "PTBD_REMOTE_TARGET_PATH": selected_path,
             }
         )
@@ -608,6 +673,10 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
             "1" if config.get("remote_bootstrap") else "0",
             "--audio-spectrum",
             str(config.get("audio_spectrum_mode") or "single"),
+            "--audio-spectrum-backend",
+            str(config.get("audio_spectrum_backend") or "auto"),
+            "--audio-spectrum-seconds",
+            str(config.get("audio_spectrum_combined_track_seconds") or "12"),
         ]
         password = str(config.get("remote_password") or "")
         if password:
@@ -2192,6 +2261,7 @@ def main(argv: list[str] | None = None) -> int:
     address = (args.host, args.port)
     server = ThreadingHTTPServer(address, WebHandler)
     server.ptbd_base_path = base_path  # type: ignore[attr-defined]
+    install_shutdown_handlers(server)
     url_path = f"{base_path}/" if base_path else "/"
     url = f"http://{args.host}:{args.port}{url_path}"
     print(f"{APP_NAME} listening on {url}")

@@ -84,8 +84,11 @@ fi
 APP_NAME="bdtool"
 BT_VERSION="${BT_VERSION:-0.1.0}"
 : "${BDTOOL_AUDIO_SPECTRUM_MODE:=single}"
+: "${BDTOOL_AUDIO_SPECTRUM_BACKEND:=auto}"
 : "${BDTOOL_AUDIO_SPECTRUM_SECONDS:=90}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
+: "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:=12}"
+: "${BDTOOL_AUDIO_SPECTRUM_TILE_SIZE:=320x180}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
 
 bt_die() { die "$*"; }
@@ -511,17 +514,125 @@ bt_audio_spectrum_tail_filter() {
   fi
 }
 
+bt_audio_spectrum_size_part() {
+  local size="$1"
+  local part="$2"
+  local width="${size%x*}"
+  local height="${size#*x}"
+  [[ "$width" =~ ^[1-9][0-9]*$ ]] || width=1280
+  [[ "$height" =~ ^[1-9][0-9]*$ ]] || height=720
+  if [[ "$part" == "height" ]]; then
+    printf '%s' "$height"
+  else
+    printf '%s' "$width"
+  fi
+}
+
+bt_format_spectrum_duration() {
+  local seconds="${1:-0}"
+  local hours=0
+  local minutes=0
+  local remain=0
+  [[ "$seconds" =~ ^[1-9][0-9]*$ ]] || seconds=12
+  hours=$((seconds / 3600))
+  minutes=$(((seconds % 3600) / 60))
+  remain=$((seconds % 60))
+  if (( hours > 0 )); then
+    printf '%d:%02d:%02d' "$hours" "$minutes" "$remain"
+  else
+    printf '%d:%02d' "$minutes" "$remain"
+  fi
+}
+
+bt_find_sox_spectrum_binary() {
+  local backend="${BDTOOL_AUDIO_SPECTRUM_BACKEND:-auto}"
+  backend="${backend,,}"
+  [[ "$backend" == "ffmpeg" ]] && return 1
+  if command -v sox_ng >/dev/null 2>&1; then
+    command -v sox_ng
+    return 0
+  fi
+  if command -v sox >/dev/null 2>&1; then
+    command -v sox
+    return 0
+  fi
+  return 1
+}
+
+bt_make_audio_spectrum_sox() {
+  local audio="$1"
+  local image="$2"
+  local size="$3"
+  local seconds="${4:-0}"
+  local title="${5:-}"
+  local sox_bin=""
+  local width=""
+  local height=""
+  local -a duration_args=()
+  local -a title_args=()
+
+  sox_bin="$(bt_find_sox_spectrum_binary)" || return 1
+  width="$(bt_audio_spectrum_size_part "$size" width)"
+  height="$(bt_audio_spectrum_size_part "$size" height)"
+  if [[ "$seconds" =~ ^[1-9][0-9]*$ ]]; then
+    duration_args=(-S 0 -d "$(bt_format_spectrum_duration "$seconds")")
+  fi
+  if [[ -n "$title" ]]; then
+    title_args=(-t "$title" -c "PT-BDtool")
+  fi
+  "$sox_bin" "$audio" -n remix 1 spectrogram \
+    -x "$width" -y "$height" -z 120 -w Kaiser \
+    "${duration_args[@]}" "${title_args[@]}" -o "$image" >/dev/null 2>&1
+}
+
+bt_make_audio_spectrum_ffmpeg() {
+  local audio="$1"
+  local image="$2"
+  local size="$3"
+  local seconds="${4:-0}"
+  local filter_tail=""
+  if [[ "$seconds" =~ ^[1-9][0-9]*$ ]]; then
+    filter_tail="atrim=end=${seconds},showspectrumpic=s=${size}:legend=disabled"
+  else
+    filter_tail="showspectrumpic=s=${size}:legend=disabled"
+  fi
+  bt_need_cmd ffmpeg
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" \
+    -filter_complex "[0:a]aformat=channel_layouts=mono,${filter_tail}" \
+    -frames:v 1 "$image" >/dev/null 2>&1
+}
+
+bt_make_audio_spectrum_bounded() {
+  local audio="$1"
+  local image="$2"
+  local size="$3"
+  local seconds="${4:-0}"
+  local title="${5:-}"
+  local backend="${BDTOOL_AUDIO_SPECTRUM_BACKEND:-auto}"
+  backend="${backend,,}"
+  case "$backend" in
+    auto|"")
+      bt_make_audio_spectrum_sox "$audio" "$image" "$size" "$seconds" "$title" && return 0
+      bt_make_audio_spectrum_ffmpeg "$audio" "$image" "$size" "$seconds"
+      ;;
+    sox|sox_ng)
+      bt_make_audio_spectrum_sox "$audio" "$image" "$size" "$seconds" "$title"
+      ;;
+    ffmpeg)
+      bt_make_audio_spectrum_ffmpeg "$audio" "$image" "$size" "$seconds"
+      ;;
+    *)
+      bt_make_audio_spectrum_ffmpeg "$audio" "$image" "$size" "$seconds"
+      ;;
+  esac
+}
+
 bt_make_audio_spectrum() {
   local audio="$1"
   local info_dir="$2"
-  local filter_tail=""
-  filter_tail="$(bt_audio_spectrum_tail_filter "$BDTOOL_AUDIO_SPECTRUM_SECONDS")"
-  bt_need_cmd ffmpeg
   mkdir -p "$info_dir"
   execute_with_spinner "生成频谱图" \
-    ffmpeg -nostdin -hide_banner -loglevel error -y -i "$audio" \
-    -filter_complex "[0:a]aformat=channel_layouts=mono,${filter_tail}" \
-    -frames:v 1 "$info_dir/频谱图.png" || bt_die "频谱图生成失败：$audio"
+    bt_make_audio_spectrum_bounded "$audio" "$info_dir/频谱图.png" "$BDTOOL_AUDIO_SPECTRUM_SIZE" "$BDTOOL_AUDIO_SPECTRUM_SECONDS" "$(basename "$audio")" || bt_die "频谱图生成失败：$audio"
 }
 
 bt_make_audio_spectrum_combined() {
@@ -529,26 +640,43 @@ bt_make_audio_spectrum_combined() {
   shift
   local audio=""
   local count="$#"
+  local sample_seconds="${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}"
   local i=0
-  local prep=""
-  local inputs=""
-  local filter_tail=""
-  local filter_complex=""
-  local -a cmd=(ffmpeg -nostdin -hide_banner -loglevel error -y)
+  local cols=1
+  local rows=1
+  local tmp_dir=""
+  local slice=""
+  local width="${BDTOOL_AUDIO_SPECTRUM_SIZE%x*}"
+  local height="${BDTOOL_AUDIO_SPECTRUM_SIZE#*x}"
+  local tile_filter=""
 
   (( count > 0 )) || bt_die "整包频谱图生成失败：音频列表为空"
+  [[ "$sample_seconds" =~ ^[1-9][0-9]*$ ]] || sample_seconds=12
+  [[ "$width" =~ ^[1-9][0-9]*$ && "$height" =~ ^[1-9][0-9]*$ ]] || { width=1280; height=720; }
   bt_need_cmd ffmpeg
   mkdir -p "$info_dir"
+  tmp_dir="$(mktemp -d)"
   for audio in "$@"; do
-    cmd+=(-i "$audio")
-    prep+="[${i}:a]aformat=channel_layouts=mono,aresample=44100[a${i}];"
-    inputs+="[a${i}]"
+    slice="$tmp_dir/slice-$(printf '%05d' "$i").png"
+    bt_log "整包总频谱切片 $((i + 1))/${count}: $(basename "$audio")"
+    if ! bt_make_audio_spectrum_bounded "$audio" "$slice" "$BDTOOL_AUDIO_SPECTRUM_TILE_SIZE" "$sample_seconds" "$(basename "$audio")"; then
+      rm -rf "$tmp_dir"
+      bt_die "整包频谱图切片生成失败：$audio"
+    fi
     i=$((i + 1))
   done
-  filter_tail="$(bt_audio_spectrum_tail_filter "$BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS")"
-  filter_complex="${prep}${inputs}concat=n=${count}:v=0:a=1,${filter_tail}"
-  cmd+=(-filter_complex "$filter_complex" -frames:v 1 "$info_dir/频谱图.png")
-  execute_with_spinner "生成整包总频谱图" "${cmd[@]}" || bt_die "整包频谱图生成失败：$info_dir"
+  while (( cols * cols < count )); do
+    cols=$((cols + 1))
+  done
+  rows=$(( (count + cols - 1) / cols ))
+  tile_filter="tile=${cols}x${rows}:nb_frames=${count},scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black"
+  if ! execute_with_spinner "生成整包总频谱图" \
+    ffmpeg -nostdin -hide_banner -loglevel error -y -framerate 1 -i "$tmp_dir/slice-%05d.png" \
+    -vf "$tile_filter" -frames:v 1 "$info_dir/频谱图.png"; then
+    rm -rf "$tmp_dir"
+    bt_die "整包频谱图生成失败：$info_dir"
+  fi
+  rm -rf "$tmp_dir"
 }
 
 bt_run_mediainfo_report_combined() {
@@ -798,7 +926,7 @@ bt_process_audio_dir_combined() {
 
   bt_log "AUDIO_DIR: $audio_dir"
   bt_log "OUT:       $BT_JOB_DIR"
-  bt_log "MODE:      combined (${#audio_files[@]} tracks)"
+  bt_log "MODE:      combined (${#audio_files[@]} tracks, ${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}s sample each)"
 
   bt_run_mediainfo_report_combined "$info_dir" "${audio_files[@]}"
   bt_make_audio_spectrum_combined "$info_dir" "${audio_files[@]}"
@@ -859,7 +987,7 @@ bt_process_local_scan() {
     if ! bt_is_video_file "$scan_path" && ! bt_is_audio_file "$scan_path"; then
       bt_die "不支持的文件类型：$scan_path（仅视频/音频文件或 Blu-ray BDMV/ISO）"
     fi
-    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
+    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE BDTOOL_AUDIO_SPECTRUM_SIZE
     local worker_cmd
     worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
     execute_with_spinner "处理媒体 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
@@ -879,7 +1007,7 @@ bt_process_local_scan() {
 
   local cmds=()
   local v
-  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
+  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE BDTOOL_AUDIO_SPECTRUM_SIZE
   for v in "${media_list[@]}"; do
     cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$out_base")")
   done
@@ -1153,7 +1281,7 @@ bt_main_scan() {
     *) bt_die "invalid audio spectrum mode: $BDTOOL_AUDIO_SPECTRUM_MODE. Use single|combined" ;;
   esac
 
-  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
+  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_TILE_SIZE BDTOOL_AUDIO_SPECTRUM_SIZE
   bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL audio_spectrum=$BDTOOL_AUDIO_SPECTRUM_MODE"
   OPT_SHOTS_N=6
   bt_validate_options
