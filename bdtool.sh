@@ -89,6 +89,7 @@ BT_VERSION="${BT_VERSION:-0.1.0}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:=12}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
+: "${BDTOOL_SCREENSHOT_CANDIDATES:=18}"
 
 bt_die() { die "$*"; }
 bt_log() {
@@ -281,52 +282,128 @@ bt_resolve_bd_path() {
 # =====================
 # Module: media
 # =====================
-bt_pick_random_seconds() {
-  local duration_s="$1"
-  local n="$2"
+bt_screenshot_candidate_count() {
+  local n="${BDTOOL_SCREENSHOT_CANDIDATES:-18}"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || n=18
+  (( n < 6 )) && n=6
+  (( n > 48 )) && n=48
+  printf "%s" "$n"
+}
 
-  local dur_int="${duration_s%.*}"
-  [[ -z "$dur_int" || "$dur_int" -lt 1 ]] && dur_int=1
+bt_screenshot_frame_usable() {
+  local image="$1"
+  local stats yavg ymin ymax yrange
+  [[ -s "$image" ]] || return 1
+  stats="$(ffmpeg -nostdin -hide_banner -loglevel error -i "$image" -vf signalstats,metadata=print:file=- -frames:v 1 -f null - 2>/dev/null || true)"
+  yavg="$(awk -F= '/lavfi.signalstats.YAVG=/{printf "%d", $2 + 0; exit}' <<< "$stats")"
+  ymin="$(awk -F= '/lavfi.signalstats.YMIN=/{printf "%d", $2 + 0; exit}' <<< "$stats")"
+  ymax="$(awk -F= '/lavfi.signalstats.YMAX=/{printf "%d", $2 + 0; exit}' <<< "$stats")"
+  [[ "$yavg" =~ ^[0-9]+$ && "$ymin" =~ ^[0-9]+$ && "$ymax" =~ ^[0-9]+$ ]] || return 1
+  yrange=$((ymax - ymin))
+  (( yavg >= 18 && yavg <= 238 && yrange >= 20 ))
+}
 
-  local start=0
-  local end="$dur_int"
-  if [[ "$dur_int" -ge 120 ]]; then
-    start=$((dur_int / 20))
-    end=$((dur_int - dur_int / 20))
-    [[ "$end" -le "$start" ]] && { start=0; end="$dur_int"; }
+bt_screenshot_array_contains() {
+  local needle="$1"
+  shift || true
+  local item
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+bt_screenshot_copy_selection() {
+  local info_dir="$1"
+  local valid_name="$2"
+  local fallback_name="$3"
+  local -n valid_ref="$valid_name"
+  local -n fallback_ref="$fallback_name"
+  local -a chosen=()
+  local total idx i item copied
+
+  for i in 1 2 3 4 5 6; do
+    rm -f -- "$info_dir/${i}.png"
+  done
+
+  total="${#valid_ref[@]}"
+  if (( total > 0 )); then
+    for i in 1 2 3 4 5 6; do
+      if (( total == 1 )); then
+        idx=0
+      else
+        idx=$(( (total - 1) * (i - 1) / 5 ))
+      fi
+      chosen+=("${valid_ref[$idx]}")
+    done
+  else
+    for item in "${fallback_ref[@]}"; do
+      bt_screenshot_array_contains "$item" "${chosen[@]}" && continue
+      chosen+=("$item")
+      (( ${#chosen[@]} >= 6 )) && break
+    done
   fi
 
-  local i=1
-  while [[ "$i" -le "$n" ]]; do
-    local r
-    r="$(od -An -N2 -tu2 /dev/urandom | tr -d ' ')"
-    local span=$((end - start))
-    [[ "$span" -lt 1 ]] && span=1
-    echo $((start + (r % span)))
-    i=$((i + 1))
+  copied=0
+  for item in "${chosen[@]}"; do
+    (( copied >= 6 )) && break
+    (( copied += 1 ))
+    cp -f -- "$item" "$info_dir/${copied}.png" || return 1
   done
+  (( copied > 0 ))
+}
+
+bt_make_quality_screenshots() {
+  local video="$1"
+  local info_dir="$2"
+  local duration dur_int candidate_count tmp_dir i permille sec candidate
+  local rc=1
+  local -a valid_candidates=()
+  local -a fallback_candidates=()
+
+  bt_need_cmd ffprobe
+  bt_need_cmd ffmpeg
+
+  duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video" 2>/dev/null || true)"
+  [[ -z "$duration" ]] && bt_die "无法读取视频时长：$video"
+  dur_int="${duration%.*}"
+  [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
+  (( dur_int < 12 )) && dur_int=12
+  candidate_count="$(bt_screenshot_candidate_count)"
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptbd-shots.XXXXXX")" || return 1
+
+  bt_log "截图候选生成：$candidate_count 张，自动过滤黑屏/空白帧"
+  for ((i = 1; i <= candidate_count; i++)); do
+    permille=$((80 + (i - 1) * 840 / (candidate_count - 1)))
+    sec=$((dur_int * permille / 1000))
+    (( sec < 1 )) && sec=1
+    (( sec >= dur_int )) && sec=$((dur_int - 1))
+    candidate="$tmp_dir/$i.png"
+    if ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$candidate" >/dev/null 2>&1; then
+      if [[ -s "$candidate" ]]; then
+        fallback_candidates+=("$candidate")
+        if bt_screenshot_frame_usable "$candidate"; then
+          valid_candidates+=("$candidate")
+        fi
+      fi
+    fi
+  done
+
+  bt_log "截图筛选完成：有效 ${#valid_candidates[@]}/${#fallback_candidates[@]}，输出 6 张"
+  if bt_screenshot_copy_selection "$info_dir" valid_candidates fallback_candidates; then
+    rc=0
+  fi
+  rm -rf -- "$tmp_dir"
+  return "$rc"
 }
 
 bt_make_screenshots() {
   local video="$1"
   local info_dir="$2"
   local _n_ignored="${3:-}"
-  local n=6
-
-  bt_need_cmd ffprobe
-  bt_need_cmd ffmpeg
-
-  local duration
-  duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video" || true)"
-  [[ -z "$duration" ]] && bt_die "无法读取视频时长：$video"
 
   mkdir -p "$info_dir"
-
-  local idx=1
-  while read -r sec; do
-    execute_with_spinner "截图 ${idx}/6" ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$video" -frames:v 1 -y "$info_dir/${idx}.png" || bt_die "截图失败：$video"
-    idx=$((idx + 1))
-  done < <(bt_pick_random_seconds "$duration" "$n")
+  bt_make_quality_screenshots "$video" "$info_dir" || bt_die "截图失败：$video"
 }
 
 bt_run_mediainfo_report() {
@@ -728,18 +805,11 @@ bt_pick_disc_probe_video() {
 bt_make_disc_screenshots() {
   local bd_path="$1"
   local info_dir="$2"
-  local probe_video duration dur_int i sec
+  local probe_video
 
   probe_video="$(bt_pick_disc_probe_video "$bd_path")"
   if [[ -n "$probe_video" ]] && command -v ffprobe >/dev/null 2>&1 && command -v ffmpeg >/dev/null 2>&1; then
-    duration="$(ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$probe_video" 2>/dev/null || true)"
-    dur_int="${duration%.*}"
-    [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
-    (( dur_int < 12 )) && dur_int=12
-    for i in 1 2 3 4 5 6; do
-      sec=$(( (dur_int * i) / 7 ))
-      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe_video" -frames:v 1 -y "$info_dir/${i}.png" >/dev/null 2>&1 || true
-    done
+    bt_make_quality_screenshots "$probe_video" "$info_dir" || true
   fi
   bt_ensure_disc_six_png "$info_dir"
 }
@@ -965,7 +1035,7 @@ bt_process_local_scan() {
     if ! bt_is_video_file "$scan_path" && ! bt_is_audio_file "$scan_path"; then
       bt_die "不支持的文件类型：$scan_path（仅视频/音频文件或 Blu-ray BDMV/ISO）"
     fi
-    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
+    export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE BDTOOL_SCREENSHOT_CANDIDATES
     local worker_cmd
     worker_cmd="$(printf '%q ' "$0") __worker_video $(printf '%q ' "$scan_path") $(printf '%q' "$out_base")"
     execute_with_spinner "处理媒体 $(basename "$scan_path")" bash -c "$worker_cmd" || bt_die "处理失败：$scan_path"
@@ -985,7 +1055,7 @@ bt_process_local_scan() {
 
   local cmds=()
   local v
-  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
+  export OPT_MEDIAINFO OPT_SHOTS OPT_SHOTS_N OPT_LOG_LEVEL BDTOOL_ROOT BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE BDTOOL_SCREENSHOT_CANDIDATES
   for v in "${media_list[@]}"; do
     cmds+=("$(printf '%q ' "$0") __worker_video $(printf '%q ' "$v") $(printf '%q' "$out_base")")
   done
@@ -1259,8 +1329,8 @@ bt_main_scan() {
     *) bt_die "invalid audio spectrum mode: $BDTOOL_AUDIO_SPECTRUM_MODE. Use single|combined" ;;
   esac
 
-  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE
-  bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL audio_spectrum=$BDTOOL_AUDIO_SPECTRUM_MODE"
+  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_AUDIO_SPECTRUM_SIZE BDTOOL_SCREENSHOT_CANDIDATES
+  bt_debug "effective options: mediainfo=$OPT_MEDIAINFO shots=$OPT_SHOTS shots_n=$OPT_SHOTS_N jobs=$OPT_JOBS log_level=$OPT_LOG_LEVEL audio_spectrum=$BDTOOL_AUDIO_SPECTRUM_MODE screenshot_candidates=$BDTOOL_SCREENSHOT_CANDIDATES"
   OPT_SHOTS_N=6
   bt_validate_options
 

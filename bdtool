@@ -91,6 +91,7 @@ setup_bundle_runtime "$ROOT_DIR"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_SECONDS:=0}"
 : "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:=12}"
 : "${BDTOOL_AUDIO_SPECTRUM_SIZE:=1280x720}"
+: "${BDTOOL_SCREENSHOT_CANDIDATES:=18}"
 
 ensure_output_root
 MAX_SCAN_DISPLAY=10
@@ -285,6 +286,135 @@ ensure_six_png() {
       fi
     fi
   done
+}
+
+screenshot_candidate_count() {
+  local n="${BDTOOL_SCREENSHOT_CANDIDATES:-18}"
+  [[ "$n" =~ ^[1-9][0-9]*$ ]] || n=18
+  (( n < 6 )) && n=6
+  (( n > 48 )) && n=48
+  printf "%s" "$n"
+}
+
+screenshot_frame_usable() {
+  local image="$1"
+  local stats yavg ymin ymax yrange
+  [[ -s "$image" ]] || return 1
+  stats="$(ffmpeg -nostdin -hide_banner -loglevel error -i "$image" -vf signalstats,metadata=print:file=- -frames:v 1 -f null - 2>/dev/null || true)"
+  yavg="$(awk -F= '/lavfi.signalstats.YAVG=/{printf "%d", $2 + 0; exit}' <<< "$stats")"
+  ymin="$(awk -F= '/lavfi.signalstats.YMIN=/{printf "%d", $2 + 0; exit}' <<< "$stats")"
+  ymax="$(awk -F= '/lavfi.signalstats.YMAX=/{printf "%d", $2 + 0; exit}' <<< "$stats")"
+  [[ "$yavg" =~ ^[0-9]+$ && "$ymin" =~ ^[0-9]+$ && "$ymax" =~ ^[0-9]+$ ]] || return 1
+  yrange=$((ymax - ymin))
+  (( yavg >= 18 && yavg <= 238 && yrange >= 20 ))
+}
+
+screenshot_array_contains() {
+  local needle="$1"
+  shift || true
+  local item
+  for item in "$@"; do
+    [[ "$item" == "$needle" ]] && return 0
+  done
+  return 1
+}
+
+screenshot_copy_selection() {
+  local out="$1"
+  local valid_name="$2"
+  local fallback_name="$3"
+  local -n valid_ref="$valid_name"
+  local -n fallback_ref="$fallback_name"
+  local -a chosen=()
+  local total idx i item copied
+
+  for i in 1 2 3 4 5 6; do
+    rm -f -- "$out/$i.png"
+  done
+
+  total="${#valid_ref[@]}"
+  if (( total > 0 )); then
+    for i in 1 2 3 4 5 6; do
+      if (( total == 1 )); then
+        idx=0
+      else
+        idx=$(( (total - 1) * (i - 1) / 5 ))
+      fi
+      chosen+=("${valid_ref[$idx]}")
+    done
+  else
+    for item in "${fallback_ref[@]}"; do
+      screenshot_array_contains "$item" "${chosen[@]}" && continue
+      chosen+=("$item")
+      (( ${#chosen[@]} >= 6 )) && break
+    done
+  fi
+
+  copied=0
+  for item in "${chosen[@]}"; do
+    (( copied >= 6 )) && break
+    (( copied += 1 ))
+    cp -f -- "$item" "$out/$copied.png" || return 1
+  done
+  (( copied > 0 ))
+}
+
+screenshot_progress() {
+  local base="${1:-0}"
+  local span="${2:-0}"
+  local done_count="${3:-0}"
+  local total="${4:-1}"
+  local label="${5:-截图生成}"
+  local pct
+  [[ "$base" =~ ^[0-9]+$ && "$span" =~ ^[0-9]+$ && "$done_count" =~ ^[0-9]+$ && "$total" =~ ^[1-9][0-9]*$ ]] || return 0
+  (( span > 0 )) || return 0
+  pct=$((base + done_count * span / total))
+  (( pct > 99 )) && pct=99
+  screen "生成进度: ${pct}% (${label})"
+}
+
+make_quality_screenshots() {
+  local src="$1"
+  local out="$2"
+  local progress_base="${3:-0}"
+  local progress_span="${4:-0}"
+  local duration dur_int candidate_count tmp_dir i permille sec candidate
+  local rc=1
+  local -a valid_candidates=()
+  local -a fallback_candidates=()
+
+  duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
+  dur_int="${duration%.*}"
+  [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
+  (( dur_int < 12 )) && dur_int=12
+  candidate_count="$(screenshot_candidate_count)"
+  tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptbd-shots.XXXXXX")" || return 1
+
+  for ((i = 1; i <= candidate_count; i++)); do
+    permille=$((80 + (i - 1) * 840 / (candidate_count - 1)))
+    sec=$((dur_int * permille / 1000))
+    (( sec < 1 )) && sec=1
+    (( sec >= dur_int )) && sec=$((dur_int - 1))
+    candidate="$tmp_dir/$i.png"
+    if ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$candidate" >/dev/null 2>&1; then
+      if [[ -s "$candidate" ]]; then
+        fallback_candidates+=("$candidate")
+        if screenshot_frame_usable "$candidate"; then
+          valid_candidates+=("$candidate")
+        fi
+      fi
+    fi
+    if (( i == 1 || i == candidate_count || i % 3 == 0 )); then
+      screenshot_progress "$progress_base" "$progress_span" "$i" "$candidate_count" "截图候选生成 ${i}/${candidate_count}"
+    fi
+  done
+
+  screen "截图筛选完成：有效 ${#valid_candidates[@]}/${#fallback_candidates[@]}，输出 6 张"
+  if screenshot_copy_selection "$out" valid_candidates fallback_candidates; then
+    rc=0
+  fi
+  rm -rf -- "$tmp_dir"
+  return "$rc"
 }
 
 finalize_video_output() {
@@ -602,22 +732,14 @@ make_disc_screenshots() {
   local out="$2"
   local progress_base="${3:-0}"
   local progress_step="${4:-0}"
-  local probe duration dur_int i sec progress_pct
+  local probe progress_span
   probe="$(pick_disc_probe_video "$src")"
   if [[ -n "$probe" ]] && require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
-    duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$probe" 2>/dev/null || true)"
-    dur_int="${duration%.*}"
-    [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
-    (( dur_int < 12 )) && dur_int=12
-    for i in 1 2 3 4 5 6; do
-      sec=$(( (dur_int * i) / 7 ))
-      ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$probe" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1 || true
-      if [[ "$progress_step" =~ ^[0-9]+$ ]] && (( progress_step > 0 )); then
-        progress_pct=$((progress_base + i * progress_step))
-        (( progress_pct > 99 )) && progress_pct=99
-        screen "生成进度: ${progress_pct}% (截图生成 ${i}/6)"
-      fi
-    done
+    progress_span=0
+    if [[ "$progress_step" =~ ^[0-9]+$ ]]; then
+      progress_span=$((progress_step * 6))
+    fi
+    make_quality_screenshots "$probe" "$out" "$progress_base" "$progress_span" || true
   fi
   ensure_six_png "$out"
 }
@@ -1106,7 +1228,7 @@ handle_generate_path_command() {
     screen_error "无效音频频谱模式：$spectrum_mode（可选 single 或 combined）"
     return 2
   fi
-  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS
+  export BDTOOL_AUDIO_SPECTRUM_MODE BDTOOL_AUDIO_SPECTRUM_BACKEND BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS BDTOOL_SCREENSHOT_CANDIDATES
 
   preflight_post_process || return 1
   generate_item "$item_type" "$item_path" || return 1
@@ -1191,19 +1313,8 @@ generate_item() {
     screen "生成进度: 30% (mediainfo 生成完成)"
 
     if require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
-      local duration dur_int i sec
-      duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
-      dur_int="${duration%.*}"
-      [[ "$dur_int" =~ ^[0-9]+$ ]] || dur_int=60
-      (( dur_int < 12 )) && dur_int=12
       screen "生成进度: 35% (截图生成准备)"
-      for i in 1 2 3 4 5 6; do
-        sec=$(( (dur_int * i) / 7 ))
-        if ! ffmpeg -nostdin -hide_banner -loglevel error -ss "$sec" -i "$src" -frames:v 1 -y "$out/$i.png" >/dev/null 2>&1; then
-          hard_fail=1
-        fi
-        screen "生成进度: $((35 + i * 10))% (截图生成 ${i}/6)"
-      done
+      make_quality_screenshots "$src" "$out" 35 56 || hard_fail=1
     else
       hard_fail=1
     fi
