@@ -24,6 +24,7 @@ find_app_root() {
   local script_dir="$1"
   local candidate=""
   local -a candidates=()
+  local user_home="${HOME:-}"
 
   [[ -n "${PTBDTOOL_ROOT:-}" ]] && candidates+=("${PTBDTOOL_ROOT}")
   [[ -n "${PTBD_INSTALL_ROOT:-}" ]] && candidates+=("${PTBD_INSTALL_ROOT}")
@@ -31,8 +32,8 @@ find_app_root() {
     "$script_dir"
     "$script_dir/.."
     "/opt/PT-BDtool"
-    "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
   )
+  [[ -n "$user_home" ]] && candidates+=("$user_home/.local/share/pt-bdtool/PT-BDtool-app")
 
   for candidate in "${candidates[@]}"; do
     [[ -n "$candidate" ]] || continue
@@ -55,7 +56,8 @@ SCRIPT_PATH="$(resolve_script_path "$SCRIPT_SOURCE")"
 [[ -n "$SCRIPT_PATH" ]] || SCRIPT_PATH="$SCRIPT_SOURCE"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" 2>/dev/null && pwd)"
 ROOT_DIR=""
-for candidate in "${PTBDTOOL_ROOT:-}" "${PTBD_INSTALL_ROOT:-}" "$SCRIPT_DIR" "/opt/PT-BDtool" "$HOME/.local/share/pt-bdtool/PT-BDtool-app"; do
+USER_HOME="${HOME:-}"
+for candidate in "${PTBDTOOL_ROOT:-}" "${PTBD_INSTALL_ROOT:-}" "$SCRIPT_DIR" "/opt/PT-BDtool" "${USER_HOME:+$USER_HOME/.local/share/pt-bdtool/PT-BDtool-app}"; do
   [[ -n "$candidate" ]] || continue
   if [[ -f "$candidate/lib/ui.sh" ]]; then
     ROOT_DIR="$candidate"

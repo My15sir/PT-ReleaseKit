@@ -401,6 +401,7 @@ def shell_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
 
 def local_runtime_env(config: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
+    env.setdefault("HOME", str(Path.home()))
     local_root = str(config.get("local_root") or "/")
     env["BDTOOL_SCAN_FULL_ROOT"] = local_root
     env["BDTOOL_SCAN_INCLUDE_ROOTS"] = str(config.get("scan_include") or local_root)

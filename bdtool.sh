@@ -27,6 +27,7 @@ bt_find_app_root() {
   local script_dir="$1"
   local candidate=""
   local -a candidates=()
+  local user_home="${HOME:-}"
 
   [[ -n "${PTBDTOOL_ROOT:-}" ]] && candidates+=("${PTBDTOOL_ROOT}")
   [[ -n "${PTBD_INSTALL_ROOT:-}" ]] && candidates+=("${PTBD_INSTALL_ROOT}")
@@ -34,8 +35,8 @@ bt_find_app_root() {
     "$script_dir"
     "$script_dir/.."
     "/opt/PT-BDtool"
-    "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
   )
+  [[ -n "$user_home" ]] && candidates+=("$user_home/.local/share/pt-bdtool/PT-BDtool-app")
 
   for candidate in "${candidates[@]}"; do
     [[ -n "$candidate" ]] || continue
