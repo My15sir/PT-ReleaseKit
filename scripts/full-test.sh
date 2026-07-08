@@ -164,7 +164,7 @@ from pathlib import Path
 
 pattern = re.compile(r"printf '([^']+)' \| base64 -d")
 
-for rel in ("bdtool", "bdtool.sh"):
+for rel in ("bdtool",):
     path = Path(sys.argv[1]) / rel
     text = path.read_text(encoding="utf-8")
     match = pattern.search(text)

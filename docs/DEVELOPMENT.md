@@ -45,8 +45,12 @@
 ### 核心处理
 
 - `bdtool`
-- `bdtool.sh`
 - `lib/ui.sh`
+
+说明：
+
+- `bdtool` 是唯一核心处理实现
+- `bdtool.sh` 仅保留为旧命令兼容转发入口
 
 ### 打包与发布
 

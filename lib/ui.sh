@@ -80,6 +80,13 @@ resolve_effective_home() {
   local user_home="${HOME:-}"
   local owner=""
 
+  # Honor an explicit HOME first. This keeps non-interactive SSH/test runs
+  # isolated while still allowing sudo/root defaults to fall through below.
+  if [[ -n "$user_home" && "$user_home" != "/root" ]]; then
+    printf "%s" "$user_home"
+    return 0
+  fi
+
   if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
     if command -v getent >/dev/null 2>&1; then
       owner="$(getent passwd "$SUDO_USER" | awk -F: '{print $6}' | head -n1)"

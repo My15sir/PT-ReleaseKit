@@ -247,7 +247,7 @@ This is the recommended way to think about it now:
 To keep the repository understandable instead of turning into a dumping ground, it helps to think of it in a few simple buckets:
 
 - **Main entrypoints**: `ptbd`, `ptbd-start.sh`, `ptbd-gui`, `ptbd-remote.sh`
-- **Core processing logic**: `bdtool`, `bdtool.sh`
+- **Core processing logic**: `bdtool`; `bdtool.sh` is a compatibility launcher that forwards to `bdtool`
 - **Shared helpers**: `lib/`
 - **Install and dependency bundling**: `install.sh`, `scripts/`, `scripts/ensure-bundle.py`, `third_party/bundle/` (generated on demand)
 - **Double-click launchers**: `PT-BDtool.bat`, `PT-BDtool.command`, `PT-BDtool.desktop`
