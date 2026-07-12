@@ -623,7 +623,130 @@ class PTBDRemoteBackend:
             auth_timeout=20,
         )
         self.client = client
-        self.sftp = client.open_sftp()
+        # SFTP is optional: some VPS disable the subsystem. Open on demand.
+
+    def ensure_sftp(self) -> None:
+        self.connect()
+        if self.sftp is not None:
+            return
+        try:
+            self.sftp = self.client.open_sftp()
+        except Exception as exc:
+            raise RemoteCommandError(
+                "SSH 已连通，但 SFTP 子系统不可用（Channel closed）。"
+                "将尝试用 SSH 管道传输文件；若仍失败，请在 VPS 启用 Subsystem sftp。"
+                f" 原始错误：{exc}"
+            ) from exc
+
+    def put_file(self, local_path: Path | str, remote_path: str) -> None:
+        """Upload a local file. Prefer SFTP; fall back to SSH stdin pipe."""
+        self.connect()
+        self.ensure_not_cancelled()
+        local = Path(local_path)
+        try:
+            self.ensure_sftp()
+            self.sftp.put(str(local), remote_path)
+            return
+        except Exception as sftp_exc:
+            self.log(f"[gui] SFTP 上传不可用，回退 SSH 管道：{sftp_exc}")
+
+        transport = self.client.get_transport()
+        if transport is None:
+            raise RemoteCommandError("SSH 连接已断开，无法上传文件。")
+        # Ensure parent dir exists
+        parent = str(PurePosixPath(remote_path).parent)
+        if parent and parent not in {".", "/"}:
+            self.run_script(f"mkdir -p {quote_sh(parent)}", check=False)
+        channel = transport.open_session()
+        channel.settimeout(600)
+        self._active_channel = channel
+        try:
+            channel.exec_command(f"cat > {quote_sh(remote_path)}")
+            with local.open("rb") as handle:
+                while True:
+                    self.ensure_not_cancelled()
+                    chunk = handle.read(65536)
+                    if not chunk:
+                        break
+                    channel.sendall(chunk)
+            channel.shutdown_write()
+            # Drain remote output/errors
+            while not channel.exit_status_ready():
+                if channel.recv_ready():
+                    channel.recv(4096)
+                if channel.recv_stderr_ready():
+                    channel.recv_stderr(4096)
+                time.sleep(0.05)
+            rc = channel.recv_exit_status()
+            if rc != 0:
+                err = b""
+                while channel.recv_stderr_ready():
+                    err += channel.recv_stderr(4096)
+                raise RemoteCommandError(
+                    f"SSH 管道上传失败 rc={rc}: {err.decode('utf-8', errors='replace') or remote_path}"
+                )
+        finally:
+            try:
+                channel.close()
+            except Exception:
+                pass
+            if self._active_channel is channel:
+                self._active_channel = None
+
+    def get_file(self, remote_path: str, local_path: Path | str) -> None:
+        """Download a remote file. Prefer SFTP; fall back to SSH stdout pipe."""
+        self.connect()
+        self.ensure_not_cancelled()
+        local = Path(local_path)
+        local.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.ensure_sftp()
+            self.sftp.get(remote_path, str(local))
+            return
+        except Exception as sftp_exc:
+            self.log(f"[gui] SFTP 下载不可用，回退 SSH 管道：{sftp_exc}")
+
+        transport = self.client.get_transport()
+        if transport is None:
+            raise RemoteCommandError("SSH 连接已断开，无法下载文件。")
+        channel = transport.open_session()
+        channel.settimeout(600)
+        self._active_channel = channel
+        try:
+            channel.exec_command(f"cat {quote_sh(remote_path)}")
+            with local.open("wb") as handle:
+                while True:
+                    self.ensure_not_cancelled()
+                    if channel.recv_ready():
+                        chunk = channel.recv(65536)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        continue
+                    if channel.exit_status_ready():
+                        while channel.recv_ready():
+                            handle.write(channel.recv(65536))
+                        break
+                    time.sleep(0.05)
+            rc = channel.recv_exit_status()
+            if rc != 0 or not local.exists() or local.stat().st_size <= 0:
+                err = b""
+                while channel.recv_stderr_ready():
+                    err += channel.recv_stderr(4096)
+                try:
+                    local.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                raise RemoteCommandError(
+                    f"SSH 管道下载失败 rc={rc}: {err.decode('utf-8', errors='replace') or remote_path}"
+                )
+        finally:
+            try:
+                channel.close()
+            except Exception:
+                pass
+            if self._active_channel is channel:
+                self._active_channel = None
 
     def close(self) -> None:
         channel = self._active_channel
@@ -786,11 +909,22 @@ class PTBDRemoteBackend:
         else:
             hints.append("当前为全盘扫描模式，媒体多时可能较慢")
 
+        # Probe SFTP availability without failing diagnose.
+        sftp_ok = False
+        try:
+            self.ensure_sftp()
+            sftp_ok = True
+        except Exception as sftp_exc:
+            hints.append(f"SFTP 不可用，将回退 SSH 管道传输：{sftp_exc}")
+        report["sftp_available"] = sftp_ok
+
         report["ok"] = True
         if report["core_deps_ready"]:
             report["message"] = "连接成功，核心依赖已就绪"
         else:
             report["message"] = "连接成功，但核心依赖未齐"
+        if not sftp_ok:
+            report["message"] += "（SFTP 不可用，已启用管道回退）"
         report["hints"] = hints
         return report
 
@@ -926,7 +1060,34 @@ class PTBDRemoteBackend:
         members = self.runtime_members(archive_mode)
         digest = hashlib.sha256()
         digest.update(f"mode:{archive_mode}".encode("utf-8"))
-        digest.update(b"\0")
+        digest.update(b"\0text-normalize-lf-v1\0")
+        text_suffixes = {".sh", ".py", ".env", ".txt", ".md", ".json", ".yml", ".yaml", ".desktop", ".command"}
+        text_names = {"bdtool", "ptbd", "ptbd-gui", "ptbd-web", "ptbd-remote.sh", "Dockerfile"}
+
+        def is_text_member(source_path: Path, relative_path: str) -> bool:
+            name = PurePosixPath(relative_path).name
+            if name in text_names or name.startswith("bdtool"):
+                return True
+            suffix = source_path.suffix.lower()
+            if suffix in text_suffixes:
+                return True
+            # Shebang scripts without extension (e.g. bdtool)
+            try:
+                with source_path.open("rb") as handle:
+                    head = handle.read(2)
+                return head == b"#!"
+            except OSError:
+                return False
+
+        def read_member_bytes(source_path: Path, relative_path: str) -> bytes | None:
+            if source_path.is_symlink() or source_path.is_dir():
+                return None
+            data = source_path.read_bytes()
+            if is_text_member(source_path, relative_path):
+                # Avoid Windows CRLF breaking Linux shebang: "bash\r"
+                data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            return data
+
         for source_path, relative_path in members:
             digest.update(relative_path.encode("utf-8"))
             digest.update(b"\0")
@@ -939,12 +1100,8 @@ class PTBDRemoteBackend:
                 digest.update(b"D")
             else:
                 digest.update(b"F")
-                with source_path.open("rb") as handle:
-                    while True:
-                        chunk = handle.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        digest.update(chunk)
+                payload = read_member_bytes(source_path, relative_path) or b""
+                digest.update(payload)
             digest.update(str(mode).encode("ascii"))
             digest.update(b"\0")
         runtime_hash = digest.hexdigest()
@@ -961,7 +1118,21 @@ class PTBDRemoteBackend:
 
         with tarfile.open(archive_path, "w:gz", compresslevel=6, format=tarfile.PAX_FORMAT) as handle:
             for source_path, relative_path in members:
-                handle.add(source_path, arcname=relative_path, recursive=False, filter=normalize_tar_info)
+                if source_path.is_dir() or source_path.is_symlink():
+                    handle.add(source_path, arcname=relative_path, recursive=False, filter=normalize_tar_info)
+                    continue
+                payload = read_member_bytes(source_path, relative_path)
+                if payload is None:
+                    handle.add(source_path, arcname=relative_path, recursive=False, filter=normalize_tar_info)
+                    continue
+                info = tarfile.TarInfo(name=relative_path)
+                info.size = len(payload)
+                info.mode = stat.S_IMODE(source_path.stat().st_mode)
+                # Ensure scripts remain executable on remote.
+                if is_text_member(source_path, relative_path) or source_path.name in {"bdtool", "bdtool.sh"}:
+                    info.mode |= 0o755
+                info = normalize_tar_info(info)
+                handle.addfile(info, io.BytesIO(payload))
         return archive_path, runtime_hash
 
     def normalize_remote_arch(self, remote_arch: str) -> str:
@@ -1007,7 +1178,7 @@ class PTBDRemoteBackend:
 
             self.log(f"[gui] 正在上传 {archive_mode} 运行包到 {self.config['remote_host']}:{self.remote_cache_root}")
             self.run_script(f"mkdir -p {quote_sh(self.remote_cache_root)}")
-            self.sftp.put(str(archive_path), remote_archive)
+            self.put_file(archive_path, remote_archive)
             self.run_script(
                 self.render_prepare_runtime_script(
                     remote_runtime_dir=remote_runtime_dir,
@@ -1185,7 +1356,7 @@ rm -f "$archive_path"
         save_dir.mkdir(parents=True, exist_ok=True)
         local_path = unique_local_path(save_dir, Path(remote_package).name)
         self.log(f"[gui] 正在下载结果到本机：{local_path}")
-        self.sftp.get(remote_package, str(local_path))
+        self.get_file(remote_package, local_path)
         self.log(f"[gui] 本机已收到结果：{local_path}")
         return local_path
 
