@@ -187,9 +187,15 @@ def public_config(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def find_bash() -> str | None:
-    if os.name == "nt":
-        return shutil.which("bash")
-    candidates = [shutil.which("bash"), "/bin/bash", "/usr/bin/bash"]
+    candidates = [
+        shutil.which("bash"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+        "/bin/bash",
+        "/usr/bin/bash",
+    ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return candidate
@@ -514,7 +520,16 @@ def extra_scan_roots(config: dict[str, Any]) -> list[str]:
 
 
 def scan_include_env_value(config: dict[str, Any]) -> str:
-    # Prefer explicit roots / preferred media roots. Empty only when scan_full=true and no whitelist.
+    # Explicit whitelist always wins.
+    explicit = str(config.get("scan_include") or "").strip()
+    if explicit:
+        return build_effective_scan_include(config)
+    # Full scan: no include roots.
+    if bool(config.get("scan_full")):
+        return ""
+    # Local mode should stay on local_root, not Linux VPS preferred roots.
+    if str(config.get("mode") or "").strip().lower() == "local":
+        return ""
     return build_effective_scan_include(config)
 
 
@@ -545,6 +560,16 @@ def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
     if not bdtool.is_file():
         raise RuntimeError(f"找不到 bdtool：{bdtool}")
     env = local_runtime_env(config)
+    # Ensure Git usr/bin tools and python are visible to bdtool under Windows.
+    git_bins = [
+        r"C:\Program Files\Git\usr\bin",
+        r"C:\Program Files\Git\mingw64\bin",
+        r"C:\Program Files\Git\bin",
+    ]
+    env["PATH"] = os.pathsep.join([*git_bins, env.get("PATH", "")])
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["LANG"] = env.get("LANG") or "C.UTF-8"
+    env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
     if env.get("BDTOOL_SCAN_INCLUDE_ROOTS"):
         task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}；额外目录：{env['BDTOOL_SCAN_INCLUDE_ROOTS']}")
     else:
@@ -553,25 +578,26 @@ def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
         [bash_bin, str(bdtool), "scan-json", "--full", "--lang", "zh"],
         cwd=str(APP_ROOT),
         env=env,
-        text=True,
         capture_output=True,
         timeout=1800,
         check=False,
         stdin=subprocess.DEVNULL,
     )
-    if result.stderr.strip():
+    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+    if stderr.strip():
         task.log("scan-json stderr:")
-        for line in result.stderr.strip().splitlines():
+        for line in stderr.strip().splitlines():
             task.log(line)
     if result.returncode != 0:
-        if result.stdout.strip():
+        if stdout.strip():
             task.log("scan-json stdout:")
-            for line in result.stdout.strip().splitlines()[:40]:
+            for line in stdout.strip().splitlines()[:40]:
                 task.log(line)
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"local scan rc={result.returncode}")
-    if not result.stdout.strip():
+        raise RuntimeError(stderr.strip() or stdout.strip() or f"local scan rc={result.returncode}")
+    if not stdout.strip():
         raise RuntimeError("本地 scan-json 没有返回任何内容。")
-    payload = json.loads(result.stdout)
+    payload = json.loads(stdout)
     return normalize_items(payload.get("items", []))
 
 
@@ -608,21 +634,21 @@ def run_process_stream(cmd: list[str], env: dict[str, str], task: WebTask) -> in
         cmd,
         cwd=str(APP_ROOT),
         env=env,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
-        bufsize=1,
         start_new_session=(os.name != "nt"),
     )
     task.process = process
+    assert process.stdout is not None
     try:
-        assert process.stdout is not None
-        for line in process.stdout:
+        for raw in process.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if line:
+                task.log(line)
             if task.cancel_event.is_set():
                 terminate_process_tree(process)
                 break
-            task.log(line.rstrip("\r\n"))
         try:
             return process.wait(timeout=5 if task.cancel_event.is_set() else None)
         except subprocess.TimeoutExpired:
