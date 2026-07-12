@@ -21,7 +21,9 @@ from ptbd_remote_backend import (
     TaskCancelledError,
     backend_available,
     backend_status,
+    build_effective_scan_include,
     normalize_remote_connection,
+    preferred_scan_roots_text,
 )
 
 
@@ -212,6 +214,7 @@ DEFAULT_CONFIG = {
     "save_dir": default_save_dir(),
     "scan_include": "",
     "scan_exclude": "",
+    "scan_full": False,
     "auto_cleanup": True,
 }
 
@@ -586,6 +589,8 @@ class App:
         self.tooltip_after_id: str | None = None
         self.tree_font = tkfont.nametofont("TkDefaultFont")
         self.scan_context_menu: tk.Menu | None = None
+        self.last_failed_paths: list[str] = []
+        self.last_success_paths: list[str] = []
         self._build_ui()
         self._load_into_form(load_config())
         self._poll_logs()
@@ -641,7 +646,14 @@ class App:
         self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 1, "默认 22")
         self._add_compact_entry(form, "SSH 密码", "remote_password", 1, 0, "留空表示走密钥", show="*")
         self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 1, "只有源码旧模式才需要")
-        self._add_compact_entry(form, "扫描白名单", "scan_include", 2, 0, "留空时自动扫描常见媒体目录")
+        self._add_compact_entry(
+            form,
+            "扫描白名单",
+            "scan_include",
+            2,
+            0,
+            f"可留空。默认优先：{preferred_scan_roots_text()}",
+        )
         self._add_compact_entry(form, "额外排除", "scan_exclude", 2, 1, "可留空")
 
         save_group = ttk.Frame(form, style="Panel.TFrame", padding=(0, 8, 0, 0))
@@ -667,7 +679,7 @@ class App:
         option_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         option_group.columnconfigure(0, weight=1)
         ttk.Label(option_group, text="运行选项", style="Field.TLabel").grid(row=0, column=0, sticky=W)
-        ttk.Label(option_group, text="这些设置会影响回传和远端清理行为", style="PanelHint.TLabel").grid(
+        ttk.Label(option_group, text="这些设置会影响扫描范围、回传和远端清理行为", style="PanelHint.TLabel").grid(
             row=1, column=0, sticky=W, pady=(2, 8)
         )
         self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
@@ -681,7 +693,13 @@ class App:
             option_group,
             text="空白 VPS 自动上传运行包（推荐）",
             variable=self.config_vars["remote_bootstrap"],
-        ).grid(row=3, column=0, sticky=W)
+        ).grid(row=3, column=0, sticky=W, pady=(0, 6))
+        self.config_vars["scan_full"] = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            option_group,
+            text="启用全盘扫描（高级，媒体多时较慢）",
+            variable=self.config_vars["scan_full"],
+        ).grid(row=4, column=0, sticky=W)
 
         form.columnconfigure(0, weight=1, uniform="form")
         form.columnconfigure(1, weight=1, uniform="form")
@@ -717,9 +735,11 @@ class App:
         self._pack_round_button(primary_actions, "⌕ 扫描", self.scan_remote, variant="primary", width=8)
         self._pack_round_button(primary_actions, "▷ 启动", self.start_remote, variant="accent", width=8, padx=(10, 0))
         self._pack_round_button(primary_actions, "▢ 停止", self.stop_remote, variant="danger", width=8, padx=(10, 0))
+        self._pack_round_button(primary_actions, "⚙ 测连", self.test_connection, variant="action", width=8, padx=(10, 0))
+        self._pack_round_button(primary_actions, "↻ 重试失败", self.retry_failed_paths, variant="action", width=10, padx=(10, 0))
         ttk.Label(
             primary_actions,
-            text="提示：左侧勾选即可多选",
+            text="提示：左侧勾选即可多选；默认优先扫描常见目录",
             style="PanelHint.TLabel",
         ).pack(side=LEFT, padx=(12, 0))
         filter_bar = self._build_pill_group(scan_body, pady=(0, 8), body_padding=(14, 10, 14, 10))
@@ -1203,6 +1223,7 @@ class App:
             "save_dir": self.config_vars["save_dir"].get().strip() or default_save_dir(),
             "scan_include": self.config_vars["scan_include"].get().strip(),
             "scan_exclude": self.config_vars["scan_exclude"].get().strip(),
+            "scan_full": bool(self.config_vars["scan_full"].get()),
             "auto_cleanup": bool(self.config_vars["auto_cleanup"].get()),
         }
 
@@ -1316,15 +1337,43 @@ class App:
         self.status_var.set(f"运行中：准备顺序处理 {len(selected_paths)} 个条目")
 
         def worker() -> None:
+            success_paths: list[str] = []
+            failed: list[tuple[str, str]] = []
+            last_local: Path | None = None
             try:
-                local_path = None
                 for index, selected_path in enumerate(selected_paths, start=1):
                     self.log_queue.put(f"[gui] 开始处理 {index}/{len(selected_paths)}：{selected_path}")
-                    local_path = backend.process_selected_path(selected_path, save_dir)
-                    self.log_queue.put(f"[gui] 完成 {index}/{len(selected_paths)}：{selected_path}")
-                if local_path is not None:
-                    self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{local_path.parent}")
-                self.log_queue.put("[gui] 任务结束，退出码：0")
+                    try:
+                        local_path = backend.process_selected_path(selected_path, save_dir)
+                        last_local = local_path
+                        success_paths.append(str(local_path))
+                        self.log_queue.put(f"[gui] 成功 {index}/{len(selected_paths)}：{local_path}")
+                    except TaskCancelledError:
+                        raise
+                    except Exception as item_exc:
+                        failed.append((selected_path, str(item_exc)))
+                        self.log_queue.put(f"[gui] 失败 {index}/{len(selected_paths)}：{selected_path} -> {item_exc}")
+                        continue
+                self.last_success_paths = success_paths
+                self.last_failed_paths = [path for path, _ in failed]
+                summary = f"[gui] 批量完成：成功 {len(success_paths)} / 失败 {len(failed)} / 共 {len(selected_paths)}"
+                self.log_queue.put(summary)
+                if success_paths:
+                    if last_local is not None:
+                        self.log_queue.put(f"[gui] 成功结果目录：{last_local.parent}")
+                    self.log_queue.put("[gui] 成功文件：")
+                    for path in success_paths:
+                        self.log_queue.put(f"  - {path}")
+                if failed:
+                    self.log_queue.put("[gui] 失败条目（可点“重试失败”）：")
+                    for path, err in failed:
+                        self.log_queue.put(f"  - {path} | {err}")
+                if failed and not success_paths:
+                    self.log_queue.put("[gui] 任务结束，退出码：1")
+                elif failed:
+                    self.log_queue.put("[gui] 任务结束，退出码：2")
+                else:
+                    self.log_queue.put("[gui] 任务结束，退出码：0")
             except TaskCancelledError:
                 self.log_queue.put("[gui] 任务已取消")
                 self.log_queue.put("[gui] 任务结束，退出码：130")
@@ -1336,6 +1385,85 @@ class App:
 
         self.backend_thread = threading.Thread(target=worker, daemon=True)
         self.backend_thread.start()
+
+    def test_connection(self) -> None:
+        if self.task_running():
+            messagebox.showinfo("任务进行中", "请先等当前任务结束，或点“停止”。")
+            return
+        if not self.save_form():
+            return
+        if not backend_available():
+            messagebox.showerror(
+                "无法测连",
+                "当前环境没有内置 Python 后端（缺少 paramiko）。\n请使用打包版，或安装 paramiko 后重试。",
+            )
+            return
+        data = self.form_data()
+        self.status_var.set("测连中：正在检查 SSH 与远端依赖")
+        self.append_log("[gui] 开始测试连接与依赖预检")
+        backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
+        self.backend = backend
+
+        def worker() -> None:
+            try:
+                report = backend.diagnose_connection()
+                self.log_queue.put(f"[gui] 测连结果：{report.get('message')}")
+                self.log_queue.put(
+                    "[gui] 远端："
+                    f"os={report.get('os_name') or '?'} distro={report.get('distro_id') or '?'} "
+                    f"arch={report.get('arch') or '?'}"
+                )
+                self.log_queue.put(
+                    f"[gui] 扫描模式：{report.get('scan_mode')} 根目录={report.get('scan_roots') or '(默认)'}"
+                )
+                missing = report.get("missing_core_deps") or []
+                if missing:
+                    self.log_queue.put(f"[gui] 缺少核心依赖：{', '.join(missing)}")
+                else:
+                    self.log_queue.put("[gui] 核心依赖：已就绪")
+                self.log_queue.put(f"[gui] BDInfo：{'可用' if report.get('has_bdinfo') else '未检测到（原盘可能降级）'}")
+                for hint in report.get("hints") or []:
+                    self.log_queue.put(f"[gui] 建议：{hint}")
+
+                def finish_ui() -> None:
+                    if report.get("ok"):
+                        self.status_var.set(f"测连成功：{report.get('message')}")
+                        messagebox.showinfo("测试连接", report.get("message") or "连接成功")
+                    else:
+                        self.status_var.set(f"测连失败：{report.get('message')}")
+                        messagebox.showerror("测试连接失败", report.get("message") or "连接失败")
+
+                self.root.after(0, finish_ui)
+            except Exception as exc:
+                self.log_queue.put(f"[gui] 测连异常：{exc}")
+                self.root.after(0, lambda: self.status_var.set(f"测连失败：{exc}"))
+                self.root.after(0, lambda: messagebox.showerror("测试连接失败", str(exc)))
+            finally:
+                self.clear_backend_task(backend)
+
+        self.backend_thread = threading.Thread(target=worker, daemon=True)
+        self.backend_thread.start()
+
+    def retry_failed_paths(self) -> None:
+        if self.task_running():
+            messagebox.showinfo("任务进行中", "请先等当前任务结束。")
+            return
+        if not self.last_failed_paths:
+            messagebox.showinfo("没有失败项", "当前没有可重试的失败条目。请先批量处理后查看失败列表。")
+            return
+        if not self.save_form():
+            return
+        data = self.form_data()
+        save_dir = Path(data["save_dir"]).expanduser()
+        save_dir.mkdir(parents=True, exist_ok=True)
+        paths = list(self.last_failed_paths)
+        self.checked_scan_paths = set(paths)
+        self.refresh_scan_items()
+        self.append_log(f"[gui] 重试失败条目：{len(paths)} 个")
+        if backend_available():
+            self.start_remote_with_backend_batch(data, save_dir, paths)
+            return
+        messagebox.showerror("无法重试", "当前环境缺少内置后端，无法自动重试。请改用打包版或安装 paramiko。")
 
     def start_remote(self) -> None:
         if self.task_running():
@@ -1392,7 +1520,7 @@ class App:
                 "PTBD_REMOTE_PT_CMD": data["remote_cmd"],
                 "PTBD_REMOTE_BOOTSTRAP": "1" if data["remote_bootstrap"] else "0",
                 "PTBD_LOCAL_SAVE_DIR": str(save_dir),
-                "PTBD_SCAN_INCLUDE_ROOTS": data["scan_include"],
+                "PTBD_SCAN_INCLUDE_ROOTS": build_effective_scan_include(data),
                 "PTBD_SCAN_EXCLUDE_ROOTS": data["scan_exclude"],
                 "PTBD_AUTO_CLEANUP": "1" if data["auto_cleanup"] else "0",
             }
@@ -1535,7 +1663,9 @@ class App:
             raise RuntimeError("本机缺少 ssh。")
         remote_script = " ".join(
             [
-            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(data['scan_include'])};" if data["scan_include"] else "",
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(build_effective_scan_include(data))};"
+            if build_effective_scan_include(data)
+            else "",
             f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
             f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
             ]
@@ -1968,7 +2098,10 @@ class App:
                 self.log_queue.put(line.rstrip("\n"))
             rc = proc.wait()
             self.log_queue.put(f"[gui] 任务结束，退出码：{rc}")
-            self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{self.form_data()['save_dir']}")
+            if rc == 0:
+                self.log_queue.put(f"[gui] 成功：请到本机保存目录查看结果：{self.form_data()['save_dir']}")
+            else:
+                self.log_queue.put(f"[gui] 失败：退出码 {rc}。请检查上方日志、VPS 依赖与选中路径。")
 
         thread = threading.Thread(target=read_stream, daemon=True)
         thread.start()
@@ -2003,7 +2136,20 @@ class App:
                 line = self.log_queue.get_nowait()
                 self.append_log(line)
                 if line.startswith("[gui] 任务结束"):
-                    self.status_var.set("任务已结束。请查看上面的输出和本机保存目录。")
+                    if "退出码：0" in line:
+                        self.status_var.set("任务成功结束。可打开本机保存目录查看结果包。")
+                    elif "退出码：2" in line:
+                        self.status_var.set("任务部分成功。可点“重试失败”继续处理失败项。")
+                    elif "退出码：130" in line:
+                        self.status_var.set("任务已取消。")
+                    else:
+                        self.status_var.set("任务失败。请查看日志，或先点“测连”检查依赖。")
+                elif line.startswith("[gui] 成功：结果已保存到") or line.startswith("[gui] 成功结果目录："):
+                    self.status_var.set(line.replace("[gui] ", "", 1))
+                elif line.startswith("[gui] 批量完成："):
+                    self.status_var.set(line.replace("[gui] ", "", 1))
+                elif line.startswith("[gui] 测连结果："):
+                    self.status_var.set(line.replace("[gui] ", "", 1))
         except queue.Empty:
             pass
         self.root.after(150, self._poll_logs)
