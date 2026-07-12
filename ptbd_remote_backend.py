@@ -33,6 +33,38 @@ BUNDLE_DOWNLOAD_URL = os.environ.get(
     "https://github.com/My15sir/PT-BDtool/releases/download/bundle-latest/PT-BDtool-linux-amd64.tar.gz",
 )
 BUNDLE_MARKER_PARTS = ("third_party", "bundle", "linux-amd64")
+PREFERRED_SCAN_ROOTS = ("/home", "/root", "/data", "/mnt", "/media", "/srv")
+
+
+def preferred_scan_roots_text() -> str:
+    return " ".join(PREFERRED_SCAN_ROOTS)
+
+
+def bool_config(value: object, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def split_path_list(raw: object) -> list[str]:
+    text = str(raw or "").replace(",", " ")
+    return [item for item in text.split() if item]
+
+
+def build_effective_scan_include(config: dict) -> str:
+    explicit = split_path_list(config.get("scan_include"))
+    if explicit:
+        return " ".join(explicit)
+    if bool_config(config.get("scan_full"), default=False):
+        return ""
+    return preferred_scan_roots_text()
 
 
 def backend_available() -> bool:
@@ -681,6 +713,87 @@ class PTBDRemoteBackend:
             raise RemoteCommandError(output or f"远端命令失败，退出码：{exit_code}")
         return CommandResult(exit_code=exit_code, output=output)
 
+    def diagnose_connection(self) -> dict:
+        """Probe SSH + remote deps without starting a full scan/generate job."""
+        report: dict = {
+            "ok": False,
+            "remote_host": self.config.get("remote_host"),
+            "remote_port": self.config.get("remote_port"),
+            "os_name": "",
+            "distro_id": "",
+            "arch": "",
+            "auto_install_supported": False,
+            "core_deps_ready": False,
+            "missing_core_deps": [],
+            "has_bdinfo": False,
+            "scan_mode": "full" if bool_config(self.config.get("scan_full"), default=False) else "preferred",
+            "scan_roots": build_effective_scan_include(self.config),
+            "bootstrap": bool_config(self.config.get("remote_bootstrap"), default=True),
+            "message": "",
+            "hints": [],
+        }
+        try:
+            self.connect()
+            info = self.probe_remote_system()
+        except Exception as exc:
+            report["message"] = f"连接失败：{exc}"
+            report["hints"] = [
+                "检查 VPS 地址/端口是否正确",
+                "检查密码或 SSH 密钥是否可用",
+                "确认本机网络能访问该 VPS",
+            ]
+            return report
+
+        report["os_name"] = info.os_name
+        report["distro_id"] = info.distro_id
+        report["arch"] = info.arch
+        report["auto_install_supported"] = info.auto_install_supported()
+        report["core_deps_ready"] = info.core_deps_ready()
+        report["has_bdinfo"] = bool(info.has_bdinfo or info.has_bd_info)
+        missing = []
+        for label, ready in (
+            ("tar", info.has_tar),
+            ("bash", info.has_bash),
+            ("python3", info.has_python3),
+            ("curl", info.has_curl),
+            ("ffmpeg", info.has_ffmpeg),
+            ("ffprobe", info.has_ffprobe),
+            ("mediainfo", info.has_mediainfo),
+            ("numpy", info.has_numpy),
+            ("PIL", info.has_pil),
+        ):
+            if not ready:
+                missing.append(label)
+        report["missing_core_deps"] = missing
+
+        if info.os_name != "Linux":
+            report["message"] = f"已连通，但远端系统暂不支持：{info.os_name or 'unknown'}"
+            report["hints"] = ["当前只支持 Linux VPS"]
+            return report
+
+        hints: list[str] = []
+        if not report["core_deps_ready"]:
+            if report["auto_install_supported"] and report["bootstrap"]:
+                hints.append("核心依赖未齐；扫描/生成时会尝试自动安装，不够再上传运行包")
+            elif report["bootstrap"]:
+                hints.append("核心依赖未齐，且发行版不在自动安装优先列表；将更依赖上传运行包")
+            else:
+                hints.append("核心依赖未齐，且未开启空白 VPS 自举；请手动安装依赖或开启自举")
+        if not report["has_bdinfo"]:
+            hints.append("未检测到 BDInfo/bd_info：原盘/ISO 可能走降级报告")
+        if report["scan_mode"] == "preferred":
+            hints.append(f"默认扫描优先目录：{report['scan_roots'] or preferred_scan_roots_text()}")
+        else:
+            hints.append("当前为全盘扫描模式，媒体多时可能较慢")
+
+        report["ok"] = True
+        if report["core_deps_ready"]:
+            report["message"] = "连接成功，核心依赖已就绪"
+        else:
+            report["message"] = "连接成功，但核心依赖未齐"
+        report["hints"] = hints
+        return report
+
     def probe_remote_system(self) -> RemoteSystemInfo:
         result = self.run_script(PROBE_REMOTE_SYSTEM_SCRIPT)
         info = RemoteSystemInfo.from_output(result.output)
@@ -996,17 +1109,18 @@ rm -f "$archive_path"
     def build_scan_env(self) -> dict[str, str]:
         env: dict[str, str] = {}
         scan_root = str(self.config.get("local_root") or "/").strip() or "/"
-        scan_include = self.config.get("scan_include", "")
+        scan_include = build_effective_scan_include(self.config)
         scan_exclude = self.config.get("scan_exclude", "")
         env["BDTOOL_SCAN_FULL_ROOT"] = scan_root
         if scan_include:
-            roots = [scan_root]
-            for item in str(scan_include).replace(",", " ").split():
+            roots: list[str] = []
+            # Prefer explicit/preferred roots only; avoid silently expanding to "/" full-disk.
+            for item in split_path_list(scan_include):
                 if item and item not in roots:
                     roots.append(item)
             env["BDTOOL_SCAN_INCLUDE_ROOTS"] = " ".join(roots)
         if scan_exclude:
-            env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = scan_exclude
+            env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = str(scan_exclude)
         env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(self.config.get("audio_spectrum_mode") or "single")
         env["BDTOOL_AUDIO_SPECTRUM_BACKEND"] = str(self.config.get("audio_spectrum_backend") or "auto")
         env["BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS"] = str(
@@ -1014,10 +1128,18 @@ rm -f "$archive_path"
         )
         return env
 
+    def scan_command_suffix(self) -> str:
+        # Always call scan-json --full so include-root logic in bdtool is used;
+        # preferred mode is enforced via BDTOOL_SCAN_INCLUDE_ROOTS.
+        return "scan-json --full --lang zh"
+
     def scan_items(self) -> list[dict]:
         remote_cmd = self.resolve_remote_command()
+        scan_include = build_effective_scan_include(self.config)
+        mode = "全盘" if bool_config(self.config.get("scan_full"), default=False) and not split_path_list(self.config.get("scan_include")) else "优先目录"
+        self.log(f"[gui] 扫描模式：{mode}；根目录：{scan_include or '(系统默认全盘候选根)'}")
         result = self.run_script(
-            f"exec {quote_sh(remote_cmd)} scan-json --full --lang zh",
+            f"exec {quote_sh(remote_cmd)} {self.scan_command_suffix()}",
             use_bash=True,
             env=self.build_scan_env(),
         )
@@ -1067,6 +1189,15 @@ rm -f "$archive_path"
         self.log(f"[gui] 本机已收到结果：{local_path}")
         return local_path
 
+    def extract_quality_status(self, output: str) -> str:
+        for line in reversed(output.splitlines()):
+            text = line.strip()
+            if text.startswith("QUALITY_STATUS="):
+                return text[len("QUALITY_STATUS=") :].strip()
+            if "质量状态：" in text:
+                return text.split("质量状态：", 1)[-1].strip()
+        return ""
+
     def process_selected_path(self, selected_path: str, save_dir: Path) -> Path:
         remote_cmd = self.resolve_remote_command()
         task_id = f"{int(time.time())}-{os.getpid()}"
@@ -1089,9 +1220,13 @@ rm -f "$archive_path"
         )
         if result.exit_code != 0:
             raise RemoteCommandError(result.output or f"远端处理失败，退出码：{result.exit_code}")
+        quality = self.extract_quality_status(result.output)
+        if quality:
+            self.log(f"[gui] 质量状态：{quality}")
         remote_package = self.extract_download_path(result.output) or self.find_remote_package(stage_dir)
         if not remote_package:
             raise RemoteCommandError("远端任务成功结束了，但没有找到可下载结果包。")
         local_path = self.download_result(remote_package, save_dir)
         self.cleanup_remote_package(remote_package, stage_dir)
+        self.log(f"[gui] 成功：结果已保存到 {local_path}")
         return local_path

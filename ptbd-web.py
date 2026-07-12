@@ -26,7 +26,9 @@ from ptbd_remote_backend import (
     TaskCancelledError,
     backend_available,
     backend_status,
+    build_effective_scan_include,
     normalize_remote_connection,
+    preferred_scan_roots_text,
 )
 
 
@@ -87,6 +89,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "save_dir": default_save_dir(),
     "scan_include": "",
     "scan_exclude": "",
+    "scan_full": False,
     "audio_spectrum_mode": "single",
     "audio_spectrum_backend": "auto",
     "audio_spectrum_combined_track_seconds": "12",
@@ -151,7 +154,7 @@ def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = No
     data["remote_cmd"] = data["remote_cmd"] or "pt"
     data["save_dir"] = data["save_dir"] or default_save_dir()
 
-    for key in ("remote_bootstrap", "auto_cleanup"):
+    for key in ("remote_bootstrap", "auto_cleanup", "scan_full"):
         if key in raw:
             data[key] = bool(raw.get(key))
 
@@ -184,9 +187,15 @@ def public_config(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def find_bash() -> str | None:
-    if os.name == "nt":
-        return shutil.which("bash")
-    candidates = [shutil.which("bash"), "/bin/bash", "/usr/bin/bash"]
+    candidates = [
+        shutil.which("bash"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+        "/bin/bash",
+        "/usr/bin/bash",
+    ]
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return candidate
@@ -269,6 +278,8 @@ class WebTask:
     logs: list[str] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
+    failed: list[dict[str, str]] = field(default_factory=list)
+    result_summary: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     ended_at: float | None = None
@@ -315,6 +326,8 @@ class WebTask:
                 "logs": list(self.logs),
                 "items": list(self.items),
                 "outputs": list(self.outputs),
+                "failed": list(self.failed),
+                "result_summary": dict(self.result_summary),
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "ended_at": self.ended_at,
@@ -507,11 +520,17 @@ def extra_scan_roots(config: dict[str, Any]) -> list[str]:
 
 
 def scan_include_env_value(config: dict[str, Any]) -> str:
-    extras = extra_scan_roots(config)
-    if not extras:
-        # Keep the main scan root out of BDTOOL_SCAN_INCLUDE_ROOTS so paths with spaces still work.
+    # Explicit whitelist always wins.
+    explicit = str(config.get("scan_include") or "").strip()
+    if explicit:
+        return build_effective_scan_include(config)
+    # Full scan: no include roots.
+    if bool(config.get("scan_full")):
         return ""
-    return " ".join([effective_scan_root(config), *extras])
+    # Local mode should stay on local_root, not Linux VPS preferred roots.
+    if str(config.get("mode") or "").strip().lower() == "local":
+        return ""
+    return build_effective_scan_include(config)
 
 
 def local_allowed_roots(config: dict[str, Any]) -> list[Path]:
@@ -541,6 +560,16 @@ def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
     if not bdtool.is_file():
         raise RuntimeError(f"找不到 bdtool：{bdtool}")
     env = local_runtime_env(config)
+    # Ensure Git usr/bin tools and python are visible to bdtool under Windows.
+    git_bins = [
+        r"C:\Program Files\Git\usr\bin",
+        r"C:\Program Files\Git\mingw64\bin",
+        r"C:\Program Files\Git\bin",
+    ]
+    env["PATH"] = os.pathsep.join([*git_bins, env.get("PATH", "")])
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["LANG"] = env.get("LANG") or "C.UTF-8"
+    env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
     if env.get("BDTOOL_SCAN_INCLUDE_ROOTS"):
         task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}；额外目录：{env['BDTOOL_SCAN_INCLUDE_ROOTS']}")
     else:
@@ -549,25 +578,26 @@ def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
         [bash_bin, str(bdtool), "scan-json", "--full", "--lang", "zh"],
         cwd=str(APP_ROOT),
         env=env,
-        text=True,
         capture_output=True,
         timeout=1800,
         check=False,
         stdin=subprocess.DEVNULL,
     )
-    if result.stderr.strip():
+    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+    if stderr.strip():
         task.log("scan-json stderr:")
-        for line in result.stderr.strip().splitlines():
+        for line in stderr.strip().splitlines():
             task.log(line)
     if result.returncode != 0:
-        if result.stdout.strip():
+        if stdout.strip():
             task.log("scan-json stdout:")
-            for line in result.stdout.strip().splitlines()[:40]:
+            for line in stdout.strip().splitlines()[:40]:
                 task.log(line)
-        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or f"local scan rc={result.returncode}")
-    if not result.stdout.strip():
+        raise RuntimeError(stderr.strip() or stdout.strip() or f"local scan rc={result.returncode}")
+    if not stdout.strip():
         raise RuntimeError("本地 scan-json 没有返回任何内容。")
-    payload = json.loads(result.stdout)
+    payload = json.loads(stdout)
     return normalize_items(payload.get("items", []))
 
 
@@ -604,21 +634,21 @@ def run_process_stream(cmd: list[str], env: dict[str, str], task: WebTask) -> in
         cmd,
         cwd=str(APP_ROOT),
         env=env,
-        text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
-        bufsize=1,
         start_new_session=(os.name != "nt"),
     )
     task.process = process
+    assert process.stdout is not None
     try:
-        assert process.stdout is not None
-        for line in process.stdout:
+        for raw in process.stdout:
+            line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            if line:
+                task.log(line)
             if task.cancel_event.is_set():
                 terminate_process_tree(process)
                 break
-            task.log(line.rstrip("\r\n"))
         try:
             return process.wait(timeout=5 if task.cancel_event.is_set() else None)
         except subprocess.TimeoutExpired:
@@ -638,6 +668,7 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
     if not remote_script.is_file():
         raise RuntimeError(f"找不到远端流程脚本：{remote_script}")
 
+    success = 0
     for index, selected_path in enumerate(paths, start=1):
         if task.cancel_event.is_set():
             raise TaskCancelledError("任务已取消。")
@@ -683,13 +714,27 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
         password = str(config.get("remote_password") or "")
         if password:
             cmd.extend(["--password", password])
-        rc = run_process_stream(cmd, env, task)
-        if rc != 0:
-            if task.cancel_event.is_set():
-                raise TaskCancelledError("任务已取消。")
-            raise RuntimeError(f"远端处理失败，退出码：{rc}")
-        task.outputs.append(str(config["save_dir"]))
-        task.log(f"完成处理 {index}/{len(paths)}")
+        try:
+            rc = run_process_stream(cmd, env, task)
+            if rc != 0:
+                if task.cancel_event.is_set():
+                    raise TaskCancelledError("任务已取消。")
+                raise RuntimeError(f"远端处理失败，退出码：{rc}")
+            task.outputs.append(str(config["save_dir"]))
+            success += 1
+            task.log(f"完成处理 {index}/{len(paths)}")
+        except TaskCancelledError:
+            raise
+        except Exception as exc:
+            task.failed.append({"path": selected_path, "error": str(exc)})
+            task.log(f"失败 {index}/{len(paths)}：{selected_path} -> {exc}")
+    task.result_summary = {
+        "success": success,
+        "failed": len(task.failed),
+        "total": len(paths),
+        "outputs": list(task.outputs),
+        "failed_items": list(task.failed),
+    }
 
 
 def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask) -> None:
@@ -704,29 +749,44 @@ def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
     save_dir.mkdir(parents=True, exist_ok=True)
     env = local_runtime_env(config)
 
+    success = 0
     for index, selected_path in enumerate(paths, start=1):
         if task.cancel_event.is_set():
             raise TaskCancelledError("任务已取消。")
-        ensure_local_path_allowed(config, selected_path)
-        task.log(f"开始本地处理 {index}/{len(paths)}：{selected_path}")
-        cmd = [
-            bash_bin,
-            str(bdtool),
-            "generate-path",
-            "--path",
-            selected_path,
-            "--lang",
-            "zh",
-            "--audio-spectrum",
-            str(config.get("audio_spectrum_mode") or "single"),
-        ]
-        rc = run_process_stream(cmd, env, task)
-        if rc != 0:
-            if task.cancel_event.is_set():
-                raise TaskCancelledError("任务已取消。")
-            raise RuntimeError(f"本地处理失败，退出码：{rc}")
-        task.outputs.append(str(save_dir))
-        task.log(f"完成本地处理 {index}/{len(paths)}，输出目录：{save_dir}")
+        try:
+            ensure_local_path_allowed(config, selected_path)
+            task.log(f"开始本地处理 {index}/{len(paths)}：{selected_path}")
+            cmd = [
+                bash_bin,
+                str(bdtool),
+                "generate-path",
+                "--path",
+                selected_path,
+                "--lang",
+                "zh",
+                "--audio-spectrum",
+                str(config.get("audio_spectrum_mode") or "single"),
+            ]
+            rc = run_process_stream(cmd, env, task)
+            if rc != 0:
+                if task.cancel_event.is_set():
+                    raise TaskCancelledError("任务已取消。")
+                raise RuntimeError(f"本地处理失败，退出码：{rc}")
+            task.outputs.append(str(save_dir))
+            success += 1
+            task.log(f"完成本地处理 {index}/{len(paths)}，输出目录：{save_dir}")
+        except TaskCancelledError:
+            raise
+        except Exception as exc:
+            task.failed.append({"path": selected_path, "error": str(exc)})
+            task.log(f"本地失败 {index}/{len(paths)}：{selected_path} -> {exc}")
+    task.result_summary = {
+        "success": success,
+        "failed": len(task.failed),
+        "total": len(paths),
+        "outputs": list(task.outputs),
+        "failed_items": list(task.failed),
+    }
 
 
 def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) -> None:
@@ -743,21 +803,81 @@ def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) ->
             task.log(f"启动方式：内置 Python 后端，{backend_status()}")
             backend = PTBDRemoteBackend(APP_ROOT, config, logger=task.log)
             task.backend = backend
+            success = 0
             for index, selected_path in enumerate(paths, start=1):
                 if task.cancel_event.is_set():
                     raise TaskCancelledError("任务已取消。")
                 task.log(f"开始处理 {index}/{len(paths)}：{selected_path}")
-                local_path = backend.process_selected_path(selected_path, save_dir)
-                task.outputs.append(str(local_path))
-                task.log(f"完成处理 {index}/{len(paths)}：{local_path}")
+                try:
+                    local_path = backend.process_selected_path(selected_path, save_dir)
+                    task.outputs.append(str(local_path))
+                    success += 1
+                    task.log(f"完成处理 {index}/{len(paths)}：{local_path}")
+                except TaskCancelledError:
+                    raise
+                except Exception as item_exc:
+                    task.failed.append({"path": selected_path, "error": str(item_exc)})
+                    task.log(f"失败 {index}/{len(paths)}：{selected_path} -> {item_exc}")
+            task.result_summary = {
+                "success": success,
+                "failed": len(task.failed),
+                "total": len(paths),
+                "outputs": list(task.outputs),
+                "failed_items": list(task.failed),
+            }
         else:
             task.log(f"启动方式：shell 回退后端，{backend_status()}")
             shell_process_paths(config, paths, task)
-        task.finish("success", f"处理完成，共处理 {len(paths)} 个条目")
+
+        summary = task.result_summary or {
+            "success": len(task.outputs),
+            "failed": len(task.failed),
+            "total": len(paths),
+        }
+        msg = f"处理完成：成功 {summary.get('success', 0)} / 失败 {summary.get('failed', 0)} / 共 {summary.get('total', len(paths))}"
+        if summary.get("failed", 0) and not summary.get("success", 0):
+            task.finish("error", msg)
+        elif summary.get("failed", 0):
+            task.finish("partial", msg)
+        else:
+            task.finish("success", msg)
     except TaskCancelledError:
         task.finish("cancelled", "任务已取消")
     except Exception as exc:
         task.finish("error", f"处理失败：{exc}")
+    finally:
+        if backend is not None:
+            backend.close()
+        task.backend = None
+
+
+def run_diagnose_task(task: WebTask, config: dict[str, Any]) -> None:
+    task.start()
+    backend: PTBDRemoteBackend | None = None
+    try:
+        if config.get("mode") == "local":
+            task.result_summary = {
+                "ok": True,
+                "mode": "local",
+                "message": "本机模式无需 SSH 测连",
+                "scan_roots": scan_include_env_value(config) or preferred_scan_roots_text(),
+            }
+            task.finish("success", "本机模式：无需远程测连")
+            return
+        if not backend_available():
+            raise RuntimeError("当前环境缺少 paramiko，无法执行独立测连。")
+        backend = PTBDRemoteBackend(APP_ROOT, config, logger=task.log)
+        task.backend = backend
+        report = backend.diagnose_connection()
+        task.result_summary = report
+        if report.get("ok"):
+            task.finish("success", str(report.get("message") or "连接成功"))
+        else:
+            task.finish("error", str(report.get("message") or "连接失败"))
+    except TaskCancelledError:
+        task.finish("cancelled", "任务已取消")
+    except Exception as exc:
+        task.finish("error", f"测连失败：{exc}")
     finally:
         if backend is not None:
             backend.close()
@@ -1387,6 +1507,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="actions" style="margin-top: 0">
               <button class="button secondary" type="submit">保存设置</button>
+              <button class="button secondary" type="button" id="diagnoseBtn">测试连接</button>
               <button class="button primary" type="button" id="scanBtn">扫描资源</button>
             </div>
           </div>
@@ -1425,7 +1546,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input name="save_dir" type="text">
               </label>
               <label>额外扫描目录
-                <textarea name="scan_include" placeholder="可留空。需要同时扫描多个根目录时再填，例如 /data,/mnt/media"></textarea>
+                <textarea name="scan_include" placeholder="可留空。默认优先扫描 /home /root /data /mnt /media /srv"></textarea>
               </label>
               <label>额外排除目录
                 <textarea name="scan_exclude" placeholder="/mnt/cache /data/tmp，可留空"></textarea>
@@ -1433,6 +1554,7 @@ INDEX_HTML = r"""<!doctype html>
               <div class="checks">
                 <label class="check"><input name="remote_bootstrap" type="checkbox"> 空白 VPS 自动自举</label>
                 <label class="check"><input name="auto_cleanup" type="checkbox"> 成功后清理远端临时结果</label>
+                <label class="check"><input name="scan_full" type="checkbox"> 启用全盘扫描（高级）</label>
                 <label class="check"><input name="clear_password" type="checkbox"> 清空已保存密码</label>
               </div>
             </div>
@@ -1608,6 +1730,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       data.remote_bootstrap = form.remote_bootstrap.checked;
       data.auto_cleanup = form.auto_cleanup.checked;
+      data.scan_full = form.scan_full ? form.scan_full.checked : false;
       data.clear_password = form.clear_password.checked;
       return data;
     }
@@ -1946,7 +2069,23 @@ INDEX_HTML = r"""<!doctype html>
       for (const output of task.outputs || []) {
         const item = document.createElement("div");
         item.className = "output";
-        item.textContent = output;
+        item.textContent = "成功：" + output;
+        outputsEl.appendChild(item);
+      }
+      for (const failed of task.failed || []) {
+        const item = document.createElement("div");
+        item.className = "output";
+        item.textContent = "失败：" + (failed.path || "") + " | " + (failed.error || "");
+        outputsEl.appendChild(item);
+      }
+      if (task.result_summary && Object.keys(task.result_summary).length) {
+        const item = document.createElement("div");
+        item.className = "output";
+        if (task.kind === "diagnose") {
+          item.textContent = "测连：" + JSON.stringify(task.result_summary);
+        } else {
+          item.textContent = `汇总：成功 ${task.result_summary.success || 0} / 失败 ${task.result_summary.failed || 0} / 共 ${task.result_summary.total || 0}`;
+        }
         outputsEl.appendChild(item);
       }
       if (task.kind === "scan" && task.status === "success") {
@@ -1969,6 +2108,13 @@ INDEX_HTML = r"""<!doctype html>
       await saveConfig();
       const payload = await api("/api/scan", {method: "POST", body: JSON.stringify({})});
       logBox.textContent = "扫描任务已提交。";
+      setTask(payload);
+    }
+
+    async function startDiagnose() {
+      await saveConfig();
+      const payload = await api("/api/diagnose", {method: "POST", body: JSON.stringify({})});
+      logBox.textContent = "测连任务已提交。";
       setTask(payload);
     }
 
@@ -2017,6 +2163,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     document.querySelector("#scanBtn").addEventListener("click", startScan);
+    document.querySelector("#diagnoseBtn").addEventListener("click", startDiagnose);
     document.querySelector("#processBtn").addEventListener("click", startProcess);
     document.querySelector("#cancelBtn").addEventListener("click", cancelTask);
     document.querySelector("#selectPageBtn").addEventListener("click", () => {
@@ -2206,7 +2353,7 @@ class WebHandler(BaseHTTPRequestHandler):
                 self.send_json({"ok": True, "config": public_config(data)})
                 return
 
-            if path in {"/api/scan", "/api/process"}:
+            if path in {"/api/scan", "/api/process", "/api/diagnose"}:
                 active = running_task()
                 if active is not None:
                     self.send_error_json(f"已有任务正在运行：{active.id}", HTTPStatus.CONFLICT)
@@ -2217,6 +2364,12 @@ class WebHandler(BaseHTTPRequestHandler):
                     task = WebTask(kind="scan")
                     register_task(task)
                     threading.Thread(target=run_scan_task, args=(task, config), daemon=True).start()
+                    self.send_json({"ok": True, "task": task.to_public()})
+                    return
+                if path == "/api/diagnose":
+                    task = WebTask(kind="diagnose")
+                    register_task(task)
+                    threading.Thread(target=run_diagnose_task, args=(task, config), daemon=True).start()
                     self.send_json({"ok": True, "task": task.to_public()})
                     return
                 paths = payload.get("paths", [])

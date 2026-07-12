@@ -389,6 +389,9 @@ make_quality_screenshots() {
   local rc=1
   local -a valid_candidates=()
   local -a fallback_candidates=()
+  local start_permille=100
+  local end_permille=900
+  local span_permille=800
 
   duration="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$src" 2>/dev/null || true)"
   dur_int="${duration%.*}"
@@ -396,11 +399,16 @@ make_quality_screenshots() {
   candidate_count="$(screenshot_candidate_count)"
   tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ptbd-shots.XXXXXX")" || return 1
 
+  # Prefer mid-content frames (10%-90%) to reduce title/credit black frames.
   for ((i = 1; i <= candidate_count; i++)); do
     if (( dur_int < 2 )); then
       sec=0
     else
-      permille=$((80 + (i - 1) * 840 / (candidate_count - 1)))
+      if (( candidate_count <= 1 )); then
+        permille=$(( (start_permille + end_permille) / 2 ))
+      else
+        permille=$((start_permille + (i - 1) * span_permille / (candidate_count - 1)))
+      fi
       sec=$((dur_int * permille / 1000))
       (( sec < 1 )) && sec=1
       (( sec >= dur_int )) && sec=$((dur_int - 1))
@@ -420,6 +428,11 @@ make_quality_screenshots() {
   done
 
   screen "截图筛选完成：有效 ${#valid_candidates[@]}/${#fallback_candidates[@]}，输出 6 张"
+  if (( ${#valid_candidates[@]} < 6 )); then
+    screen "质量状态：screenshots=degraded（有效帧不足 6 张，使用可用帧补齐）"
+  else
+    screen "质量状态：screenshots=full"
+  fi
   if screenshot_copy_selection "$out" valid_candidates fallback_candidates; then
     rc=0
   fi
@@ -1322,11 +1335,21 @@ preflight_post_process() {
   return 0
 }
 
+write_quality_status_file() {
+  local out="$1"
+  local status="$2"
+  printf '%s\n' "$status" > "$out/QUALITY_STATUS.txt" 2>/dev/null || true
+  screen "质量状态：$status"
+  screen "QUALITY_STATUS=$status"
+}
+
 generate_item() {
   local type="$1"
   local src="$2"
   local out
   local hard_fail=0
+  local quality_status="full"
+  local quality_notes=()
 
   resolve_source_output_layout "$type" "$src" || {
     screen_error "输出路径计算失败：$type $src"
@@ -1347,6 +1370,8 @@ generate_item() {
       echo "本次已关闭 mediainfo 与 screenshots，因此该目录为空（这是预期行为）。" > "$out/README.txt"
       screen "生成进度: 96% (生成结果校验中)"
       finalize_video_selected_output "$out" 0 0 || hard_fail=1
+      quality_status="partial"
+      quality_notes+=("mediainfo=off" "screenshots=off")
     else
       if [[ "${BDTOOL_CLI_MEDIAINFO:-1}" == "1" ]]; then
         screen "生成进度: 10% (mediainfo 生成中)"
@@ -1354,10 +1379,14 @@ generate_item() {
           if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
             echo "mediainfo 执行失败" > "$out/mediainfo.txt"
             hard_fail=1
+            quality_notes+=("mediainfo=failed")
+          else
+            quality_notes+=("mediainfo=full")
           fi
         else
           echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo.txt"
           hard_fail=1
+          quality_notes+=("mediainfo=missing")
         fi
         screen "生成进度: 30% (mediainfo 生成完成)"
       fi
@@ -1365,9 +1394,15 @@ generate_item() {
       if [[ "${BDTOOL_CLI_SHOTS:-1}" == "1" ]]; then
         if require_runtime_cmd ffmpeg && require_runtime_cmd ffprobe; then
           screen "生成进度: 35% (截图生成准备)"
-          make_quality_screenshots "$src" "$out" 35 56 || hard_fail=1
+          if make_quality_screenshots "$src" "$out" 35 56; then
+            quality_notes+=("screenshots=full")
+          else
+            hard_fail=1
+            quality_notes+=("screenshots=failed")
+          fi
         else
           hard_fail=1
+          quality_notes+=("screenshots=missing-ffmpeg")
         fi
         ensure_six_png "$out"
       fi
@@ -1380,16 +1415,23 @@ generate_item() {
       if ! mediainfo "$src" > "$out/mediainfo.txt" 2>/dev/null; then
         echo "mediainfo 执行失败" > "$out/mediainfo.txt"
         hard_fail=1
+        quality_notes+=("mediainfo=failed")
+      else
+        quality_notes+=("mediainfo=full")
       fi
     else
       echo "未安装 mediainfo，无法生成有效信息。" > "$out/mediainfo.txt"
       hard_fail=1
+      quality_notes+=("mediainfo=missing")
     fi
     screen "生成进度: 45% (mediainfo 生成完成)"
 
     screen "生成进度: 50% (频谱图生成中)"
     if ! make_audio_spectrum_single "$src" "$out/频谱图.png"; then
       hard_fail=1
+      quality_notes+=("spectrum=failed")
+    else
+      quality_notes+=("spectrum=full")
     fi
     screen "生成进度: 96% (生成结果校验中)"
     finalize_audio_output "$out" || hard_fail=1
@@ -1405,6 +1447,7 @@ generate_item() {
     if (( ${#audio_files[@]} < 2 )); then
       screen_error "音乐目录至少需要 2 个音频文件：$src"
       hard_fail=1
+      quality_notes+=("audio_dir=too-few-tracks")
     elif [[ "${BDTOOL_AUDIO_SPECTRUM_MODE:-single}" == "combined" ]]; then
       local combined_scope="每首采样 ${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12} 秒"
       if [[ "${BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}" == "0" ]]; then
@@ -1413,11 +1456,17 @@ generate_item() {
       screen "生成进度: 10% (整包 mediainfo 生成中)"
       if ! write_audio_mediainfo_report "$out" "${audio_files[@]}"; then
         hard_fail=1
+        quality_notes+=("mediainfo=failed")
+      else
+        quality_notes+=("mediainfo=full")
       fi
       screen "生成进度: 45% (整包 mediainfo 生成完成)"
       screen "生成进度: 50% (连续整包总频谱图生成中，共 ${#audio_files[@]} 首，${combined_scope})"
       if ! make_audio_spectrum_combined "$out/频谱图.png" "${audio_files[@]}"; then
         hard_fail=1
+        quality_notes+=("spectrum=failed")
+      else
+        quality_notes+=("spectrum=combined-full")
       fi
       screen "生成进度: 96% (生成结果校验中)"
       finalize_audio_output "$out" || hard_fail=1
@@ -1429,11 +1478,14 @@ generate_item() {
         mkdir -p "$track_out"
         if ! write_audio_mediainfo_report "$track_out" "$audio"; then
           hard_fail=1
+          quality_notes+=("mediainfo=partial")
         fi
         if ! make_audio_spectrum_single "$audio" "$track_out/频谱图.png"; then
           hard_fail=1
+          quality_notes+=("spectrum=partial")
         fi
       done
+      quality_notes+=("spectrum=single-tracks")
       screen "生成进度: 96% (生成结果校验中)"
       finalize_audio_dir_single_output "$out" || hard_fail=1
     fi
@@ -1444,6 +1496,7 @@ generate_item() {
     local bd_report=""
     local bd_attempt=0
     local disc_probe_video=""
+    local bdinfo_mode="full"
     bd_stdout_tmp="$out/.bdinfo_stdout_$$.txt"
     find "$out" -maxdepth 1 -type f \( -name '.bdinfo_stdout_*.txt' -o -name 'BDInfo.txt' \) -delete 2>/dev/null || true
     rm -f "$bd_stdout_tmp"
@@ -1451,8 +1504,10 @@ generate_item() {
     if require_runtime_cmd BDInfo; then
       if ! bdinfo_write_report "$bd_source" "$out" "$bd_stdout_tmp"; then
         screen_error "BDInfo 执行失败，改用降级报告继续导出：$bd_source"
+        bdinfo_mode="degraded"
         if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "BDInfo 执行失败或崩溃" "$disc_probe_video"; then
           hard_fail=1
+          bdinfo_mode="failed"
         fi
       else
         while (( bd_attempt < 10 )); do
@@ -1467,28 +1522,38 @@ generate_item() {
         done
         if [[ -z "$bd_report" ]]; then
           screen_error "BDInfo 输出无效，改用降级报告继续导出"
+          bdinfo_mode="degraded"
           if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "BDInfo 输出无效：缺少完整区块" "$disc_probe_video"; then
             hard_fail=1
+            bdinfo_mode="failed"
           fi
         else
           if ! write_full_bdinfo_report "$bd_report" "$bd_source" "$out/BDInfo.txt"; then
             screen_error "BDInfo 报告归档失败：$out/BDInfo.txt"
             hard_fail=1
+            bdinfo_mode="failed"
           fi
           if ! bdinfo_report_valid "$out/BDInfo.txt"; then
             screen_error "BDInfo 输出无效：$out/BDInfo.txt（需含 BDInfo/扫描文件/扫描时间 + 全区块且非空）"
             hard_fail=1
+            bdinfo_mode="failed"
           fi
           find "$out" -maxdepth 1 -type f -name '*.txt' ! -name 'BDInfo.txt' -delete
         fi
       fi
     else
       screen_error "缺少 BDInfo，改用降级报告继续导出：$bd_source"
+      bdinfo_mode="degraded"
       if ! write_bdinfo_fallback_report "$bd_source" "$out/BDInfo.txt" "缺少 BDInfo 命令" "$disc_probe_video"; then
         hard_fail=1
+        bdinfo_mode="failed"
       fi
     fi
     rm -f "$bd_stdout_tmp"
+    quality_notes+=("BDInfo=${bdinfo_mode}")
+    if [[ "$bdinfo_mode" != "full" ]]; then
+      quality_status="degraded"
+    fi
     if [[ "$hard_fail" -eq 0 ]]; then
       screen "生成进度: 55% (BDInfo 生成完成)"
       screen "生成进度: 60% (截图生成准备)"
@@ -1496,6 +1561,20 @@ generate_item() {
       screen "生成进度: 96% (生成结果校验中)"
       finalize_disc_output "$out" || hard_fail=1
     fi
+  fi
+
+  if (( ${#quality_notes[@]} > 0 )); then
+    local note
+    for note in "${quality_notes[@]}"; do
+      case "$note" in
+        *"=failed"|*"=missing"*|*"=degraded"|*"=partial"*|*"=too-few"*)
+          quality_status="degraded"
+          ;;
+      esac
+    done
+    write_quality_status_file "$out" "${quality_status};${quality_notes[*]}"
+  else
+    write_quality_status_file "$out" "$quality_status"
   fi
 
   if [[ "$hard_fail" -eq 0 ]]; then
