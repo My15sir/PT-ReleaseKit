@@ -142,7 +142,9 @@ Shell 层承担兼容、旧菜单，以及 GUI/Web 缺少 Paramiko 时的远端 
 
 ## 桌面 GUI 使用流程
 
-图形界面里先填这些：
+桌面端分为“工作台”和“连接设置”两个页签。工作台固定显示四步进度、候选列表、任务状态和实时日志；连接参数单独放在设置页，避免展开配置后把扫描区和日志挤出窗口。
+
+首次启动会直接打开“连接设置”，先填这些：
 
 - `VPS 地址`，例如 `root@1.2.3.4`
 - `SSH 端口`，一般默认 `22`
@@ -151,11 +153,11 @@ Shell 层承担兼容、旧菜单，以及 GUI/Web 缺少 Paramiko 时的远端 
 
 其他项怎么理解：
 
-- `空白 VPS 自动上传运行包（推荐）`
+- `空白 VPS 自动准备运行环境`
   - 开着更省心
   - 程序会先尝试远端自动装依赖
   - 还不够时才回退上传运行包
-- `扫描白名单`
+- `额外扫描目录`
   - 不懂就留空
   - 留空时默认优先扫描：`/home /root /data /mnt /media /srv`
   - 显式白名单优先于全盘扫描开关
@@ -172,15 +174,15 @@ Shell 层承担兼容、旧菜单，以及 GUI/Web 缺少 Paramiko 时的远端 
 正常使用顺序就是：
 
 1. 保存配置
-2. 建议先点“测连”，确认 SSH 和依赖状态
-3. 点“扫描 VPS 候选”
+2. 建议先点“测试连接”，确认 SSH 和依赖状态
+3. 返回工作台，点“扫描 VPS”
 4. 等程序连上 VPS
 5. 等程序检测远端系统和依赖
-6. 在候选列表勾选条目后点“启动”
+6. 在候选列表勾选条目后点“生成所选”
 7. 等程序在 VPS 上生成截图和媒体信息
 8. 等程序把结果包下载回本机，并在日志看到明确成功/失败汇总
 9. 如有失败项，可点“重试失败”
-10. 如果开启了自动清理，再清理 VPS 上这次生成的临时目录
+10. 完成后可直接点“打开结果目录”；如果开启了自动清理，程序会清理 VPS 上这次生成的临时目录
 
 ## 文件会保存到哪里
 
@@ -259,7 +261,7 @@ Web 控制端支持两种模式：
 - `remote`：桌面或控制端通过 SSH 操作远端 VPS
 - `local`：直接扫描当前主机目录；Docker 默认并应保持此模式，扫描根目录使用 `/media`
 
-Web 和 GUI 都支持测连、批量逐项处理及成功/失败汇总。Web 任务可能结束为 `success`、`partial`、`error` 或 `cancelled`；GUI 可直接重试上一批失败条目。
+Web 和 GUI 都支持连接检查、批量逐项处理、成功/失败汇总及失败项重试。Web 任务可能结束为 `success`、`partial`、`error` 或 `cancelled`；页面刷新后会自动恢复当前运行任务的日志和停止操作。Docker local 模式只显示本机媒体与输出路径，不显示无关的 SSH 字段。
 
 直接在 Linux 主机运行 local 模式：
 
@@ -301,6 +303,7 @@ ptbd-gui --self-check
 ```bash
 python3 -m unittest discover -s tests
 python3 -m compileall -q ptbd_core ptbd-gui.py ptbd-web.py ptbd_remote_backend.py
+xvfb-run -a python3 ptbd-gui.py --ui-smoke-check
 ./scripts/full-test.sh
 docker build -t pt-bdtool:local .
 ```

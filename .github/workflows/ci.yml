@@ -202,7 +202,7 @@ jobs:
         run: |
           mkdir -p "$HOME/Desktop" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
       - name: Install runtime commands
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip python3-numpy python3-pil python3-tk xdg-user-dirs
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip python3-numpy python3-pil python3-tk xdg-user-dirs xvfb
       - name: Run full-test.sh
         shell: bash
         run: |

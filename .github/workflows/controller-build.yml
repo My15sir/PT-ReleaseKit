@@ -56,8 +56,8 @@ jobs:
             quick_start_body: |
               1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
               2. 双击 PT-BDtool.exe，填写 VPS 地址、端口、密码、本机保存目录
-              3. 点击“测连”，再点击“扫描 VPS 候选”
-              4. 勾选要处理的条目，点击“启动所选条目”
+              3. 点击“测试连接”，再点击“扫描 VPS”
+              4. 勾选要处理的条目，点击“生成所选”
               5. 等待结果自动下载回本机
               
               提醒：
@@ -78,9 +78,9 @@ jobs:
             quick_start_body: |
               1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
               2. 双击 PT-BDtool.app；若被拦住，请右键应用后点“打开”
-              3. 填 VPS 地址、端口、密码、本机保存目录并点击“测连”
-              4. 点击“扫描 VPS 候选”
-              5. 勾选要处理的条目，点击“启动所选条目”
+              3. 填 VPS 地址、端口、密码、本机保存目录并点击“测试连接”
+              4. 返回工作台，点击“扫描 VPS”
+              5. 勾选要处理的条目，点击“生成所选”
               6. 等待结果自动下载回本机
               
               提醒：
@@ -101,8 +101,8 @@ jobs:
               1. 解压 PT-BDtool-linux-portable.tar.gz
               2. 先在系统终端 SSH 登录 VPS，核对并接受主机密钥
               3. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击 PT-BDtool.sh
-              4. 填写配置并点“测连”，再点击“扫描 VPS 候选”
-              5. 勾选条目，点击“启动所选条目”
+              4. 填写配置并点“测试连接”，再点击“扫描 VPS”
+              5. 勾选条目，点击“生成所选”
               
               提醒：
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
@@ -123,6 +123,13 @@ jobs:
         shell: bash
         run: python scripts/build-controller-app.py
 
+      - name: Install Linux UI smoke dependency
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
       - name: Smoke test built artifact
         shell: bash
         run: |
@@ -134,6 +141,8 @@ jobs:
           if not artifact.exists():
               raise SystemExit(f"missing artifact: {artifact}")
           subprocess.run([str(artifact), "--self-check"], check=True)
+          if r"${{ matrix.label }}" == "Linux":
+              subprocess.run(["xvfb-run", "-a", str(artifact), "--ui-smoke-check"], check=True)
           PY
 
       - name: Prepare upload package
@@ -270,13 +279,13 @@ jobs:
 
             1. 解压
             2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app` / Linux 优先双击 `PT-BDtool.desktop`
-            3. 先用系统 SSH 核对 VPS 主机密钥；填写配置并测连，扫描后勾选条目，再点 `启动所选条目`
+            3. 先用系统 SSH 核对 VPS 主机密钥；填写配置并测试连接，扫描后勾选条目，再点 `生成所选`
 
             VPS 上先放好视频 / 音频 / BDMV / ISO。
 
             程序会自动：
 
-            - 扫描 VPS 候选
+            - 扫描 VPS 媒体候选
             - 生成截图和媒体信息
             - 下载结果回你的电脑
             - 清理这次生成的 VPS 输出目录

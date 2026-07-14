@@ -272,7 +272,7 @@ docker compose config --quiet
 docker build -t pt-bdtool:release-check .
 ```
 
-涉及桌面端时，至少运行 `ptbd-gui --self-check`，并确认 Windows/macOS 打包工作流仍包含新的共享资产。
+涉及桌面端时，至少运行 `ptbd-gui --self-check`。Linux 上还应运行 `xvfb-run -a python3 ptbd-gui.py --ui-smoke-check`，确认候选区、主操作和日志区在默认窗口内均可见；同时确认 Windows/macOS 打包工作流仍包含新的共享资产。
 
 ## 12. 生成目录
 

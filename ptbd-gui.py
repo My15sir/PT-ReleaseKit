@@ -36,8 +36,32 @@ from ptbd_remote_backend import (
 
 
 APP_NAME = "PT-BDtool"
-CONTENT_INSET_X = 14
-HEADER_TEXT_INSET_X = 16
+WORKFLOW_STEPS = ("连接", "扫描", "选择", "生成")
+UI_COLORS = {
+    "bg": "#f2f5f6",
+    "surface": "#ffffff",
+    "surface_alt": "#eaf0f2",
+    "surface_soft": "#f7f9fa",
+    "line": "#cfdadd",
+    "line_strong": "#aebdc2",
+    "ink": "#16242c",
+    "muted": "#52636b",
+    "faint": "#6a7b83",
+    "header": "#17272e",
+    "header_muted": "#c0d0d4",
+    "accent": "#0f766e",
+    "accent_hover": "#0b5f59",
+    "accent_soft": "#d9f1ed",
+    "accent_pale": "#edf8f6",
+    "danger": "#a93b32",
+    "danger_hover": "#8d2f28",
+    "danger_soft": "#f9e8e6",
+    "warning": "#8a4f00",
+    "tree_select": "#dcefeb",
+    "tree_header": "#e5ecee",
+    "log_bg": "#111c21",
+    "log_text": "#d8e5e8",
+}
 
 
 def askpass_script_payload(password: str, *, windows: bool) -> tuple[str, str]:
@@ -57,27 +81,6 @@ def askpass_script_payload(password: str, *, windows: bool) -> tuple[str, str]:
         return ".cmd", f"@echo off\r\nsetlocal DisableDelayedExpansion\r\necho({escaped}\r\n"
     escaped = password.replace("'", "'\\''")
     return ".sh", f"#!/usr/bin/env bash\nprintf '%s\\n' '{escaped}'\n"
-
-
-class _RoundButtonHandle:
-    def __init__(self, canvas: tk.Canvas, icon_id: int | None, label_id: int) -> None:
-        self.canvas = canvas
-        self.icon_id = icon_id
-        self.label_id = label_id
-
-    def configure(self, **kwargs) -> None:
-        if "text" in kwargs:
-            icon, label = split_button_text(kwargs["text"])
-            if self.icon_id is not None:
-                self.canvas.itemconfigure(self.icon_id, text=icon or "")
-            self.canvas.itemconfigure(self.label_id, text=label)
-
-
-def split_button_text(text: str) -> tuple[str | None, str]:
-    parts = text.strip().split(maxsplit=1)
-    if len(parts) == 2:
-        return parts[0], parts[1]
-    return None, text.strip()
 
 
 def resolve_script_path(path: str) -> Path:
@@ -268,310 +271,271 @@ def standalone_backend_label() -> str:
     return "内置独立控制后端" if backend_available() else "旧版 shell 回退后端"
 
 
-def blend_hex_color(start: str, end: str, ratio: float) -> str:
-    ratio = max(0.0, min(1.0, ratio))
-    start_rgb = tuple(int(start[index : index + 2], 16) for index in (1, 3, 5))
-    end_rgb = tuple(int(end[index : index + 2], 16) for index in (1, 3, 5))
-    mixed = tuple(int(a + (b - a) * ratio) for a, b in zip(start_rgb, end_rgb))
-    return "#" + "".join(f"{channel:02x}" for channel in mixed)
+def workflow_phase_for_status(status: str) -> int:
+    text = status.strip()
+    if text.startswith("就绪"):
+        return 1
+    if "测连" in text or "测试连接" in text:
+        return 1
+    if text.startswith("当前没有运行中的任务"):
+        return 1
+    if any(marker in text for marker in ("扫描中", "扫描已取消", "获取候选失败")):
+        return 2
+    if any(marker in text for marker in ("扫描完成", "过滤完成", "等待选择", "勾选", "候选")):
+        return 3
+    if any(marker in text for marker in ("运行中", "任务", "停止", "批量完成", "结果已保存")):
+        return 4
+    return 1
 
 
-def hero_gradient_color(ratio: float) -> str:
-    if ratio <= 0.55:
-        return blend_hex_color("#5678f0", "#4f99ef", ratio / 0.55 if ratio else 0.0)
-    return blend_hex_color("#4f99ef", "#79b5f4", (ratio - 0.55) / 0.45)
+def reconcile_checked_paths(scan_items: list[dict], checked_paths: set[str]) -> set[str]:
+    available = {str(item.get("path") or "").strip() for item in scan_items}
+    available.discard("")
+    return {path for path in checked_paths if path in available}
+
+
+def ui_font_families() -> tuple[str, str]:
+    system = platform.system()
+    if system == "Windows":
+        return "Segoe UI", "Consolas"
+    if system == "Darwin":
+        return "Helvetica Neue", "Menlo"
+    return "DejaVu Sans", "DejaVu Sans Mono"
 
 
 def configure_gradient_theme(root: tk.Tk) -> None:
     style = ttk.Style(root)
     if "clam" in style.theme_names():
         style.theme_use("clam")
-
-    colors = {
-        "bg": "#eef3ff",
-        "bg_alt": "#f6f9ff",
-        "panel": "#ffffff",
-        "panel_alt": "#f4f8ff",
-        "panel_edge": "#dfe7f6",
-        "entry": "#ffffff",
-        "text": "#23314d",
-        "muted": "#6c7a96",
-        "accent": "#4f7cff",
-        "accent_soft": "#b9d8ff",
-        "accent_deep": "#365ad6",
-        "warning": "#4b64b8",
-        "danger": "#d96d6d",
-        "danger_soft": "#fdeeee",
-        "button": "#eef4ff",
-        "button_hover": "#e2ebff",
-        "button_pressed": "#d5e2ff",
-        "tree_select": "#dce8ff",
-        "tree_header": "#edf4ff",
-        "log_bg": "#f8fbff",
-    }
+    colors = UI_COLORS
+    ui_family, mono_family = ui_font_families()
+    default_font = tkfont.nametofont("TkDefaultFont")
+    default_font.configure(family=ui_family, size=10)
+    text_font = tkfont.nametofont("TkTextFont")
+    text_font.configure(family=ui_family, size=10)
+    heading_font = tkfont.nametofont("TkHeadingFont")
+    heading_font.configure(family=ui_family, size=10, weight="bold")
+    fixed_font = tkfont.nametofont("TkFixedFont")
+    fixed_font.configure(family=mono_family, size=9)
 
     root.configure(bg=colors["bg"])
 
     style.configure(
         ".",
         background=colors["bg"],
-        foreground=colors["text"],
-        bordercolor=colors["accent_soft"],
-        darkcolor=colors["panel_edge"],
-        lightcolor=colors["accent_soft"],
-        troughcolor=colors["panel_alt"],
-        fieldbackground=colors["entry"],
+        foreground=colors["ink"],
+        bordercolor=colors["line"],
+        darkcolor=colors["line"],
+        lightcolor=colors["line"],
+        troughcolor=colors["surface_alt"],
+        fieldbackground=colors["surface"],
         focuscolor=colors["accent"],
+        font=default_font,
     )
     style.configure("TFrame", background=colors["bg"])
-    style.configure(
-        "Panel.TFrame",
-        background=colors["panel"],
-        borderwidth=0,
-        relief="flat",
-    )
-    style.configure("TLabel", background=colors["bg"], foreground=colors["text"])
+    style.configure("App.TFrame", background=colors["bg"])
+    style.configure("Panel.TFrame", background=colors["surface"])
+    style.configure("Surface.TFrame", background=colors["surface"], borderwidth=1, relief="solid")
+    style.configure("SurfaceBody.TFrame", background=colors["surface"])
+    style.configure("Soft.TFrame", background=colors["surface_alt"])
+    style.configure("Status.TFrame", background=colors["accent_pale"], borderwidth=1, relief="solid")
+    style.configure("TLabel", background=colors["bg"], foreground=colors["ink"])
+    style.configure("Surface.TLabel", background=colors["surface"], foreground=colors["ink"])
     style.configure(
         "Field.TLabel",
-        background=colors["panel"],
-        foreground=colors["accent_deep"],
-        font=("Arial", 10, "bold"),
+        background=colors["surface_alt"],
+        foreground=colors["ink"],
+        font=(ui_family, 10, "bold"),
     )
     style.configure(
         "Hint.TLabel",
-        background=colors["panel"],
+        background=colors["surface"],
         foreground=colors["muted"],
-        font=("Arial", 9),
+        font=(ui_family, 9),
     )
     style.configure(
         "PanelHint.TLabel",
-        background=colors["panel_alt"],
+        background=colors["surface_alt"],
         foreground=colors["muted"],
-        font=("Arial", 9),
-        padding=(0, 2),
+        font=(ui_family, 9),
     )
     style.configure(
-        "Tips.TLabel",
-        background=colors["panel"],
-        foreground=colors["text"],
-        font=("Arial", 10),
+        "SectionTitle.TLabel",
+        background=colors["surface"],
+        foreground=colors["ink"],
+        font=(ui_family, 12, "bold"),
     )
     style.configure(
         "Status.TLabel",
-        background=colors["panel_alt"],
-        foreground=colors["warning"],
-        font=("Arial", 10, "bold"),
-        padding=(0, 8),
+        background=colors["accent_pale"],
+        foreground=colors["accent_hover"],
+        font=(ui_family, 10, "bold"),
+    )
+    style.configure(
+        "StatusMeta.TLabel",
+        background=colors["accent_pale"],
+        foreground=colors["muted"],
+        font=(ui_family, 9, "bold"),
+    )
+    style.configure(
+        "Summary.TLabel",
+        background=colors["surface"],
+        foreground=colors["ink"],
+        font=(ui_family, 10, "bold"),
+    )
+    style.configure(
+        "SummaryHint.TLabel",
+        background=colors["surface"],
+        foreground=colors["muted"],
+        font=(ui_family, 9),
     )
     style.configure(
         "Path.TLabel",
-        background=colors["panel"],
+        background=colors["surface"],
         foreground=colors["muted"],
-        font=("Consolas", 9),
-    )
-    style.configure(
-        "Section.TLabelframe",
-        background=colors["bg"],
-        borderwidth=0,
-        relief="flat",
-    )
-    style.configure(
-        "Section.TLabelframe.Label",
-        background=colors["bg"],
-        foreground=colors["accent_deep"],
-        font=("Arial", 10, "bold"),
-        padding=(0, 0, 0, 0),
+        font=fixed_font,
     )
     style.configure(
         "Cyber.TEntry",
-        fieldbackground=colors["entry"],
-        foreground=colors["text"],
-        bordercolor=colors["panel_alt"],
-        lightcolor=colors["panel_alt"],
-        darkcolor=colors["panel_alt"],
-        borderwidth=0,
+        fieldbackground=colors["surface"],
+        foreground=colors["ink"],
+        bordercolor=colors["line"],
+        lightcolor=colors["line"],
+        darkcolor=colors["line"],
+        borderwidth=1,
         relief="flat",
         padding=(8, 7),
     )
     style.map(
         "Cyber.TEntry",
-        bordercolor=[("focus", colors["accent_soft"]), ("!focus", colors["panel_alt"])],
-        lightcolor=[("focus", colors["accent_soft"]), ("!focus", colors["panel_alt"])],
+        bordercolor=[("focus", colors["accent"]), ("!focus", colors["line"])],
+        lightcolor=[("focus", colors["accent"]), ("!focus", colors["line"])],
     )
     style.configure(
         "TCheckbutton",
-        background=colors["panel"],
-        foreground=colors["text"],
+        background=colors["surface"],
+        foreground=colors["ink"],
     )
     style.map(
         "TCheckbutton",
-        foreground=[
-            ("disabled", colors["muted"]),
-            ("active", colors["accent_deep"]),
-            ("!disabled", colors["text"]),
-        ],
-        background=[("active", colors["panel"]), ("!disabled", colors["panel"])],
-    )
-    style.configure(
-        "HeroNote.TLabel",
-        background=colors["bg"],
-        foreground=colors["accent_deep"],
-        font=("Arial", 9, "bold"),
-        padding=(10, 4),
-    )
-    style.configure(
-        "Soft.TFrame",
-        background=colors["panel_alt"],
-        borderwidth=0,
-        relief="flat",
+        foreground=[("disabled", colors["faint"]), ("active", colors["accent"]), ("!disabled", colors["ink"])],
+        background=[("active", colors["surface"]), ("!disabled", colors["surface"])],
     )
     style.configure(
         "Primary.TButton",
-        background=colors["accent_deep"],
-        foreground="#ffffff",
-        bordercolor=colors["accent_deep"],
-        lightcolor=colors["accent_deep"],
-        darkcolor=colors["accent_deep"],
-        borderwidth=1,
-        relief="flat",
-        padding=(14, 7),
-        font=("Arial", 9, "bold"),
-        anchor="w",
-        justify="left",
-    )
-    style.map(
-        "Primary.TButton",
-        background=[
-            ("pressed", "#2747b5"),
-            ("active", colors["accent"]),
-        ],
-        foreground=[("!disabled", "#ffffff")],
-    )
-    style.configure(
-        "Action.TButton",
-        background=colors["button"],
-        foreground=colors["accent_deep"],
-        bordercolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
-        darkcolor=colors["panel_edge"],
-        borderwidth=1,
-        relief="flat",
-        padding=(12, 6),
-        font=("Arial", 9, "bold"),
-        anchor="w",
-        justify="left",
-    )
-    style.map(
-        "Action.TButton",
-        background=[
-            ("pressed", colors["button_pressed"]),
-            ("active", colors["button_hover"]),
-        ],
-        foreground=[
-            ("pressed", colors["accent_deep"]),
-            ("active", colors["accent"]),
-            ("!disabled", colors["accent_deep"]),
-        ],
-        bordercolor=[("active", colors["accent_soft"]), ("!disabled", colors["panel_edge"])],
-    )
-    style.configure(
-        "Accent.TButton",
         background=colors["accent"],
         foreground="#ffffff",
         bordercolor=colors["accent"],
         lightcolor=colors["accent"],
-        darkcolor=colors["accent_deep"],
+        darkcolor=colors["accent"],
         borderwidth=1,
         relief="flat",
-        padding=(12, 6),
-        font=("Arial", 9, "bold"),
-        anchor="w",
-        justify="left",
+        padding=(13, 8),
+        font=(ui_family, 9, "bold"),
     )
     style.map(
-        "Accent.TButton",
-        background=[
-            ("pressed", colors["accent_deep"]),
-            ("active", "#6d96ff"),
-        ],
-        foreground=[("!disabled", "#ffffff")],
+        "Primary.TButton",
+        background=[("pressed", colors["accent_hover"]), ("active", colors["accent_hover"]), ("disabled", colors["line_strong"])],
+        foreground=[("disabled", colors["surface_soft"]), ("!disabled", "#ffffff")],
     )
     style.configure(
-        "Toolbar.TFrame",
-        background=colors["bg"],
+        "Action.TButton",
+        background=colors["surface"],
+        foreground=colors["ink"],
+        bordercolor=colors["line_strong"],
+        lightcolor=colors["line_strong"],
+        darkcolor=colors["line_strong"],
+        borderwidth=1,
+        relief="flat",
+        padding=(11, 7),
+        font=(ui_family, 9, "bold"),
+    )
+    style.map(
+        "Action.TButton",
+        background=[("pressed", colors["surface_alt"]), ("active", colors["surface_alt"]), ("disabled", colors["surface_soft"])],
+        foreground=[("disabled", colors["faint"]), ("!disabled", colors["ink"])],
+        bordercolor=[("focus", colors["accent"]), ("active", colors["accent"]), ("!disabled", colors["line_strong"])],
     )
     style.configure(
         "Danger.TButton",
         background=colors["danger_soft"],
         foreground=colors["danger"],
-        bordercolor="#f3caca",
-        lightcolor="#f3caca",
-        darkcolor=colors["panel_edge"],
+        bordercolor=colors["danger"],
+        lightcolor=colors["danger"],
+        darkcolor=colors["danger"],
         borderwidth=1,
         relief="flat",
-        padding=(14, 7),
-        font=("Arial", 9, "bold"),
-        anchor="w",
-        justify="left",
+        padding=(11, 7),
+        font=(ui_family, 9, "bold"),
     )
     style.map(
         "Danger.TButton",
-        background=[
-            ("pressed", colors["button_pressed"]),
-            ("active", colors["button_hover"]),
-        ],
-        foreground=[
-            ("pressed", colors["danger"]),
-            ("active", "#c45757"),
-            ("!disabled", colors["danger"]),
-        ],
+        background=[("pressed", colors["danger"]), ("active", colors["danger"]), ("disabled", colors["surface_soft"])],
+        foreground=[("pressed", "#ffffff"), ("active", "#ffffff"), ("disabled", colors["faint"]), ("!disabled", colors["danger"])],
     )
     style.configure(
         "Cyber.Treeview",
-        background=colors["panel"],
-        fieldbackground=colors["panel"],
-        foreground=colors["text"],
-        bordercolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
-        darkcolor=colors["panel_edge"],
-        rowheight=28,
+        background=colors["surface"],
+        fieldbackground=colors["surface"],
+        foreground=colors["ink"],
+        bordercolor=colors["line"],
+        lightcolor=colors["line"],
+        darkcolor=colors["line"],
+        rowheight=27,
+        font=default_font,
     )
     style.map(
         "Cyber.Treeview",
         background=[("selected", colors["tree_select"])],
-        foreground=[("selected", colors["text"])],
+        foreground=[("selected", colors["ink"])],
     )
     style.configure(
         "Cyber.Treeview.Heading",
         background=colors["tree_header"],
-        foreground=colors["accent_deep"],
-        bordercolor=colors["panel_edge"],
-        lightcolor=colors["panel_edge"],
-        darkcolor=colors["panel_edge"],
-        font=("Arial", 10, "bold"),
+        foreground=colors["ink"],
+        bordercolor=colors["line"],
+        lightcolor=colors["line"],
+        darkcolor=colors["line"],
+        font=heading_font,
         padding=(6, 6),
     )
     style.map(
         "Cyber.Treeview.Heading",
-        background=[("active", colors["button_hover"])],
-        foreground=[("active", colors["accent"]), ("!disabled", colors["accent_deep"])],
+        background=[("active", colors["surface_alt"])],
+        foreground=[("active", colors["accent"]), ("!disabled", colors["ink"])],
+    )
+    style.configure("App.TNotebook", background=colors["bg"], borderwidth=0, tabmargins=(0, 0, 0, 0))
+    style.configure(
+        "App.TNotebook.Tab",
+        background=colors["surface_alt"],
+        foreground=colors["muted"],
+        borderwidth=1,
+        padding=(18, 8),
+        font=(ui_family, 9, "bold"),
+    )
+    style.map(
+        "App.TNotebook.Tab",
+        background=[("selected", colors["surface"]), ("active", colors["accent_soft"])],
+        foreground=[("selected", colors["accent_hover"]), ("active", colors["accent_hover"])],
     )
 
 
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("PT-BDtool 小白启动器")
-        self.root.geometry("920x760")
-        self.root.minsize(920, 720)
+        self.root.title("PT-BDtool 远程材料工作台")
+        self.root.geometry("1040x760")
+        self.root.minsize(820, 710)
         self.process: subprocess.Popen[str] | None = None
         self.shell_cancel_event = threading.Event()
         self.reader_threads: list[threading.Thread] = []
         self.backend: PTBDRemoteBackend | None = None
         self.backend_thread: threading.Thread | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self.status_var = tk.StringVar(value="就绪：先填 VPS，扫描候选后双击条目或点“启动所选条目”")
+        self.status_var = tk.StringVar(value="就绪：确认 VPS 连接后扫描候选，再勾选需要生成材料的条目")
         self.selected_path_var = tk.StringVar(value="")
+        self.workspace_summary_var = tk.StringVar(value="0 个候选 · 0 个已选")
+        self.backend_summary_var = tk.StringVar(value=standalone_backend_label())
         self.config_vars = {}
         self.scan_items: list[dict] = []
         self.filtered_scan_items: list[dict] = []
@@ -590,159 +554,206 @@ class App:
         self.scan_context_menu: tk.Menu | None = None
         self.last_failed_paths: list[str] = []
         self.last_success_paths: list[str] = []
+        self.workflow_step_widgets: list[tuple[tk.Frame, tk.Label, tk.Label]] = []
         self._build_ui()
-        self._load_into_form(load_config())
+        loaded_config = load_config()
+        self._load_into_form(loaded_config)
+        self.status_var.trace_add("write", self._on_status_change)
+        remote_host = str(loaded_config.get("remote_host") or "").strip().lower()
+        first_run = not CONFIG_PATH.is_file() or remote_host in {"", "root@your-vps"}
+        if first_run and not CONFIG_PATH.is_file():
+            self.config_vars["remote_host"].set("")
+        self.toggle_form_panel(force=first_run)
+        self._on_status_change()
         self._poll_logs()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build_ui(self) -> None:
-        container = ttk.Frame(self.root, padding=16)
+        colors = UI_COLORS
+        container = ttk.Frame(self.root, style="App.TFrame", padding=(14, 12, 14, 12))
         container.pack(fill=BOTH, expand=True)
 
-        self.hero_canvas = tk.Canvas(
+        header = tk.Frame(container, bg=colors["header"], height=72, padx=18, pady=12)
+        header.pack(fill=X, pady=(0, 8))
+        header.pack_propagate(False)
+        header.columnconfigure(0, weight=1)
+        title_group = tk.Frame(header, bg=colors["header"])
+        title_group.grid(row=0, column=0, sticky="w")
+        tk.Label(
+            title_group,
+            text="PT-BDtool",
+            bg=colors["header"],
+            fg="#ffffff",
+            font=(ui_font_families()[0], 16, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            title_group,
+            text="远程材料工作台 · 扫描、生成、回传在一个窗口完成",
+            bg=colors["header"],
+            fg=colors["header_muted"],
+            font=(ui_font_families()[0], 9),
+        ).pack(anchor="w", pady=(2, 0))
+        tk.Label(
+            header,
+            textvariable=self.backend_summary_var,
+            bg=colors["accent_soft"],
+            fg=colors["accent_hover"],
+            font=(ui_font_families()[0], 9, "bold"),
+            padx=12,
+            pady=7,
+        ).grid(row=0, column=1, sticky="e")
+
+        progress = tk.Frame(
             container,
-            height=102,
-            highlightthickness=0,
-            borderwidth=0,
-            relief="flat",
-            background="#eef3ff",
+            bg=colors["surface"],
+            highlightbackground=colors["line"],
+            highlightthickness=1,
+            padx=8,
+            pady=7,
         )
-        self.hero_canvas.pack(fill=X, pady=(0, 8))
-        self.hero_canvas.bind("<Configure>", self._on_hero_resize)
-        self._render_hero_banner(888)
+        progress.pack(fill=X, pady=(0, 8))
+        for column, title in enumerate(WORKFLOW_STEPS, start=1):
+            progress.columnconfigure(column - 1, weight=1, uniform="workflow")
+            cell = tk.Frame(progress, bg=colors["surface"], padx=9, pady=3)
+            cell.grid(row=0, column=column - 1, sticky="ew", padx=(0 if column == 1 else 3, 0))
+            number = tk.Label(
+                cell,
+                text=str(column),
+                width=2,
+                bg=colors["surface_alt"],
+                fg=colors["muted"],
+                font=(ui_font_families()[0], 9, "bold"),
+                padx=3,
+                pady=2,
+            )
+            number.pack(side=tk.LEFT)
+            label = tk.Label(
+                cell,
+                text=title,
+                bg=colors["surface"],
+                fg=colors["muted"],
+                font=(ui_font_families()[0], 9, "bold"),
+                padx=7,
+            )
+            label.pack(side=tk.LEFT)
+            self.workflow_step_widgets.append((cell, number, label))
 
-        form_panel, form_body = self._build_rounded_section(container, "连接与保存设置", pady=(0, 6))
-        form_summary = ttk.Frame(form_body, style="Panel.TFrame", padding=(CONTENT_INSET_X, 12))
-        form_summary.pack(fill=X)
-        form_summary.columnconfigure(0, weight=1)
-        ttk.Label(form_summary, textvariable=self.summary_host_var, style="Field.TLabel").grid(row=0, column=0, sticky=W)
-        ttk.Label(form_summary, textvariable=self.summary_save_var, style="PanelHint.TLabel").grid(
-            row=1, column=0, sticky=W, pady=(2, 0)
-        )
-        summary_actions = ttk.Frame(form_summary, style="Panel.TFrame")
-        summary_actions.grid(row=0, column=1, rowspan=2, padx=(10, 0), sticky="e")
-        self._pack_round_button(summary_actions, "□ 保存", self.save_form, variant="action", width=8)
-        self._pack_round_button(summary_actions, "⌂ 配置", self.open_config_dir, variant="action", width=8, padx=(8, 0))
-        self._pack_round_button(summary_actions, "≣ 日志", self.open_log_file, variant="action", width=8, padx=(8, 0))
-        self.form_toggle_button_shell = tk.Frame(form_summary, bg="#ffffff")
-        self.form_toggle_button_shell.grid(row=0, column=2, rowspan=2, padx=(10, 0))
-        self.form_toggle_button = self._pack_round_button(
-            self.form_toggle_button_shell,
-            "▾ 设置",
-            self.toggle_form_panel,
-            variant="action",
-            width=8,
-        )
+        self.main_notebook = ttk.Notebook(container, style="App.TNotebook", takefocus=True)
+        self.main_notebook.pack(fill=BOTH, expand=True)
+        self.workbench_tab = ttk.Frame(self.main_notebook, style="App.TFrame", padding=(0, 8, 0, 0))
+        self.settings_tab = ttk.Frame(self.main_notebook, style="App.TFrame", padding=(0, 8, 0, 0))
+        self.main_notebook.add(self.workbench_tab, text="工作台")
+        self.main_notebook.add(self.settings_tab, text="连接设置")
+        self.main_notebook.bind("<<NotebookTabChanged>>", self._on_notebook_tab_changed)
 
-        self.form_details = ttk.Frame(
-            form_body,
-            style="Panel.TFrame",
-            padding=(CONTENT_INSET_X, 6, CONTENT_INSET_X, 14),
+        summary = ttk.Frame(self.workbench_tab, style="Surface.TFrame", padding=(14, 9))
+        summary.pack(fill=X, pady=(0, 7))
+        summary.columnconfigure(0, weight=1)
+        summary_text = ttk.Frame(summary, style="SurfaceBody.TFrame")
+        summary_text.grid(row=0, column=0, sticky="ew")
+        ttk.Label(summary_text, textvariable=self.summary_host_var, style="Summary.TLabel").pack(anchor=W)
+        ttk.Label(summary_text, textvariable=self.summary_save_var, style="SummaryHint.TLabel").pack(
+            anchor=W, pady=(2, 0)
         )
-        form = self.form_details
-
-        self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4 或 ssh root@1.2.3.4")
-        self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 1, "默认 22")
-        self._add_compact_entry(form, "SSH 密码", "remote_password", 1, 0, "留空表示走密钥", show="*")
-        self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 1, "只有源码旧模式才需要")
-        self._add_compact_entry(
-            form,
-            "扫描白名单",
-            "scan_include",
-            2,
-            0,
-            f"可留空。默认优先：{preferred_scan_roots_text()}",
+        summary_actions = ttk.Frame(summary, style="SurfaceBody.TFrame")
+        summary_actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.form_toggle_button = ttk.Button(
+            summary_actions,
+            text="编辑连接",
+            command=self.toggle_form_panel,
+            style="Action.TButton",
         )
-        self._add_compact_entry(form, "额外排除", "scan_exclude", 2, 1, "可留空")
-
-        save_group = ttk.Frame(form, style="Panel.TFrame", padding=(0, 8, 0, 0))
-        save_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        save_group.columnconfigure(0, weight=1)
-        ttk.Label(save_group, text="本机保存目录", style="Field.TLabel").grid(row=0, column=0, sticky=W)
-        ttk.Label(save_group, text="生成完成后，结果会回到这个目录", style="PanelHint.TLabel").grid(
-            row=1, column=0, sticky=W, pady=(2, 6)
+        self.form_toggle_button.grid(row=0, column=0, padx=(0, 7))
+        ttk.Button(summary_actions, text="保存连接", command=self.save_form, style="Action.TButton").grid(
+            row=0, column=1, padx=(0, 7)
         )
-        save_path_row = ttk.Frame(save_group, style="Panel.TFrame")
-        save_path_row.grid(row=2, column=0, sticky="ew")
-        save_path_row.columnconfigure(0, weight=1)
-        variable = tk.StringVar()
-        variable.trace_add("write", lambda *_args: self.refresh_config_summary())
-        self.config_vars["save_dir"] = variable
-        entry = ttk.Entry(save_path_row, textvariable=variable, style="Cyber.TEntry")
-        entry.grid(row=0, column=0, sticky="ew")
-        save_button_shell = tk.Frame(save_path_row, bg="#ffffff")
-        save_button_shell.grid(row=0, column=1, padx=(8, 0))
-        self._pack_round_button(save_button_shell, "⌂ 选择", self.pick_save_dir, variant="action", width=8)
-
-        option_group = ttk.Frame(form, style="Panel.TFrame", padding=(0, 12, 0, 0))
-        option_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
-        option_group.columnconfigure(0, weight=1)
-        ttk.Label(option_group, text="运行选项", style="Field.TLabel").grid(row=0, column=0, sticky=W)
-        ttk.Label(option_group, text="这些设置会影响扫描范围、回传和远端清理行为", style="PanelHint.TLabel").grid(
-            row=1, column=0, sticky=W, pady=(2, 8)
+        self.test_button = ttk.Button(
+            summary_actions,
+            text="测试连接",
+            command=self.test_connection,
+            style="Action.TButton",
         )
-        self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            option_group,
-            text="成功后自动清理 VPS 生成目录",
-            variable=self.config_vars["auto_cleanup"],
-        ).grid(row=2, column=0, sticky=W, pady=(0, 6))
-        self.config_vars["remote_bootstrap"] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            option_group,
-            text="空白 VPS 自动上传运行包（推荐）",
-            variable=self.config_vars["remote_bootstrap"],
-        ).grid(row=3, column=0, sticky=W, pady=(0, 6))
-        self.config_vars["scan_full"] = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            option_group,
-            text="启用全盘扫描（高级，媒体多时较慢）",
-            variable=self.config_vars["scan_full"],
-        ).grid(row=4, column=0, sticky=W)
+        self.test_button.grid(row=0, column=2)
 
-        form.columnconfigure(0, weight=1, uniform="form")
-        form.columnconfigure(1, weight=1, uniform="form")
-        self.toggle_form_panel(force=False)
-
-        tips = ttk.Label(
-            container,
-            text=(
-                f"当前优先走 {standalone_backend_label()}。如果只是反复扫描和启动，通常不用一直展开上面的低频配置。"
-            ),
-            style="Hint.TLabel",
-            wraplength=860,
-            justify="left",
-        )
-        tips.pack(anchor=W, pady=(0, 6))
-
-        status = ttk.Label(container, textvariable=self.status_var, style="Status.TLabel", wraplength=860, justify="left")
-        status.pack(anchor=W, pady=(2, 12))
-
-        scan_panel, scan_body = self._build_rounded_section(
-            container,
-            "VPS 候选列表（新接口预览）",
-            pady=(0, 8),
-            expand=True,
-        )
-        scan_body.configure(
-            style="Panel.TFrame",
-            padding=(CONTENT_INSET_X, 12, CONTENT_INSET_X, 12),
-        )
-        actions = self._build_pill_group(scan_body, pady=(0, 10))
-        primary_actions = ttk.Frame(actions, style="Soft.TFrame")
-        primary_actions.pack(fill=X, expand=True)
-        self._pack_round_button(primary_actions, "⌕ 扫描", self.scan_remote, variant="primary", width=8)
-        self._pack_round_button(primary_actions, "▷ 启动", self.start_remote, variant="accent", width=8, padx=(10, 0))
-        self._pack_round_button(primary_actions, "▢ 停止", self.stop_remote, variant="danger", width=8, padx=(10, 0))
-        self._pack_round_button(primary_actions, "⚙ 测连", self.test_connection, variant="action", width=8, padx=(10, 0))
-        self._pack_round_button(primary_actions, "↻ 重试失败", self.retry_failed_paths, variant="action", width=10, padx=(10, 0))
+        status_frame = ttk.Frame(self.workbench_tab, style="Status.TFrame", padding=(12, 8))
+        status_frame.pack(fill=X, pady=(0, 7))
+        status_frame.columnconfigure(0, weight=1)
         ttk.Label(
-            primary_actions,
-            text="提示：左侧勾选即可多选；默认优先扫描常见目录",
-            style="PanelHint.TLabel",
-        ).pack(side=LEFT, padx=(12, 0))
-        filter_bar = self._build_pill_group(scan_body, pady=(0, 8), body_padding=(14, 10, 14, 10))
-        ttk.Label(filter_bar, text="过滤", style="Field.TLabel").pack(side=LEFT)
+            status_frame,
+            textvariable=self.status_var,
+            style="Status.TLabel",
+            wraplength=700,
+            justify="left",
+        ).grid(row=0, column=0, sticky="w")
+        ttk.Label(status_frame, textvariable=self.workspace_summary_var, style="StatusMeta.TLabel").grid(
+            row=0, column=1, sticky="e", padx=(12, 0)
+        )
+
+        self.workspace_paned = tk.PanedWindow(
+            self.workbench_tab,
+            orient=tk.VERTICAL,
+            background=colors["line"],
+            borderwidth=0,
+            sashwidth=6,
+            sashrelief="flat",
+            showhandle=False,
+            opaqueresize=True,
+        )
+        self.workspace_paned.pack(fill=BOTH, expand=True)
+
+        candidate_panel = ttk.Frame(self.workspace_paned, style="Surface.TFrame", padding=(12, 10))
+        activity_panel = ttk.Frame(self.workspace_paned, style="Surface.TFrame", padding=(12, 10))
+        self.workspace_paned.add(candidate_panel, minsize=220, stretch="always")
+        self.workspace_paned.add(activity_panel, minsize=166, stretch="never")
+
+        candidate_head = ttk.Frame(candidate_panel, style="SurfaceBody.TFrame")
+        candidate_head.pack(fill=X, pady=(0, 8))
+        candidate_head.columnconfigure(0, weight=1)
+        self.candidate_head = candidate_head
+        candidate_title = ttk.Frame(candidate_head, style="SurfaceBody.TFrame")
+        candidate_title.grid(row=0, column=0, sticky="w")
+        ttk.Label(candidate_title, text="VPS 候选", style="SectionTitle.TLabel").pack(anchor=W)
+        self.candidate_hint = ttk.Label(
+            candidate_title,
+            text="勾选一个或多个条目，再生成并回传材料包",
+            style="SummaryHint.TLabel",
+        )
+        self.candidate_hint.pack(anchor=W, pady=(1, 0))
+        candidate_actions = ttk.Frame(candidate_head, style="SurfaceBody.TFrame")
+        candidate_actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.scan_button = ttk.Button(
+            candidate_actions,
+            text="扫描 VPS",
+            command=self.scan_remote,
+            style="Action.TButton",
+        )
+        self.scan_button.grid(row=0, column=0, padx=(0, 7))
+        self.start_button = ttk.Button(
+            candidate_actions,
+            text="生成所选",
+            command=self.start_remote,
+            style="Primary.TButton",
+        )
+        self.start_button.grid(row=0, column=1, padx=(0, 7))
+        self.stop_button = ttk.Button(
+            candidate_actions,
+            text="停止任务",
+            command=self.stop_remote,
+            style="Danger.TButton",
+        )
+        self.stop_button.grid(row=0, column=2, padx=(0, 7))
+        self.retry_button = ttk.Button(
+            candidate_actions,
+            text="重试失败",
+            command=self.retry_failed_paths,
+            style="Action.TButton",
+        )
+        self.retry_button.grid(row=0, column=3)
+
+        filter_bar = ttk.Frame(candidate_panel, style="Soft.TFrame", padding=(10, 8))
+        filter_bar.pack(fill=X, pady=(0, 8))
+        filter_bar.columnconfigure(3, weight=1)
+        ttk.Label(filter_bar, text="类型", style="Field.TLabel").grid(row=0, column=0, sticky="w")
         type_box = ttk.Combobox(
             filter_bar,
             textvariable=self.filter_type_var,
@@ -750,414 +761,306 @@ class App:
             state="readonly",
             width=10,
         )
-        type_box.pack(side=LEFT, padx=(10, 8))
+        type_box.grid(row=0, column=1, padx=(7, 12), sticky="w")
         type_box.bind("<<ComboboxSelected>>", lambda _event: self.apply_scan_filters())
+        ttk.Label(filter_bar, text="路径", style="Field.TLabel").grid(row=0, column=2, sticky="w")
         keyword_entry = ttk.Entry(filter_bar, textvariable=self.filter_keyword_var, style="Cyber.TEntry")
-        keyword_entry.pack(side=LEFT, fill=X, expand=True)
+        keyword_entry.grid(row=0, column=3, padx=(7, 7), sticky="ew")
         keyword_entry.bind("<KeyRelease>", lambda _event: self.apply_scan_filters())
-        self._pack_round_button(filter_bar, "× 清空", self.clear_scan_filters, variant="action", width=7, padx=(8, 0))
-        scan_list = ttk.Frame(scan_body, style="Soft.TFrame", padding=(10, 10, 10, 10))
+        ttk.Button(filter_bar, text="清除筛选", command=self.clear_scan_filters, style="Action.TButton").grid(
+            row=0, column=4, padx=(0, 7)
+        )
+        ttk.Button(
+            filter_bar,
+            text="全选结果",
+            command=self.select_visible_scan_items,
+            style="Action.TButton",
+        ).grid(row=0, column=5, padx=(0, 7))
+        ttk.Button(
+            filter_bar,
+            text="清空勾选",
+            command=self.clear_checked_scan_items,
+            style="Action.TButton",
+        ).grid(row=0, column=6)
+
+        scan_list = ttk.Frame(candidate_panel, style="SurfaceBody.TFrame")
         scan_list.pack(fill=BOTH, expand=True)
         columns = ("pick", "index", "type", "path")
         self.scan_tree = ttk.Treeview(
             scan_list,
             columns=columns,
             show="headings",
-            height=18,
+            height=8,
             style="Cyber.Treeview",
             selectmode="browse",
+            takefocus=True,
         )
         self.scan_tree.heading("pick", text="选择")
         self.scan_tree.heading("index", text="#")
         self.scan_tree.heading("type", text="类型")
         self.scan_tree.heading("path", text="路径")
-        self.scan_tree.column("pick", width=76, anchor="center", stretch=False)
-        self.scan_tree.column("index", width=56, anchor="center")
-        self.scan_tree.column("type", width=100, anchor="center")
-        self.scan_tree.column("path", width=980, minwidth=560, anchor="w", stretch=True)
+        self.scan_tree.column("pick", width=66, anchor="center", stretch=False)
+        self.scan_tree.column("index", width=48, anchor="center", stretch=False)
+        self.scan_tree.column("type", width=92, anchor="center", stretch=False)
+        self.scan_tree.column("path", width=700, minwidth=280, anchor="w", stretch=True)
         scan_scrollbar = ttk.Scrollbar(scan_list, orient="vertical", command=self.scan_tree.yview)
-        scan_scrollbar_x = ttk.Scrollbar(scan_body, orient="horizontal", command=self.scan_tree.xview)
+        scan_scrollbar_x = ttk.Scrollbar(scan_list, orient="horizontal", command=self.scan_tree.xview)
         self.scan_tree.configure(yscrollcommand=scan_scrollbar.set, xscrollcommand=scan_scrollbar_x.set)
-        self.scan_tree.pack(side=LEFT, fill=BOTH, expand=True)
-        scan_scrollbar.pack(side=LEFT, fill="y", padx=(6, 0))
-        scan_scrollbar_x.pack(fill=X, pady=(8, 0))
+        self.scan_tree.grid(row=0, column=0, sticky="nsew")
+        scan_scrollbar.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        scan_scrollbar_x.grid(row=1, column=0, sticky="ew", pady=(5, 0))
+        scan_list.columnconfigure(0, weight=1)
+        scan_list.rowconfigure(0, weight=1)
         self.scan_tree.bind("<<TreeviewSelect>>", self.on_scan_select)
         self.scan_tree.bind("<Double-1>", self.on_scan_double_click)
         self.scan_tree.bind("<Button-1>", self.on_scan_click, add="+")
+        self.scan_tree.bind("<space>", self.on_scan_space)
+        self.scan_tree.bind("<Return>", self.on_scan_return)
         self.scan_tree.bind("<Motion>", self.on_scan_tree_hover)
         self.scan_tree.bind("<Leave>", self.hide_path_tooltip)
         self.scan_tree.bind("<ButtonPress-1>", self.hide_path_tooltip)
         self.scan_tree.bind("<Button-3>", self.on_scan_right_click)
         self.scan_tree.bind("<Control-Button-1>", self.on_scan_right_click)
         ttk.Label(
-            scan_body,
-            text="左侧勾选列用于批量启动；单击勾选，双击路径看完整内容，路径列支持横向滚动。",
-            style="PanelHint.TLabel",
-        ).pack(anchor=W, pady=(6, 2))
-        ttk.Label(scan_body, textvariable=self.selected_path_var, style="Path.TLabel").pack(anchor=W, pady=(2, 0))
+            candidate_panel,
+            textvariable=self.selected_path_var,
+            style="Path.TLabel",
+            wraplength=920,
+            justify="left",
+        ).pack(anchor=W, pady=(7, 0))
         self.scan_context_menu = tk.Menu(self.root, tearoff=0)
-        self.scan_context_menu.add_command(label="⧉ 复制路径", command=self.copy_selected_scan_path)
-        self.scan_context_menu.add_command(label="⌕ 查看完整路径", command=self.show_selected_scan_path_dialog)
-        self.scan_context_menu.add_command(label="▷ 直接启动", command=self.start_selected_scan_item)
+        self.scan_context_menu.add_command(label="复制路径", command=self.copy_selected_scan_path)
+        self.scan_context_menu.add_command(label="查看完整路径", command=self.show_selected_scan_path_dialog)
+        self.scan_context_menu.add_command(label="仅生成这一项", command=self.start_selected_scan_item)
 
-        log_panel, log_body = self._build_rounded_section(container, "运行日志", body_padding=(8, 8, 8, 8))
-
+        activity_head = ttk.Frame(activity_panel, style="SurfaceBody.TFrame")
+        activity_head.pack(fill=X, pady=(0, 7))
+        activity_head.columnconfigure(0, weight=1)
+        self.activity_head = activity_head
+        activity_title = ttk.Frame(activity_head, style="SurfaceBody.TFrame")
+        activity_title.grid(row=0, column=0, sticky="w")
+        ttk.Label(activity_title, text="运行日志", style="SectionTitle.TLabel").pack(anchor=W)
+        self.activity_hint = ttk.Label(
+            activity_title,
+            text="任务输出会实时显示，完整日志同时写入本机",
+            style="SummaryHint.TLabel",
+        )
+        self.activity_hint.pack(anchor=W, pady=(1, 0))
+        log_actions = ttk.Frame(activity_head, style="SurfaceBody.TFrame")
+        log_actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
+        self.open_output_button = ttk.Button(
+            log_actions,
+            text="打开结果目录",
+            command=self.open_save_dir,
+            style="Action.TButton",
+        )
+        self.open_output_button.grid(row=0, column=0, padx=(0, 7))
+        ttk.Button(log_actions, text="复制日志", command=self.copy_log_view, style="Action.TButton").grid(
+            row=0, column=1, padx=(0, 7)
+        )
+        ttk.Button(log_actions, text="清空显示", command=self.clear_log_view, style="Action.TButton").grid(
+            row=0, column=2, padx=(0, 7)
+        )
+        ttk.Button(log_actions, text="日志文件", command=self.open_log_file, style="Action.TButton").grid(
+            row=0, column=3
+        )
         self.log_view = ScrolledText(
-            log_body,
+            activity_panel,
             wrap="word",
-            font=("Consolas", 10),
-            height=5,
-            background="#f8fbff",
-            foreground="#23314d",
-            insertbackground="#4f7cff",
-            selectbackground="#cfe0ff",
-            selectforeground="#23314d",
+            font=tkfont.nametofont("TkFixedFont"),
+            height=7,
+            background=colors["log_bg"],
+            foreground=colors["log_text"],
+            insertbackground="#ffffff",
+            selectbackground=colors["accent"],
+            selectforeground="#ffffff",
             relief="flat",
             borderwidth=0,
             highlightthickness=1,
-            highlightbackground="#d7e1f3",
-            highlightcolor="#7da8ff",
-            padx=12,
-            pady=10,
+            highlightbackground=colors["line_strong"],
+            highlightcolor=colors["accent"],
+            padx=10,
+            pady=8,
         )
         self.log_view.pack(fill=BOTH, expand=True)
-        self.log_view.insert(END, f"App root: {APP_ROOT}\n")
-        self.log_view.insert(END, f"Config: {CONFIG_PATH}\n")
-        self.log_view.insert(END, f"Log: {LOG_PATH}\n")
-        self.log_view.insert(END, f"Config mode: {config_storage_mode()}\n")
-        self.log_view.insert(END, f"Backend: {backend_status()}\n")
-        self.log_view.insert(END, "准备完成。\n")
         self.log_view.configure(state="disabled")
-        for line in (
+        self._workspace_headers_compact: bool | None = None
+        candidate_head.bind("<Configure>", self._on_workspace_header_resize)
+        activity_head.bind("<Configure>", self._on_workspace_header_resize)
+
+        settings_view = ttk.Frame(self.settings_tab, style="App.TFrame")
+        settings_view.pack(fill=BOTH, expand=True)
+        settings_canvas = tk.Canvas(
+            settings_view,
+            background=colors["bg"],
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        settings_scrollbar = ttk.Scrollbar(settings_view, orient="vertical", command=settings_canvas.yview)
+        settings_canvas.configure(yscrollcommand=settings_scrollbar.set)
+        settings_canvas.pack(side=tk.LEFT, fill=BOTH, expand=True)
+        settings_scrollbar.pack(side=tk.RIGHT, fill="y")
+        settings_shell = ttk.Frame(settings_canvas, style="Surface.TFrame", padding=(18, 14))
+        self.settings_canvas = settings_canvas
+        self.settings_shell = settings_shell
+        settings_window = settings_canvas.create_window((0, 0), anchor="nw", window=settings_shell)
+        settings_shell.bind(
+            "<Configure>",
+            lambda _event: settings_canvas.configure(scrollregion=settings_canvas.bbox("all")),
+        )
+        settings_canvas.bind(
+            "<Configure>",
+            lambda event: settings_canvas.itemconfigure(settings_window, width=max(event.width, 560)),
+        )
+        settings_head = ttk.Frame(settings_shell, style="SurfaceBody.TFrame")
+        settings_head.pack(fill=X, pady=(0, 10))
+        settings_head.columnconfigure(0, weight=1)
+        settings_title = ttk.Frame(settings_head, style="SurfaceBody.TFrame")
+        settings_title.grid(row=0, column=0, sticky="w")
+        ttk.Label(settings_title, text="连接与保存设置", style="SectionTitle.TLabel").pack(anchor=W)
+        ttk.Label(
+            settings_title,
+            text="首次使用先填写 VPS；低频扫描规则留在这里，不占用工作台空间",
+            style="SummaryHint.TLabel",
+        ).pack(anchor=W, pady=(2, 0))
+        ttk.Button(
+            settings_head,
+            text="返回工作台",
+            command=lambda: self.toggle_form_panel(force=False),
+            style="Action.TButton",
+        ).grid(row=0, column=1, sticky="e")
+
+        self.form_details = ttk.Frame(settings_shell, style="SurfaceBody.TFrame")
+        self.form_details.pack(fill=BOTH, expand=True)
+        form = self.form_details
+        self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4")
+        self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 1, "默认 22")
+        self._add_compact_entry(form, "SSH 密码", "remote_password", 1, 0, "留空表示使用密钥", show="*")
+        self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 1, "通常保持 pt")
+        self._add_compact_entry(
+            form,
+            "额外扫描目录",
+            "scan_include",
+            2,
+            0,
+            f"可留空，默认：{preferred_scan_roots_text()}",
+        )
+        self._add_compact_entry(form, "排除目录", "scan_exclude", 2, 1, "多个目录用空格分隔，可留空")
+
+        save_group = ttk.Frame(form, style="Soft.TFrame", padding=(12, 9))
+        save_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 4))
+        save_group.columnconfigure(0, weight=1)
+        ttk.Label(save_group, text="本机保存目录", style="Field.TLabel").grid(row=0, column=0, sticky=W)
+        variable = tk.StringVar()
+        variable.trace_add("write", lambda *_args: self.refresh_config_summary())
+        self.config_vars["save_dir"] = variable
+        ttk.Entry(save_group, textvariable=variable, style="Cyber.TEntry").grid(
+            row=1, column=0, sticky="ew", pady=(6, 0)
+        )
+        ttk.Button(save_group, text="选择目录", command=self.pick_save_dir, style="Action.TButton").grid(
+            row=1, column=1, padx=(8, 0)
+        )
+
+        option_group = ttk.Frame(form, style="SurfaceBody.TFrame", padding=(0, 7, 0, 0))
+        option_group.grid(row=4, column=0, columnspan=2, sticky="ew")
+        option_group.columnconfigure(0, weight=1)
+        option_group.columnconfigure(1, weight=1)
+        self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            option_group,
+            text="成功后清理 VPS 临时结果",
+            variable=self.config_vars["auto_cleanup"],
+        ).grid(row=0, column=0, sticky=W, pady=(0, 6))
+        self.config_vars["remote_bootstrap"] = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            option_group,
+            text="空白 VPS 自动准备运行环境",
+            variable=self.config_vars["remote_bootstrap"],
+        ).grid(row=0, column=1, sticky=W, pady=(0, 6))
+        self.config_vars["scan_full"] = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            option_group,
+            text="启用全盘扫描（较慢）",
+            variable=self.config_vars["scan_full"],
+        ).grid(row=1, column=0, sticky=W)
+
+        settings_actions = ttk.Frame(form, style="SurfaceBody.TFrame")
+        settings_actions.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        self.settings_save_button = ttk.Button(
+            settings_actions,
+            text="保存并返回",
+            command=self.save_and_show_workbench,
+            style="Primary.TButton",
+        )
+        self.settings_save_button.pack(side=tk.LEFT)
+        self.settings_test_button = ttk.Button(
+            settings_actions,
+            text="测试连接",
+            command=self.test_connection,
+            style="Action.TButton",
+        )
+        self.settings_test_button.pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(settings_actions, text="配置目录", command=self.open_config_dir, style="Action.TButton").pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        ttk.Button(settings_actions, text="日志文件", command=self.open_log_file, style="Action.TButton").pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
+        form.columnconfigure(0, weight=1, uniform="form")
+        form.columnconfigure(1, weight=1, uniform="form")
+        self._bind_settings_scroll(settings_canvas)
+
+        initial_lines = (
             f"App root: {APP_ROOT}",
             f"Config: {CONFIG_PATH}",
             f"Log: {LOG_PATH}",
             f"Config mode: {config_storage_mode()}",
             f"Backend: {backend_status()}",
             "准备完成。",
-        ):
-            append_gui_log_line(line)
-
-    def _create_rounded_rect(
-        self,
-        canvas: tk.Canvas,
-        x1: float,
-        y1: float,
-        x2: float,
-        y2: float,
-        radius: float,
-        **kwargs,
-    ) -> int:
-        radius = max(0, min(radius, (x2 - x1) / 2, (y2 - y1) / 2))
-        points = [
-            x1 + radius,
-            y1,
-            x2 - radius,
-            y1,
-            x2,
-            y1,
-            x2,
-            y1 + radius,
-            x2,
-            y2 - radius,
-            x2,
-            y2,
-            x2 - radius,
-            y2,
-            x1 + radius,
-            y2,
-            x1,
-            y2,
-            x1,
-            y2 - radius,
-            x1,
-            y1 + radius,
-            x1,
-            y1,
-        ]
-        return canvas.create_polygon(points, smooth=True, splinesteps=24, **kwargs)
-
-    def _build_rounded_section(
-        self,
-        parent,
-        title: str,
-        pady: tuple[int, int] = (0, 6),
-        expand: bool = False,
-        body_padding: tuple[int, int, int, int] = (0, 0, 0, 0),
-    ) -> tuple[tk.Canvas, ttk.Frame]:
-        card = tk.Canvas(
-            parent,
-            highlightthickness=0,
-            borderwidth=0,
-            relief="flat",
-            background="#eef3ff",
-            height=120,
         )
-        card.pack(fill=BOTH if expand else X, expand=expand, pady=pady)
-        body = ttk.Frame(card, style="Panel.TFrame", padding=body_padding)
-        title_id = card.create_text(
-            CONTENT_INSET_X + 12,
-            18,
-            anchor="w",
-            text=title,
-            fill="#365ad6",
-            font=("Arial", 10, "bold"),
-        )
-        window_id = card.create_window(CONTENT_INSET_X, 40, anchor="nw", window=body)
+        self.append_log_lines(initial_lines)
+        self.main_notebook.select(self.workbench_tab)
+        self._set_workflow_phase(1)
+        self._sync_action_states()
 
-        def redraw(_event=None) -> None:
-            width = max(card.winfo_width(), 320)
-            body_width = max(width - CONTENT_INSET_X * 2, 120)
-            card.itemconfigure(window_id, width=body_width)
-            card.update_idletasks()
-            body_height = body.winfo_reqheight()
-            total_height = max(72, body_height + 52)
-            card.configure(height=total_height)
-            card.delete("card-bg")
-            self._create_rounded_rect(
-                card,
-                4,
-                10,
-                width - 4,
-                total_height,
-                radius=28,
-                fill="#dae5ff",
-                outline="",
-                tags="card-bg",
-            )
-            self._create_rounded_rect(
-                card,
-                2,
-                4,
-                width - 2,
-                total_height - 2,
-                radius=28,
-                fill="#ffffff",
-                outline="#dfe7f6",
-                width=1,
-                tags="card-bg",
-            )
-            card.tag_lower("card-bg")
-            card.coords(title_id, CONTENT_INSET_X + 12, 18)
-            card.coords(window_id, CONTENT_INSET_X, 40)
+    def _bind_settings_scroll(self, widget: tk.Misc) -> None:
+        widget.bind("<MouseWheel>", self._on_settings_mousewheel, add="+")
+        widget.bind("<Button-4>", self._on_settings_mousewheel, add="+")
+        widget.bind("<Button-5>", self._on_settings_mousewheel, add="+")
+        widget.bind("<FocusIn>", self._on_settings_focus, add="+")
+        for child in widget.winfo_children():
+            self._bind_settings_scroll(child)
 
-        card.bind("<Configure>", redraw)
-        body.bind("<Configure>", redraw)
-        card.after_idle(redraw)
-        return card, body
+    def _on_settings_mousewheel(self, event) -> str:
+        if getattr(event, "num", None) == 4:
+            units = -3
+        elif getattr(event, "num", None) == 5:
+            units = 3
+        else:
+            delta = int(getattr(event, "delta", 0) or 0)
+            units = -int(delta / 120) if abs(delta) >= 120 else (-1 if delta > 0 else 1)
+        self.settings_canvas.yview_scroll(units, "units")
+        return "break"
 
-    def _build_pill_group(
-        self,
-        parent,
-        pady: tuple[int, int] = (0, 8),
-        body_padding: tuple[int, int, int, int] = (12, 10, 12, 10),
-    ) -> ttk.Frame:
-        shell = tk.Canvas(
-            parent,
-            highlightthickness=0,
-            borderwidth=0,
-            relief="flat",
-            background="#eef3ff",
-            height=56,
-        )
-        shell.pack(fill=X, pady=pady)
-        body = ttk.Frame(shell, style="Soft.TFrame", padding=body_padding)
-        window_id = shell.create_window(0, 0, anchor="nw", window=body)
+    def _on_settings_focus(self, event) -> None:
+        self.root.after_idle(lambda widget=event.widget: self._scroll_settings_widget_into_view(widget))
 
-        def redraw(_event=None) -> None:
-            width = max(shell.winfo_width(), 220)
-            shell.itemconfigure(window_id, width=max(width - 4, 100))
-            shell.update_idletasks()
-            body_height = body.winfo_reqheight()
-            total_height = max(48, body_height + 4)
-            shell.configure(height=total_height)
-            shell.delete("pill-bg")
-            self._create_rounded_rect(
-                shell,
-                2,
-                2,
-                width - 2,
-                total_height - 2,
-                radius=24,
-                fill="#f4f8ff",
-                outline="#dfe7f6",
-                width=1,
-                tags="pill-bg",
-            )
-            shell.tag_lower("pill-bg")
-            shell.coords(window_id, 2, 2)
-
-        shell.bind("<Configure>", redraw)
-        body.bind("<Configure>", redraw)
-        shell.after_idle(redraw)
-        return body
-
-    def _button_palette(self, variant: str) -> tuple[str, str, str, str]:
-        palettes = {
-            "primary": ("#365ad6", "#2747b5", "#ffffff", "#365ad6"),
-            "accent": ("#4f7cff", "#365ad6", "#ffffff", "#4f7cff"),
-            "danger": ("#fdeeee", "#f8dede", "#d96d6d", "#f3caca"),
-            "action": ("#eef4ff", "#e2ebff", "#365ad6", "#dfe7f6"),
-        }
-        return palettes.get(variant, palettes["action"])
-
-    def _pack_round_button(
-        self,
-        parent,
-        text: str,
-        command,
-        variant: str = "action",
-        width: int = 8,
-        padx: tuple[int, int] | None = None,
-    ):
-        fill, hover, fg, outline = self._button_palette(variant)
-        icon_text, label_text = split_button_text(text)
-        try:
-            parent_bg = str(parent.cget("background"))
-        except Exception:
-            parent_bg = "#eef3ff"
-        shell = tk.Canvas(
-            parent,
-            highlightthickness=0,
-            borderwidth=0,
-            relief="flat",
-            background=parent_bg,
-            width=width * 16 + 12,
-            height=38,
-        )
-        pack_kwargs = {"side": LEFT}
-        if padx is not None:
-            pack_kwargs["padx"] = padx
-        shell.pack(**pack_kwargs)
-        shell.configure(cursor="hand2")
-        icon_id = None
-        if icon_text:
-            icon_id = shell.create_text(
-                16,
-                19,
-                anchor="w",
-                text=icon_text,
-                fill=fg,
-                font=("Arial", 8, "bold"),
-            )
-        label_id = shell.create_text(
-            30 if icon_text else 14,
-            19,
-            anchor="w",
-            text=label_text,
-            fill=fg,
-            font=("Arial", 9, "bold"),
-        )
-
-        def redraw(_event=None) -> None:
-            width_px = max(shell.winfo_width(), 80)
-            height_px = max(shell.winfo_height(), 32)
-            shell.delete("btn-bg")
-            self._create_rounded_rect(
-                shell,
-                1,
-                1,
-                width_px - 1,
-                height_px - 1,
-                radius=16,
-                fill=fill,
-                outline=outline,
-                width=1,
-                tags="btn-bg",
-            )
-            shell.tag_lower("btn-bg")
-            if icon_id is not None:
-                shell.coords(icon_id, 16, height_px / 2)
-            shell.coords(label_id, 30 if icon_text else 14, height_px / 2)
-
-        def on_enter(_event=None) -> None:
-            shell.delete("btn-bg")
-            self._create_rounded_rect(
-                shell,
-                1,
-                1,
-                max(shell.winfo_width(), 80) - 1,
-                max(shell.winfo_height(), 32) - 1,
-                radius=16,
-                fill=hover,
-                outline=outline,
-                width=1,
-                tags="btn-bg",
-            )
-            shell.tag_lower("btn-bg")
-
-        def on_leave(_event=None) -> None:
-            redraw()
-
-        def on_click(_event=None) -> None:
-            command()
-
-        shell.bind("<Configure>", redraw)
-        shell.bind("<Enter>", on_enter)
-        shell.bind("<Leave>", on_leave)
-        shell.bind("<Button-1>", on_click)
-        for item_id in [item for item in (icon_id, label_id) if item is not None]:
-            shell.tag_bind(item_id, "<Enter>", on_enter)
-            shell.tag_bind(item_id, "<Leave>", on_leave)
-            shell.tag_bind(item_id, "<Button-1>", on_click)
-        shell.after_idle(redraw)
-        return _RoundButtonHandle(shell, icon_id, label_id)
-
-    def _render_hero_banner(self, width: int) -> None:
-        width = max(width, 420)
-        height = int(self.hero_canvas.cget("height"))
-        self.hero_canvas.delete("all")
-        self._create_rounded_rect(
-            self.hero_canvas,
-            8,
-            18,
-            width - 8,
-            height - 6,
-            radius=30,
-            fill="#d7e5ff",
-            outline="",
-        )
-        self._create_rounded_rect(
-            self.hero_canvas,
-            6,
-            14,
-            width - 6,
-            height - 10,
-            radius=30,
-            fill="#6ea6e8",
-            outline="#cfe0ff",
-            width=1,
-        )
-        self._create_rounded_rect(
-            self.hero_canvas,
-            12,
-            20,
-            width - 12,
-            height - 18,
-            radius=24,
-            fill="#79afea",
-            outline="",
-        )
-        self.hero_canvas.create_text(
-            HEADER_TEXT_INSET_X,
-            28,
-            anchor="nw",
-            text="PT-BDtool 小白启动器（Win / macOS / Linux MVP）",
-            fill="#ffffff",
-            font=("Arial", 16, "bold"),
-        )
-        self.hero_canvas.create_text(
-            HEADER_TEXT_INSET_X,
-            60,
-            anchor="nw",
-            width=max(width - HEADER_TEXT_INSET_X * 2, 180),
-            text="先填连接信息，再扫描候选；确认条目后再启动。保存目录、回传和自动清理都在下面分组展示。",
-            fill="#eaf2ff",
-            font=("Arial", 10),
-        )
-
-    def _on_hero_resize(self, event) -> None:
-        self._render_hero_banner(event.width)
+    def _scroll_settings_widget_into_view(self, widget: tk.Misc) -> None:
+        if not widget.winfo_exists() or not self.settings_canvas.winfo_viewable():
+            return
+        content_height = max(self.settings_shell.winfo_height(), 1)
+        viewport_height = self.settings_canvas.winfo_height()
+        if content_height <= viewport_height:
+            return
+        widget_top = widget.winfo_rooty() - self.settings_shell.winfo_rooty()
+        widget_bottom = widget_top + widget.winfo_height()
+        view_top = self.settings_canvas.canvasy(0)
+        view_bottom = view_top + viewport_height
+        if widget_top < view_top + 8:
+            self.settings_canvas.yview_moveto(max(0.0, (widget_top - 8) / content_height))
+        elif widget_bottom > view_bottom - 8:
+            target = (widget_bottom - viewport_height + 8) / content_height
+            self.settings_canvas.yview_moveto(min(1.0, max(0.0, target)))
 
     def _add_entry(self, parent, label_text: str, key: str, row: int, hint: str, show: str | None = None) -> None:
         ttk.Label(parent, text=label_text, style="Field.TLabel").grid(row=row, column=0, sticky=W, padx=(0, 10), pady=4)
@@ -1168,15 +1071,15 @@ class App:
         ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
 
     def _add_compact_entry(self, parent, label_text: str, key: str, row: int, column: int, hint: str, show: str | None = None) -> None:
-        field = ttk.Frame(parent, style="Soft.TFrame", padding=(12, 10, 12 if column == 0 else 12, 10))
-        field.grid(row=row, column=column, sticky="nsew", padx=(0, 10 if column == 0 else 0), pady=3)
+        field = ttk.Frame(parent, style="Soft.TFrame", padding=(10, 6, 10, 6))
+        field.grid(row=row, column=column, sticky="nsew", padx=(0, 10 if column == 0 else 0), pady=2)
         field.columnconfigure(0, weight=1)
         ttk.Label(field, text=label_text, style="Field.TLabel").grid(row=0, column=0, sticky=W)
         variable = tk.StringVar()
         self.config_vars[key] = variable
         variable.trace_add("write", lambda *_args: self.refresh_config_summary())
         entry = ttk.Entry(field, textvariable=variable, show=show or "", style="Cyber.TEntry")
-        entry.grid(row=1, column=0, sticky="ew", pady=(6, 4))
+        entry.grid(row=1, column=0, sticky="ew", pady=(3, 2))
         ttk.Label(
             field,
             text=hint,
@@ -1199,18 +1102,98 @@ class App:
         save_dir = self.config_vars.get("save_dir")
         host_value = host.get().strip() if isinstance(host, tk.StringVar) else ""
         save_value = save_dir.get().strip() if isinstance(save_dir, tk.StringVar) else ""
-        self.summary_host_var.set(f"VPS：{host_value or '未配置'}")
+        display_host = "未配置" if host_value.lower() in {"", "root@your-vps"} else host_value
+        self.summary_host_var.set(f"VPS：{display_host}")
         self.summary_save_var.set(f"保存目录：{save_value or default_save_dir()}")
 
     def toggle_form_panel(self, force: bool | None = None) -> None:
-        expanded = (not self.form_expanded.get()) if force is None else bool(force)
+        selected = self.main_notebook.select()
+        settings_selected = selected == str(self.settings_tab)
+        expanded = (not settings_selected) if force is None else bool(force)
         self.form_expanded.set(expanded)
         if expanded:
-            self.form_details.pack(fill=X, pady=(8, 0))
-            self.form_toggle_button.configure(text="▴ 设置")
+            self.main_notebook.select(self.settings_tab)
         else:
-            self.form_details.pack_forget()
-            self.form_toggle_button.configure(text="▾ 设置")
+            self.main_notebook.select(self.workbench_tab)
+
+    def _on_notebook_tab_changed(self, _event=None) -> None:
+        settings_selected = self.main_notebook.select() == str(self.settings_tab)
+        self.form_expanded.set(settings_selected)
+        if settings_selected:
+            self._set_workflow_phase(1)
+        else:
+            self._set_workflow_phase(workflow_phase_for_status(self.status_var.get()))
+
+    def _on_workspace_header_resize(self, _event=None) -> None:
+        available_width = min(self.candidate_head.winfo_width(), self.activity_head.winfo_width())
+        compact = available_width < 900
+        if compact == self._workspace_headers_compact:
+            return
+        self._workspace_headers_compact = compact
+        for hint in (self.candidate_hint, self.activity_hint):
+            if compact:
+                hint.pack_forget()
+            elif not hint.winfo_manager():
+                hint.pack(anchor=W, pady=(1, 0))
+
+    def _set_workflow_phase(self, phase: int) -> None:
+        phase = max(1, min(len(WORKFLOW_STEPS), phase))
+        for index, (cell, number, label) in enumerate(self.workflow_step_widgets, start=1):
+            if index == phase:
+                cell_bg = UI_COLORS["accent_pale"]
+                number_bg = UI_COLORS["accent"]
+                number_fg = "#ffffff"
+                label_fg = UI_COLORS["accent_hover"]
+            elif index < phase:
+                cell_bg = UI_COLORS["surface"]
+                number_bg = UI_COLORS["accent_soft"]
+                number_fg = UI_COLORS["accent_hover"]
+                label_fg = UI_COLORS["ink"]
+            else:
+                cell_bg = UI_COLORS["surface"]
+                number_bg = UI_COLORS["surface_alt"]
+                number_fg = UI_COLORS["muted"]
+                label_fg = UI_COLORS["muted"]
+            cell.configure(bg=cell_bg)
+            number.configure(bg=number_bg, fg=number_fg)
+            label.configure(bg=cell_bg, fg=label_fg)
+
+    def _on_status_change(self, *_args) -> None:
+        if not self.form_expanded.get():
+            phase = workflow_phase_for_status(self.status_var.get())
+            if phase == 1 and self.scan_items:
+                phase = 3
+            self._set_workflow_phase(phase)
+        self._sync_action_states()
+
+    @staticmethod
+    def _set_widget_enabled(widget: ttk.Widget, enabled: bool) -> None:
+        widget.state(["!disabled"] if enabled else ["disabled"])
+
+    def _sync_action_states(self) -> None:
+        if not hasattr(self, "scan_button"):
+            return
+        running = self.task_running()
+        self.scan_button.configure(style="Primary.TButton" if not self.scan_items else "Action.TButton")
+        self._set_widget_enabled(self.scan_button, not running)
+        self._set_widget_enabled(self.start_button, not running and bool(self.checked_scan_paths))
+        self._set_widget_enabled(self.stop_button, running)
+        self._set_widget_enabled(self.test_button, not running)
+        if hasattr(self, "settings_test_button"):
+            self._set_widget_enabled(self.settings_test_button, not running)
+        self._set_widget_enabled(self.retry_button, not running and bool(self.last_failed_paths))
+
+    def refresh_workspace_summary(self) -> None:
+        shown = len(self.visible_scan_items())
+        total = len(self.scan_items)
+        selected = len(self.checked_scan_paths)
+        visible_text = f"{shown} / {total} 个候选" if shown != total else f"{total} 个候选"
+        self.workspace_summary_var.set(f"{visible_text} · {selected} 个已选")
+        self._sync_action_states()
+
+    def save_and_show_workbench(self) -> None:
+        if self.save_form():
+            self.toggle_form_panel(force=False)
 
     def form_data(self) -> dict:
         return {
@@ -1228,8 +1211,9 @@ class App:
 
     def normalize_connection_fields(self) -> dict | None:
         data = self.form_data()
-        if not data["remote_host"]:
+        if not data["remote_host"] or data["remote_host"].strip().lower() == "root@your-vps":
             messagebox.showerror("缺少配置", "请先填写 VPS 地址。")
+            self.toggle_form_panel(force=True)
             return None
         try:
             normalized_host, normalized_port = normalize_remote_connection(
@@ -1303,6 +1287,32 @@ class App:
                 subprocess.Popen(["xdg-open", target])
         except Exception as exc:
             messagebox.showinfo("打开目录失败", f"{target}\n\n无法自动打开：{exc}")
+
+    def open_save_dir(self) -> None:
+        target = Path(self.form_data()["save_dir"]).expanduser()
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            messagebox.showerror("无法打开结果目录", str(exc))
+            return
+        self.open_in_file_manager(str(target))
+
+    def copy_log_view(self) -> None:
+        text = self.log_view.get("1.0", "end-1c")
+        if not text.strip():
+            self.status_var.set("当前没有可复制的日志。")
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update_idletasks()
+        self.status_var.set("日志已复制到剪贴板。")
+
+    def clear_log_view(self) -> None:
+        self.log_view.configure(state="normal")
+        self.log_view.delete("1.0", END)
+        self.log_view.insert(END, "日志显示已清空，磁盘日志仍然保留。\n")
+        self.log_view.configure(state="disabled")
+        self.status_var.set("已清空当前日志显示。")
 
     def task_running(self) -> bool:
         legacy_running = self.process is not None and self.process.poll() is None
@@ -1595,7 +1605,7 @@ class App:
 
         if backend_available():
             if not selected_paths:
-                messagebox.showinfo("先选条目", "请先在候选列表里选中一个或多个条目，再点“启动所选条目”。")
+                messagebox.showinfo("先选条目", "请先在候选列表里勾选一个或多个条目，再点“生成所选”。")
                 self.status_var.set("等待选择：先在候选列表里选中要处理的条目")
                 return
             self.start_remote_with_backend_batch(data, save_dir, selected_paths)
@@ -1818,6 +1828,15 @@ class App:
             f"bash -lc {shlex.quote(remote_script)}",
         ]
 
+    def apply_scan_results(self, items: list[dict], *, auto_start: bool = False) -> None:
+        self.scan_items = list(items)
+        self.checked_scan_paths = reconcile_checked_paths(self.scan_items, self.checked_scan_paths)
+        if self.has_active_scan_filter():
+            self.apply_scan_filters(auto_start=auto_start)
+            return
+        self.filtered_scan_items = []
+        self.refresh_scan_items(auto_start=auto_start)
+
     def scan_remote(self, auto_start: bool = False) -> None:
         if not self.save_form():
             return
@@ -1837,9 +1856,9 @@ class App:
                 try:
                     if data["remote_bootstrap"]:
                         self.log_queue.put("[gui] 空白 VPS 自举已开启：先尝试系统依赖自动安装，不够时才回退上传内置运行包")
-                    self.scan_items = backend.scan_items()
-                    self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
-                    self.root.after(0, lambda: self.refresh_scan_items(auto_start=auto_start))
+                    items = backend.scan_items()
+                    self.log_queue.put(f"[gui] scan-json 返回 {len(items)} 个候选")
+                    self.root.after(0, lambda items=items: self.apply_scan_results(items, auto_start=auto_start))
                 except TaskCancelledError:
                     self.log_queue.put("[gui] 扫描已取消")
                     self.root.after(0, lambda: self.status_var.set("扫描已取消"))
@@ -1881,9 +1900,9 @@ class App:
                             self.log_queue.put(line)
                     raise RuntimeError("scan-json 没有返回任何内容，通常是远端命令没有真正执行。")
                 payload = json.loads(result.stdout)
-                self.scan_items = payload.get("items", [])
-                self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
-                self.root.after(0, lambda: self.refresh_scan_items(auto_start=auto_start))
+                items = payload.get("items", [])
+                self.log_queue.put(f"[gui] scan-json 返回 {len(items)} 个候选")
+                self.root.after(0, lambda items=items: self.apply_scan_results(items, auto_start=auto_start))
             except TaskCancelledError:
                 self.log_queue.put("[gui] 扫描已取消")
                 self.root.after(0, lambda: self.status_var.set("扫描已取消"))
@@ -1906,13 +1925,25 @@ class App:
         self.filter_keyword_var.set("")
         self.apply_scan_filters()
 
+    def select_visible_scan_items(self) -> None:
+        self.checked_scan_paths.update(
+            str(item.get("path") or "").strip()
+            for item in self.visible_scan_items()
+            if str(item.get("path") or "").strip()
+        )
+        self.refresh_scan_items()
+
+    def clear_checked_scan_items(self) -> None:
+        self.checked_scan_paths.clear()
+        self.refresh_scan_items()
+
     def has_active_scan_filter(self) -> bool:
         return bool(self.filter_keyword_var.get().strip()) or self.filter_type_var.get().strip() != "全部类型"
 
     def visible_scan_items(self) -> list[dict]:
         return self.filtered_scan_items if self.has_active_scan_filter() else self.scan_items
 
-    def apply_scan_filters(self) -> None:
+    def apply_scan_filters(self, *, auto_start: bool = False) -> None:
         type_filter = self.filter_type_var.get().strip()
         keyword = self.filter_keyword_var.get().strip().lower()
         self.filtered_scan_items = []
@@ -1925,7 +1956,7 @@ class App:
             if keyword and keyword not in haystack:
                 continue
             self.filtered_scan_items.append(item)
-        self.refresh_scan_items()
+        self.refresh_scan_items(auto_start=auto_start)
 
     def refresh_scan_items(self, auto_start: bool = False) -> None:
         previous_paths = set(self.current_selected_paths())
@@ -1956,8 +1987,10 @@ class App:
             self.scan_tree.focus(first)
         else:
             self.selected_path_var.set("当前没有匹配的候选")
+            self.refresh_workspace_summary()
             return
         self.on_scan_select()
+        self.refresh_workspace_summary()
         if auto_start:
             self.auto_start_after_scan = False
             if len(self.scan_items) == 1:
@@ -1970,7 +2003,7 @@ class App:
             elif len(self.scan_items) == 0:
                 self.status_var.set("扫描完成：没有发现可处理候选")
             else:
-                self.status_var.set("扫描完成：已定位第一项，请先勾选要处理的条目，再点“启动所选条目”")
+                self.status_var.set("扫描完成：已定位第一项，请先勾选要处理的条目，再点“生成所选”")
 
     def on_scan_select(self, _event=None) -> None:
         checked_count = len(self.checked_scan_paths)
@@ -1984,6 +2017,7 @@ class App:
             self.selected_path_var.set(f"当前定位：{focus_path}，左侧打勾后才会批量启动")
         else:
             self.selected_path_var.set("当前未勾选条目")
+        self.refresh_workspace_summary()
 
     def current_selected_path(self) -> str:
         selection = self.scan_tree.selection()
@@ -1996,17 +2030,6 @@ class App:
 
     def current_selected_paths(self) -> list[str]:
         paths: list[str] = []
-        visible_checked: set[str] = set()
-        for item_id in self.scan_tree.get_children():
-            values = self.scan_tree.item(item_id, "values")
-            if values and len(values) >= 4:
-                path = str(values[3]).strip()
-                if path in self.checked_scan_paths:
-                    visible_checked.add(path)
-                if path and path in self.checked_scan_paths and path not in paths:
-                    paths.append(path)
-        if paths:
-            return paths
         for item in self.scan_items:
             path = str(item.get("path", "")).strip()
             if path and path in self.checked_scan_paths and path not in paths:
@@ -2149,6 +2172,17 @@ class App:
             return "break"
         return None
 
+    def on_scan_space(self, _event=None) -> str:
+        item_id = self.scan_tree.focus()
+        if item_id:
+            self.toggle_scan_item_checked(item_id)
+            self.scan_tree.selection_set(item_id)
+        return "break"
+
+    def on_scan_return(self, _event=None) -> str:
+        self.show_selected_scan_path_dialog()
+        return "break"
+
     def on_scan_right_click(self, event) -> None:
         item_id = self.scan_tree.identify_row(event.y)
         if not item_id or self.scan_context_menu is None:
@@ -2192,14 +2226,14 @@ class App:
             frame,
             wrap="word",
             height=4,
-            font=("Consolas", 10),
-            background="#f8fbff",
-            foreground="#23314d",
+            font=tkfont.nametofont("TkFixedFont"),
+            background=UI_COLORS["surface_soft"],
+            foreground=UI_COLORS["ink"],
             relief="flat",
             borderwidth=0,
             highlightthickness=1,
-            highlightbackground="#d7e1f3",
-            highlightcolor="#7da8ff",
+            highlightbackground=UI_COLORS["line"],
+            highlightcolor=UI_COLORS["accent"],
             padx=10,
             pady=8,
         )
@@ -2212,18 +2246,24 @@ class App:
         footer.columnconfigure(0, weight=1)
         copy_status = tk.StringVar(value="可复制后粘贴到终端、文件管理器或 SSH 命令中")
         ttk.Label(footer, textvariable=copy_status, style="PanelHint.TLabel").grid(row=0, column=0, sticky=W)
-        footer_btn_1 = tk.Frame(footer, bg="#ffffff")
-        footer_btn_1.grid(row=0, column=1, padx=(10, 0))
-        self._pack_round_button(footer_btn_1, "⧉ 复制", lambda: self.copy_full_path(path, copy_status), variant="action", width=7)
-        footer_btn_2 = tk.Frame(footer, bg="#ffffff")
-        footer_btn_2.grid(row=0, column=2, padx=(8, 0))
-        self._pack_round_button(footer_btn_2, "⌂ 目录", lambda: self.open_parent_dir_for_path(path, copy_status), variant="action", width=7)
-        footer_btn_3 = tk.Frame(footer, bg="#ffffff")
-        footer_btn_3.grid(row=0, column=3, padx=(8, 0))
-        self._pack_round_button(footer_btn_3, "× 关闭", dialog.destroy, variant="action", width=7)
+        ttk.Button(
+            footer,
+            text="复制路径",
+            command=lambda: self.copy_full_path(path, copy_status),
+            style="Action.TButton",
+        ).grid(row=0, column=1, padx=(10, 0))
+        ttk.Button(
+            footer,
+            text="打开目录",
+            command=lambda: self.open_parent_dir_for_path(path, copy_status),
+            style="Action.TButton",
+        ).grid(row=0, column=2, padx=(8, 0))
+        close_button = ttk.Button(footer, text="关闭", command=dialog.destroy, style="Action.TButton")
+        close_button.grid(row=0, column=3, padx=(8, 0))
 
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
         dialog.grab_set()
-        dialog.focus_set()
+        close_button.focus_set()
 
     def _start_reader(self, proc: subprocess.Popen[str]) -> None:
         def read_stream() -> None:
@@ -2260,35 +2300,51 @@ class App:
         self.status_var.set("当前没有运行中的任务。")
 
     def append_log(self, text: str) -> None:
-        append_gui_log_line(text)
+        self.append_log_lines((text,))
+
+    def append_log_lines(self, lines) -> None:
+        normalized = [str(line).rstrip("\r\n") for line in lines]
+        if not normalized:
+            return
+        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with LOG_PATH.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(normalized) + "\n")
         self.log_view.configure(state="normal")
-        self.log_view.insert(END, text + "\n")
+        self.log_view.insert(END, "\n".join(normalized) + "\n")
+        line_count = int(self.log_view.index("end-1c").split(".", 1)[0])
+        if line_count > 4000:
+            self.log_view.delete("1.0", f"{line_count - 4000}.0")
         self.log_view.see(END)
         self.log_view.configure(state="disabled")
 
     def _poll_logs(self) -> None:
-        try:
-            while True:
+        pending: list[str] = []
+        for _ in range(250):
+            try:
                 line = self.log_queue.get_nowait()
-                self.append_log(line)
-                if line.startswith("[gui] 任务结束"):
-                    if "退出码：0" in line:
-                        self.status_var.set("任务成功结束。可打开本机保存目录查看结果包。")
-                    elif "退出码：2" in line:
-                        self.status_var.set("任务部分成功。可点“重试失败”继续处理失败项。")
-                    elif "退出码：130" in line:
-                        self.status_var.set("任务已取消。")
-                    else:
-                        self.status_var.set("任务失败。请查看日志，或先点“测连”检查依赖。")
-                elif line.startswith("[gui] 成功：结果已保存到") or line.startswith("[gui] 成功结果目录："):
-                    self.status_var.set(line.replace("[gui] ", "", 1))
-                elif line.startswith("[gui] 批量完成："):
-                    self.status_var.set(line.replace("[gui] ", "", 1))
-                elif line.startswith("[gui] 测连结果："):
-                    self.status_var.set(line.replace("[gui] ", "", 1))
-        except queue.Empty:
-            pass
-        self.root.after(150, self._poll_logs)
+            except queue.Empty:
+                break
+            pending.append(line)
+        if pending:
+            self.append_log_lines(pending)
+        for line in pending:
+            if line.startswith("[gui] 任务结束"):
+                if "退出码：0" in line:
+                    self.status_var.set("任务成功结束。可打开本机保存目录查看结果包。")
+                elif "退出码：2" in line:
+                    self.status_var.set("任务部分成功。可点“重试失败”继续处理失败项。")
+                elif "退出码：130" in line:
+                    self.status_var.set("任务已取消。")
+                else:
+                    self.status_var.set("任务失败。请查看日志，或先点“测试连接”检查依赖。")
+            elif line.startswith("[gui] 成功：结果已保存到") or line.startswith("[gui] 成功结果目录："):
+                self.status_var.set(line.replace("[gui] ", "", 1))
+            elif line.startswith("[gui] 批量完成："):
+                self.status_var.set(line.replace("[gui] ", "", 1))
+            elif line.startswith("[gui] 测连结果："):
+                self.status_var.set(line.replace("[gui] ", "", 1))
+        self._sync_action_states()
+        self.root.after(25 if not self.log_queue.empty() else 150, self._poll_logs)
 
     def on_close(self) -> None:
         if self.task_running():
@@ -2299,10 +2355,70 @@ class App:
         self.root.destroy()
 
 
+def run_ui_smoke_check() -> int:
+    root = tk.Tk()
+    configure_gradient_theme(root)
+    app = App(root)
+    app.toggle_form_panel(force=False)
+    widgets = {
+        "candidates": app.scan_tree,
+        "log": app.log_view,
+        "scan_button": app.scan_button,
+        "start_button": app.start_button,
+    }
+    failures: list[str] = []
+
+    def check_workbench(label: str) -> None:
+        root.update_idletasks()
+        root.update()
+        root_bottom = root.winfo_rooty() + root.winfo_height()
+        for name, widget in widgets.items():
+            if not widget.winfo_viewable():
+                failures.append(f"{label}: {name} is not visible")
+                continue
+            widget_bottom = widget.winfo_rooty() + widget.winfo_height()
+            if widget_bottom > root_bottom + 1:
+                failures.append(f"{label}: {name} extends below the window")
+        if app.scan_tree.winfo_height() < 70:
+            failures.append(f"{label}: candidates pane is too short")
+        if app.log_view.winfo_height() < 60:
+            failures.append(f"{label}: log pane is too short")
+
+    check_workbench("default")
+    default_geometry = f"{root.winfo_width()}x{root.winfo_height()}"
+    root.geometry("820x700")
+    check_workbench("minimum")
+    minimum_geometry = f"{root.winfo_width()}x{root.winfo_height()}"
+    if app.candidate_hint.winfo_ismapped() or app.activity_hint.winfo_ismapped():
+        failures.append("minimum: workspace helper text was not collapsed")
+    app.toggle_form_panel(force=True)
+    root.update_idletasks()
+    root.update()
+    app._scroll_settings_widget_into_view(app.settings_save_button)
+    root.update_idletasks()
+    settings_bottom = app.settings_canvas.winfo_rooty() + app.settings_canvas.winfo_height()
+    save_bottom = app.settings_save_button.winfo_rooty() + app.settings_save_button.winfo_height()
+    if not app.settings_canvas.winfo_viewable() or save_bottom > settings_bottom + 1:
+        failures.append("minimum: settings actions are not reachable by scrolling")
+    if not isinstance(app.scan_button, ttk.Button) or not isinstance(app.start_button, ttk.Button):
+        failures.append("primary actions are not native ttk buttons")
+    root.destroy()
+    if failures:
+        print(f"ui_layout=FAIL default={default_geometry} minimum={minimum_geometry}: {'; '.join(failures)}")
+        return 1
+    print(
+        f"ui_layout=PASS default={default_geometry} minimum={minimum_geometry} "
+        "panes=candidates,log settings=scrollable controls=ttk"
+    )
+    return 0
+
+
 def cli_main() -> int:
     if "--print-config-path" in sys.argv:
         print(CONFIG_PATH)
         return 0
+    if "--ui-smoke-check" in sys.argv:
+        return run_ui_smoke_check()
     if "--self-check" in sys.argv:
         bash_bin = find_bash() or "<missing>"
         ssh_bin = shutil.which("ssh") or "<missing>"

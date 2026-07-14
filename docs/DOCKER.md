@@ -125,16 +125,16 @@ ssh -L 8899:127.0.0.1:8899 user@VPS-IP
 http://127.0.0.1:8899/
 ```
 
-首次启动会在 `/config/config.json` 创建 local 模式配置，文件权限为 `0600`。在 Web 界面中保持“本机模式”，扫描根目录使用 `/media`，保存目录使用 `/output`。
+首次启动会在 `/config/config.json` 创建 local 模式配置，文件权限为 `0600`。在 Web 界面中保持“本机服务器”，媒体根目录使用 `/media`，结果保存目录使用 `/output`。local 模式会自动隐藏 VPS、SSH 和远端自举字段。
 
 ## 5. 使用流程
 
 1. 打开 Web 页面。
-2. 确认运行模式为“本机”。
-3. 确认本机扫描根目录为 `/media`。
-4. 点击扫描。
+2. 确认处理位置为“本机服务器”。
+3. 确认媒体根目录为 `/media`。
+4. 点击“扫描本机资源”。
 5. 选择视频、音频、`BDMV` 或 `ISO`。
-6. 启动处理并等待任务完成。
+6. 点击“生成发布材料”并等待任务完成；刷新页面会继续显示当前任务。
 7. 在宿主机 `PTBD_OUTPUT_DIR` 中读取结果。
 
 Docker local 模式不需要填写 VPS SSH 地址、端口或密码。浏览器只提交任务，媒体始终留在 VPS 文件系统上。
@@ -181,7 +181,7 @@ docker compose up -d --force-recreate
 location / {
     proxy_pass http://127.0.0.1:8899;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
@@ -202,7 +202,7 @@ Nginx 保留该路径转发：
 location /ptbd/ {
     proxy_pass http://127.0.0.1:8899;
     proxy_http_version 1.1;
-    proxy_set_header Host $host;
+    proxy_set_header Host $http_host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
 }
@@ -318,7 +318,7 @@ docker compose up -d --force-recreate
 
 ### 配置意外切到 remote 模式
 
-在 Web 界面改回 local 模式，扫描根目录填 `/media`，保存目录填 `/output`。如果配置已损坏，可先停止容器、备份并移走 `PTBD_CONFIG_DIR/config.json`，再启动容器生成新的默认 local 配置。
+在 Web 界面把处理位置改回“本机服务器”，媒体根目录填 `/media`，结果保存目录填 `/output`。如果配置已损坏，可先停止容器、备份并移走 `PTBD_CONFIG_DIR/config.json`，再启动容器生成新的默认 local 配置。
 
 ## 11. 完整卸载
 

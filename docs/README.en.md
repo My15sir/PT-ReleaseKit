@@ -140,9 +140,11 @@ New processing behavior should be implemented in `ptbd_core/`; Shell remains for
 
 ## Desktop Workflow
 
+The desktop app now separates the primary workbench from connection settings. The workbench keeps the four workflow stages, candidates, task controls, and live log visible in the default window; first launch opens the connection tab so placeholder credentials are not treated as a valid setup.
+
 The remote scan defaults to `/home /root /data /mnt /media /srv`. Use an explicit scan whitelist to restrict the roots; it takes precedence over full scan. Enable full scan only when media is outside the preferred roots. Separate multiple roots with spaces or commas. Double-quote an individual path containing spaces, commas, or apostrophes, for example `"/data/PT Movies" "/mnt/O'Brien, Archive"`.
 
-The normal workflow is save configuration, run connection diagnostics, scan, select one or more entries, and process them. Batch processing continues after an individual failure, reports separate success and failure totals, and lets the GUI retry the failed entries.
+The normal workflow is **Save connection**, **Test connection**, **Scan VPS**, select one or more entries, then **Generate selected**. Batch processing continues after an individual failure, reports separate success and failure totals, lets the GUI retry failed entries, and exposes an **Open output folder** action.
 
 ## Web Modes
 
@@ -157,7 +159,7 @@ The controller supports:
 - `remote`: the desktop/controller machine operates a VPS over SSH
 - `local`: the process scans a directory on its own host; Docker uses this mode with `/media` as its root
 
-The Web API supports connection diagnostics and batch results. Process jobs expose `failed` and `result_summary`, and finish as `success`, `partial`, `error`, or `cancelled`.
+The Web API supports connection diagnostics and batch results. Process jobs expose `failed` and `result_summary`, and finish as `success`, `partial`, `error`, or `cancelled`. Reloading the page restores the active task and its log. Local mode hides SSH-only fields and labels the mounted media and host output paths explicitly.
 
 Run local mode directly on Linux:
 

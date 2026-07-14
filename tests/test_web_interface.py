@@ -64,6 +64,7 @@ class WebInterfaceTests(unittest.TestCase):
     def test_status_and_config_interface(self) -> None:
         status_payload = self.request_json("/api/status")
         self.assertTrue(status_payload["ok"])
+        self.assertIsNone(status_payload["active_task"])
 
         saved = self.request_json(
             "/api/config",
@@ -84,6 +85,49 @@ class WebInterfaceTests(unittest.TestCase):
         self.assertTrue(loaded["config"]["password_saved"])
         mode = stat.S_IMODE(self.web.CONFIG_PATH.stat().st_mode)
         self.assertEqual(mode, 0o600)
+
+    def test_status_exposes_active_task_for_page_refresh_recovery(self) -> None:
+        task, active = self.web.TASK_REGISTRY.reserve("process")
+        self.assertIsNone(active)
+        self.assertIsNotNone(task)
+        task.start()
+
+        status_payload = self.request_json("/api/status")
+
+        self.assertEqual(status_payload["active_task"]["id"], task.id)
+        self.assertEqual(status_payload["active_task"]["status"], "running")
+        task.finish("success", "complete")
+        self.assertIsNone(self.request_json("/api/status")["active_task"])
+
+    def test_write_endpoints_reject_non_json_and_foreign_origins(self) -> None:
+        cases = (
+            ({"Content-Type": "text/plain"}, 415),
+            (
+                {
+                    "Content-Type": "application/json",
+                    "Origin": "https://untrusted.invalid",
+                },
+                403,
+            ),
+            (
+                {
+                    "Content-Type": "application/json",
+                    "Sec-Fetch-Site": "cross-site",
+                },
+                403,
+            ),
+        )
+        for headers, expected_status in cases:
+            with self.subTest(headers=headers):
+                request = urllib.request.Request(
+                    self.base_url + "/api/config",
+                    data=b"{}",
+                    headers=headers,
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as caught:
+                    urllib.request.urlopen(request, timeout=5)
+                self.assertEqual(caught.exception.code, expected_status)
 
     def test_scan_full_config_round_trip(self) -> None:
         saved = self.request_json(

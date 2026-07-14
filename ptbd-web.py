@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import signal
 import shlex
 import shutil
@@ -42,6 +43,7 @@ from ptbd_remote_backend import (
 APP_NAME = "PT-BDtool Web"
 CONFIG_PATH = Path(os.environ.get("PTBD_WEB_CONFIG", Path.home() / ".config/ptbd-web/config.json"))
 DEFAULT_PORT = 8899
+SAFE_BASE_PATH = re.compile(r"^/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*$")
 
 
 def resolve_script_path(path: str) -> Path:
@@ -820,22 +822,22 @@ INDEX_HTML = r"""<!doctype html>
   <style>
     :root {
       color-scheme: light;
-      --bg: oklch(0.985 0.004 230);
+      --bg: oklch(0.975 0.006 205);
       --surface: oklch(1 0 0);
-      --surface-strong: oklch(0.955 0.008 230);
-      --surface-soft: oklch(0.973 0.006 230);
-      --ink: oklch(0.19 0.018 235);
-      --muted: oklch(0.45 0.023 235);
-      --faint: oklch(0.62 0.018 235);
-      --primary: oklch(0.44 0.105 246);
-      --primary-strong: oklch(0.34 0.11 246);
+      --surface-strong: oklch(0.945 0.01 205);
+      --surface-soft: oklch(0.968 0.008 205);
+      --ink: oklch(0.20 0.025 205);
+      --muted: oklch(0.43 0.025 205);
+      --faint: oklch(0.49 0.022 205);
+      --primary: oklch(0.46 0.09 175);
+      --primary-strong: oklch(0.34 0.08 175);
       --accent: oklch(0.56 0.12 154);
       --danger: oklch(0.52 0.15 28);
       --warning: oklch(0.68 0.13 76);
       --success: oklch(0.50 0.11 150);
-      --line: oklch(0.88 0.012 235);
-      --line-strong: oklch(0.78 0.018 235);
-      --shadow: 0 1px 3px oklch(0.19 0.018 235 / 0.11);
+      --line: oklch(0.87 0.014 205);
+      --line-strong: oklch(0.76 0.022 205);
+      --shadow: 0 1px 3px oklch(0.20 0.025 205 / 0.11);
       --radius: 12px;
       --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
       --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
@@ -872,8 +874,27 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
       gap: 18px;
-      align-items: start;
+      align-items: center;
       margin-bottom: 16px;
+    }
+
+    .brand-lockup {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+    }
+
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      flex: 0 0 auto;
+      border-radius: 10px;
+      background: var(--ink);
+      color: white;
+      font-weight: 850;
+      letter-spacing: -0.03em;
     }
 
     h1 {
@@ -891,13 +912,36 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .status-strip {
-      min-width: 300px;
-      padding: 11px 13px;
+      position: relative;
+      min-width: 320px;
+      padding: 11px 13px 11px 39px;
       background: var(--surface);
       color: var(--ink);
       border: 1px solid var(--line);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
+    }
+
+    .status-strip::before {
+      content: "";
+      position: absolute;
+      left: 15px;
+      top: 17px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 0 4px oklch(0.92 0.035 154);
+    }
+
+    .status-strip[data-tone="busy"]::before {
+      background: var(--warning);
+      box-shadow: 0 0 0 4px oklch(0.94 0.04 76);
+    }
+
+    .status-strip[data-tone="error"]::before {
+      background: var(--danger);
+      box-shadow: 0 0 0 4px oklch(0.94 0.035 28);
     }
 
     .status-strip strong {
@@ -912,29 +956,75 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 0.82rem;
     }
 
-    .flow {
+    .progress-rail {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
+      padding: 7px;
       margin-bottom: 16px;
-    }
-
-    .step {
-      display: grid;
-      gap: 3px;
-      padding: 10px 12px;
+      overflow-x: auto;
       background: var(--surface);
       border: 1px solid var(--line);
       border-radius: var(--radius);
     }
 
-    .step strong {
-      font-size: 0.86rem;
+    .progress-step {
+      min-width: 150px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 8px 10px;
+      color: var(--muted);
+      border-radius: 9px;
     }
 
-    .step span {
+    .progress-step + .progress-step {
+      border-left: 1px solid var(--line);
+    }
+
+    .step-index {
+      display: grid;
+      place-items: center;
+      width: 25px;
+      height: 25px;
+      flex: 0 0 auto;
+      border-radius: 7px;
+      background: var(--surface-strong);
       color: var(--muted);
       font-size: 0.78rem;
+      font-weight: 850;
+    }
+
+    .progress-copy {
+      display: grid;
+      gap: 1px;
+    }
+
+    .progress-copy strong {
+      font-size: 0.86rem;
+      color: inherit;
+    }
+
+    .progress-copy span {
+      font-size: 0.78rem;
+    }
+
+    .progress-step.is-done {
+      color: var(--ink);
+    }
+
+    .progress-step.is-done .step-index {
+      background: oklch(0.91 0.045 175);
+      color: var(--primary-strong);
+    }
+
+    .progress-step.is-active {
+      color: var(--primary-strong);
+      background: oklch(0.96 0.02 175);
+    }
+
+    .progress-step.is-active .step-index {
+      background: var(--primary);
+      color: white;
     }
 
     .workbench {
@@ -980,14 +1070,6 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 0.88rem;
     }
 
-    .section-kicker {
-      display: block;
-      margin-bottom: 4px;
-      color: var(--primary-strong);
-      font-size: 0.76rem;
-      font-weight: 800;
-    }
-
     .panel-body {
       padding: 15px 16px 16px;
     }
@@ -999,7 +1081,7 @@ INDEX_HTML = r"""<!doctype html>
 
     .quick-config {
       display: grid;
-      grid-template-columns: 150px minmax(0, 1fr);
+      grid-template-columns: 150px repeat(2, minmax(0, 1fr));
       gap: 10px;
       align-items: end;
     }
@@ -1044,6 +1126,12 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--ink);
       outline: none;
       transition: border-color 160ms ease, box-shadow 160ms ease;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: var(--muted);
+      opacity: 1;
     }
 
     textarea {
@@ -1103,7 +1191,17 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .button:hover {
-      background: oklch(0.93 0.012 235);
+      background: oklch(0.93 0.012 205);
+    }
+
+    .button:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
+    .button:focus-visible,
+    .material-card:focus-visible {
+      outline: 3px solid oklch(0.72 0.09 175 / 0.45);
+      outline-offset: 2px;
     }
 
     .button:disabled {
@@ -1273,8 +1371,12 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     .candidate-materials {
-      color: var(--faint);
+      color: var(--muted);
       font-size: 0.82rem;
+    }
+
+    [hidden] {
+      display: none !important;
     }
 
     .empty {
@@ -1369,7 +1471,6 @@ INDEX_HTML = r"""<!doctype html>
 
       .topbar,
       .workbench,
-      .flow,
       .quick-config,
       .filters,
       .list-tools {
@@ -1383,6 +1484,10 @@ INDEX_HTML = r"""<!doctype html>
 
       .status-strip {
         min-width: 0;
+      }
+
+      .progress-rail {
+        grid-template-columns: repeat(4, minmax(150px, 1fr));
       }
 
       .candidate {
@@ -1406,35 +1511,37 @@ INDEX_HTML = r"""<!doctype html>
 <body>
   <main class="shell">
     <section class="topbar">
-      <div>
-        <h1>PT-BDtool 发种材料工作台</h1>
-        <p class="lede">按资源目录生成 PT 发布需要的 MediaInfo、BDInfo、截图和音乐频谱图。主流程只处理资源，连接和扫描细节放在高级配置。</p>
+      <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">PT</span>
+        <div>
+          <h1>PT-BDtool 材料工作台</h1>
+          <p class="lede">扫描媒体目录，生成 MediaInfo、BDInfo、截图和音乐频谱图，并把结果写入指定目录。</p>
+        </div>
       </div>
-      <div class="status-strip">
+      <div class="status-strip" id="runtimeStatus" role="status" aria-live="polite" data-tone="ready">
         <strong id="runtimeMode">读取运行状态中</strong>
         <span id="runtimeDetail">等待本地服务响应</span>
       </div>
     </section>
 
-    <section class="flow" aria-label="发种材料生成流程">
-      <div class="step"><strong>1. 连接位置</strong><span>本机或 VPS，只在高级配置里改一次</span></div>
-      <div class="step"><strong>2. 扫描资源</strong><span>列出视频、音乐目录、原盘和 ISO</span></div>
-      <div class="step"><strong>3. 选择方案</strong><span>按资源类型决定要生成哪些材料</span></div>
-      <div class="step"><strong>4. 生成下载</strong><span>日志和结果包固定显示</span></div>
-    </section>
+    <nav class="progress-rail" id="workflowProgress" aria-label="材料生成流程">
+      <div class="progress-step" data-phase="1"><span class="step-index">1</span><span class="progress-copy"><strong>配置位置</strong><span>本机或远端 VPS</span></span></div>
+      <div class="progress-step" data-phase="2"><span class="step-index">2</span><span class="progress-copy"><strong>扫描资源</strong><span>查找媒体候选</span></span></div>
+      <div class="progress-step" data-phase="3"><span class="step-index">3</span><span class="progress-copy"><strong>选择材料</strong><span>确认资源与方案</span></span></div>
+      <div class="progress-step" data-phase="4"><span class="step-index">4</span><span class="progress-copy"><strong>生成结果</strong><span>查看日志与路径</span></span></div>
+    </nav>
 
     <form id="configForm" class="main-stack">
       <section class="panel">
         <div class="panel-head">
           <div class="toolbar">
             <div>
-              <span class="section-kicker">连接与路径</span>
               <h2>工作区</h2>
-              <p>先确认处理位置，再扫描资源。常用路径直接显示，SSH 和排除目录放到高级配置。</p>
+              <p id="workspaceHelp">确认媒体所在位置，再开始扫描；当前模式无关的字段会自动隐藏。</p>
             </div>
             <div class="actions" style="margin-top: 0">
               <button class="button secondary" type="submit">保存设置</button>
-              <button class="button secondary" type="button" id="diagnoseBtn">测试连接</button>
+              <button class="button secondary" type="button" id="diagnoseBtn" data-mode-only="remote" hidden>测试连接</button>
               <button class="button primary" type="button" id="scanBtn">扫描资源</button>
             </div>
           </div>
@@ -1447,18 +1554,21 @@ INDEX_HTML = r"""<!doctype html>
                 <option value="remote">远端 VPS</option>
               </select>
             </label>
-            <label>资源根目录
+            <label data-mode-only="local"><span id="rootLabel">媒体根目录</span>
               <input name="local_root" type="text" placeholder="/data/downloads">
+            </label>
+            <label><span id="scanIncludeLabel">额外扫描目录</span>
+              <input name="scan_include" type="text" placeholder="可留空，多个目录用空格分隔">
             </label>
           </div>
           <input name="audio_spectrum_mode" type="hidden" value="single">
           <details class="advanced-config">
             <summary>高级配置</summary>
             <div class="advanced-grid">
-              <label>VPS 地址
+              <label data-mode-only="remote">VPS 地址
                 <input name="remote_host" type="text" autocomplete="off" placeholder="root@1.2.3.4">
               </label>
-              <div class="row">
+              <div class="row" data-mode-only="remote">
                 <label>SSH 端口
                   <input name="remote_port" type="number" min="1" max="65535">
                 </label>
@@ -1466,23 +1576,20 @@ INDEX_HTML = r"""<!doctype html>
                   <input name="remote_cmd" type="text" placeholder="pt">
                 </label>
               </div>
-              <label>SSH 密码
+              <label data-mode-only="remote">SSH 密码
                 <input name="remote_password" type="password" autocomplete="new-password" placeholder="留空保留已保存密码">
               </label>
               <label>结果保存目录
                 <input name="save_dir" type="text">
               </label>
-              <label>额外扫描目录
-                <textarea name="scan_include" placeholder="可留空。默认优先扫描 /home /root /data /mnt /media /srv"></textarea>
-              </label>
               <label>额外排除目录
                 <textarea name="scan_exclude" placeholder="/mnt/cache /data/tmp，可留空"></textarea>
               </label>
               <div class="checks">
-                <label class="check"><input name="remote_bootstrap" type="checkbox"> 空白 VPS 自动自举</label>
-                <label class="check"><input name="auto_cleanup" type="checkbox"> 成功后清理远端临时结果</label>
+                <label class="check" data-mode-only="remote"><input name="remote_bootstrap" type="checkbox"> 空白 VPS 自动准备运行环境</label>
+                <label class="check"><input name="auto_cleanup" type="checkbox"> 任务结束后清理临时工作目录</label>
                 <label class="check"><input name="scan_full" type="checkbox"> 启用全盘扫描（高级）</label>
-                <label class="check"><input name="clear_password" type="checkbox"> 清空已保存密码</label>
+                <label class="check" data-mode-only="remote"><input name="clear_password" type="checkbox"> 清空已保存密码</label>
               </div>
             </div>
           </details>
@@ -1495,23 +1602,22 @@ INDEX_HTML = r"""<!doctype html>
             <div class="panel-head">
               <div class="toolbar">
                 <div>
-                  <span class="section-kicker">资源池</span>
                   <h2>选择资源</h2>
                   <p id="candidateSummary">点击“扫描资源”后，从这里选择要发种的资源。音乐目录会作为文件夹资源显示。</p>
                 </div>
                 <div class="filters">
-                  <select id="typeFilter">
-                    <option value="">全部资源（音乐按目录合并）</option>
+                  <select id="typeFilter" aria-label="按资源类型筛选">
+                    <option value="">全部资源</option>
                     <option value="VIDEO">视频</option>
                     <option value="AUDIO_DIR">音乐目录</option>
                     <option value="AUDIO">单曲音频（高级）</option>
                     <option value="BDMV">原盘</option>
                     <option value="ISO">ISO</option>
                   </select>
-                  <select id="directoryFilter">
+                  <select id="directoryFilter" aria-label="按目录筛选">
                     <option value="">全部目录</option>
                   </select>
-                  <input id="keywordFilter" type="text" placeholder="按路径或名称过滤">
+                  <input id="keywordFilter" type="text" aria-label="按路径或名称过滤" placeholder="按路径或名称过滤">
                 </div>
               </div>
             </div>
@@ -1546,21 +1652,20 @@ INDEX_HTML = r"""<!doctype html>
         <aside class="side-stack">
           <div class="panel">
             <div class="panel-head">
-              <span class="section-kicker">材料方案</span>
               <h2>发布材料方案</h2>
               <p>默认用自动推荐。音乐目录可以一键切换整包总频谱或单曲频谱。</p>
             </div>
             <div class="panel-body">
               <div class="material-options" role="group" aria-label="发布材料方案">
-                <button class="material-card active" type="button" data-plan="auto" data-spectrum="auto">
+                <button class="material-card active" type="button" data-plan="auto" data-spectrum="auto" aria-pressed="true">
                   <strong>自动推荐</strong>
                   <span>视频生成 MediaInfo 和截图；原盘生成 BDInfo；音乐目录默认整包总频谱。</span>
                 </button>
-                <button class="material-card" type="button" data-plan="music-combined" data-spectrum="combined">
+                <button class="material-card" type="button" data-plan="music-combined" data-spectrum="combined" aria-pressed="false">
                   <strong>音乐整包总频谱</strong>
                   <span>适合专辑或合集，输出一个总频谱图和多段 MediaInfo。</span>
                 </button>
-                <button class="material-card" type="button" data-plan="music-single" data-spectrum="single">
+                <button class="material-card" type="button" data-plan="music-single" data-spectrum="single" aria-pressed="false">
                   <strong>音乐单曲频谱</strong>
                   <span>每首歌单独生成频谱图，保留旧逻辑。</span>
                 </button>
@@ -1570,18 +1675,18 @@ INDEX_HTML = r"""<!doctype html>
 
           <div class="panel">
             <div class="panel-head">
-              <span class="section-kicker">执行</span>
               <h2>生成确认</h2>
               <p>开始前确认将处理什么资源，以及会生成什么材料。</p>
             </div>
             <div class="panel-body">
-              <div id="runSummary" class="run-summary">
+              <div id="runSummary" class="run-summary" role="status" aria-live="polite">
                 <strong>还没有选择资源。</strong>
                 <span>先扫描并选择一个资源，系统会给出材料预览。</span>
               </div>
               <div class="actions">
-                <button class="button primary" type="button" id="processBtn">生成发布材料</button>
-                <button class="button danger" type="button" id="cancelBtn">停止任务</button>
+                <button class="button primary" type="button" id="processBtn" disabled>生成发布材料</button>
+                <button class="button secondary" type="button" id="retryFailedBtn" hidden disabled>重试失败项</button>
+                <button class="button danger" type="button" id="cancelBtn" disabled>停止任务</button>
               </div>
             </div>
           </div>
@@ -1590,9 +1695,8 @@ INDEX_HTML = r"""<!doctype html>
             <div class="panel-head">
               <div class="toolbar">
                 <div>
-                  <span class="section-kicker">运行状态</span>
                   <h2>任务日志</h2>
-                  <p id="taskState">当前没有任务。</p>
+                  <p id="taskState" role="status" aria-live="polite">当前没有任务。</p>
                 </div>
                 <div class="actions" style="margin-top: 0">
                   <button class="button secondary" type="button" id="copyLogBtn">复制日志</button>
@@ -1601,8 +1705,8 @@ INDEX_HTML = r"""<!doctype html>
               </div>
             </div>
             <div class="panel-body">
-              <pre id="logBox" class="logbox">等待任务。</pre>
-              <div id="outputs" class="outputs"></div>
+              <pre id="logBox" class="logbox" tabindex="0" aria-label="任务日志">等待任务。</pre>
+              <div id="outputs" class="outputs" aria-live="polite"></div>
             </div>
           </div>
         </aside>
@@ -1616,8 +1720,10 @@ INDEX_HTML = r"""<!doctype html>
     const candidateList = document.querySelector("#candidateList");
     const candidateSummary = document.querySelector("#candidateSummary");
     const taskState = document.querySelector("#taskState");
+    const runtimeStatus = document.querySelector("#runtimeStatus");
     const runtimeMode = document.querySelector("#runtimeMode");
     const runtimeDetail = document.querySelector("#runtimeDetail");
+    const workflowSteps = Array.from(document.querySelectorAll(".progress-step"));
     const outputsEl = document.querySelector("#outputs");
     const runSummary = document.querySelector("#runSummary");
     const materialCards = Array.from(document.querySelectorAll(".material-card"));
@@ -1627,6 +1733,14 @@ INDEX_HTML = r"""<!doctype html>
     const selectedOnlyToggle = document.querySelector("#selectedOnlyToggle");
     const prevPageBtn = document.querySelector("#prevPageBtn");
     const nextPageBtn = document.querySelector("#nextPageBtn");
+    const scanBtn = document.querySelector("#scanBtn");
+    const diagnoseBtn = document.querySelector("#diagnoseBtn");
+    const processBtn = document.querySelector("#processBtn");
+    const cancelBtn = document.querySelector("#cancelBtn");
+    const retryFailedBtn = document.querySelector("#retryFailedBtn");
+    const saveSettingsBtn = form.querySelector('button[type="submit"]');
+    const workspaceHelp = document.querySelector("#workspaceHelp");
+    const scanIncludeLabel = document.querySelector("#scanIncludeLabel");
 
     let candidates = [];
     let rawCandidateCount = 0;
@@ -1638,6 +1752,15 @@ INDEX_HTML = r"""<!doctype html>
     let showSelectedOnly = false;
     let activeTaskId = null;
     let pollTimer = null;
+    let pollGeneration = 0;
+    let pollFailures = 0;
+    let uiBusy = false;
+    let taskRunning = false;
+    let lastFailedPaths = [];
+    let backendStatusText = "";
+    let backendAvailable = false;
+    let scanFingerprint = null;
+    let pendingScanFingerprint = null;
     const PTBD_BASE_PATH = __PTBD_BASE_PATH_JSON__;
 
     function apiUrl(path) {
@@ -1647,19 +1770,51 @@ INDEX_HTML = r"""<!doctype html>
 
     function formData() {
       const data = Object.fromEntries(new FormData(form).entries());
-      if (
-        loadedConfig.local_root !== undefined &&
-        data.local_root !== loadedConfig.local_root &&
-        data.scan_include === (loadedConfig.scan_include || "")
-      ) {
-        data.scan_include = "";
-        form.scan_include.value = "";
-      }
       data.remote_bootstrap = form.remote_bootstrap.checked;
       data.auto_cleanup = form.auto_cleanup.checked;
       data.scan_full = form.scan_full ? form.scan_full.checked : false;
       data.clear_password = form.clear_password.checked;
       return data;
+    }
+
+    function scanSourceFingerprint(config = formData()) {
+      const mode = String(config.mode || "remote") === "local" ? "local" : "remote";
+      const source = mode === "local"
+        ? {
+            mode,
+            local_root: String(config.local_root || "").trim(),
+            scan_include: String(config.scan_include || "").trim(),
+            scan_exclude: String(config.scan_exclude || "").trim(),
+            scan_full: Boolean(config.scan_full),
+          }
+        : {
+            mode,
+            remote_host: String(config.remote_host || "").trim(),
+            remote_port: String(config.remote_port || "22").trim(),
+            remote_cmd: String(config.remote_cmd || "pt").trim(),
+            scan_include: String(config.scan_include || "").trim(),
+            scan_exclude: String(config.scan_exclude || "").trim(),
+            scan_full: Boolean(config.scan_full),
+          };
+      return JSON.stringify(source);
+    }
+
+    function invalidateScanResults(message = "扫描来源已改变，请重新扫描资源。") {
+      pendingScanFingerprint = null;
+      if (!candidates.length && !selectedPaths.size && !scanFingerprint) return;
+      candidates = [];
+      rawCandidateCount = 0;
+      selectedPaths.clear();
+      lastFailedPaths = [];
+      scanFingerprint = null;
+      currentPage = 1;
+      showSelectedOnly = false;
+      selectedOnlyToggle.checked = false;
+      rebuildDirectoryFilter();
+      renderCandidates();
+      taskState.textContent = message;
+      appendFrontendLog("[web] " + message);
+      if (!taskRunning) setWorkflowPhase(1);
     }
 
     async function api(path, options = {}) {
@@ -1672,6 +1827,67 @@ INDEX_HTML = r"""<!doctype html>
         throw new Error(payload.error || `HTTP ${response.status}`);
       }
       return payload;
+    }
+
+    function setWorkflowPhase(phase) {
+      const current = Math.max(1, Math.min(4, Number(phase) || 1));
+      for (const step of workflowSteps) {
+        const value = Number(step.dataset.phase || 0);
+        step.classList.toggle("is-done", value < current);
+        step.classList.toggle("is-active", value === current);
+        if (value === current) step.setAttribute("aria-current", "step");
+        else step.removeAttribute("aria-current");
+      }
+    }
+
+    function updateActionStates() {
+      scanBtn.disabled = uiBusy || taskRunning;
+      diagnoseBtn.disabled = uiBusy || taskRunning;
+      saveSettingsBtn.disabled = uiBusy || taskRunning;
+      processBtn.disabled = uiBusy || taskRunning || selectedPaths.size === 0;
+      cancelBtn.disabled = uiBusy || !taskRunning;
+      retryFailedBtn.hidden = lastFailedPaths.length === 0;
+      retryFailedBtn.disabled = uiBusy || taskRunning || lastFailedPaths.length === 0;
+      for (const name of ["mode", "local_root", "remote_host", "remote_port", "remote_cmd", "scan_include", "scan_exclude", "scan_full"]) {
+        const field = form.elements.namedItem(name);
+        if (field) field.disabled = taskRunning;
+      }
+      form.setAttribute("aria-busy", String(uiBusy || taskRunning));
+    }
+
+    function setUiBusy(busy) {
+      uiBusy = Boolean(busy);
+      if (uiBusy || taskRunning) runtimeStatus.dataset.tone = "busy";
+      else runtimeStatus.dataset.tone = "ready";
+      updateActionStates();
+    }
+
+    function setTaskRunning(running) {
+      taskRunning = Boolean(running);
+      runtimeStatus.dataset.tone = taskRunning ? "busy" : "ready";
+      updateActionStates();
+    }
+
+    function updateRuntimeCopy() {
+      if (isLocalMode()) {
+        runtimeMode.textContent = "本机处理模式";
+        runtimeDetail.textContent = "媒体与服务位于同一台 VPS，结果写入宿主机输出目录";
+      } else {
+        runtimeMode.textContent = backendAvailable ? "远端 VPS 控制 · Python 后端" : "远端 VPS 控制 · Shell 回退";
+        runtimeDetail.textContent = backendStatusText || "等待后端状态";
+      }
+    }
+
+    function updateModeFields() {
+      const mode = isLocalMode() ? "local" : "remote";
+      for (const element of document.querySelectorAll("[data-mode-only]")) {
+        element.hidden = element.dataset.modeOnly !== mode;
+      }
+      scanIncludeLabel.textContent = isLocalMode() ? "额外扫描目录" : "VPS 扫描目录";
+      workspaceHelp.textContent = isLocalMode()
+        ? "Docker 部署在媒体所在 VPS：选择挂载的媒体根目录，扫描后直接在本机生成。"
+        : "桌面控制远端 VPS：填写 SSH 连接与扫描目录，结果会回传到保存目录。";
+      updateRuntimeCopy();
     }
 
     function isLocalMode() {
@@ -1800,7 +2016,20 @@ INDEX_HTML = r"""<!doctype html>
 
     function syncPlanCards() {
       for (const card of materialCards) {
-        card.classList.toggle("active", card.dataset.plan === selectedMaterialPlan);
+        const active = card.dataset.plan === selectedMaterialPlan;
+        card.classList.toggle("active", active);
+        card.setAttribute("aria-pressed", String(active));
+      }
+    }
+
+    function renderRunSummary(title, lines) {
+      const heading = document.createElement("strong");
+      heading.textContent = title;
+      runSummary.replaceChildren(heading);
+      for (const line of lines) {
+        const detail = document.createElement("span");
+        detail.textContent = line;
+        runSummary.appendChild(detail);
       }
     }
 
@@ -1809,7 +2038,8 @@ INDEX_HTML = r"""<!doctype html>
       const spectrumMode = recommendedSpectrumMode(items);
       form.audio_spectrum_mode.value = spectrumMode;
       if (!items.length) {
-        runSummary.innerHTML = "<strong>还没有选择资源。</strong><span>先扫描并选择一个资源，系统会给出材料预览。</span>";
+        renderRunSummary("还没有选择资源。", ["先扫描并选择一个资源，系统会给出材料预览。"]);
+        updateActionStates();
         return;
       }
       const typeCounts = items.reduce((acc, item) => {
@@ -1820,17 +2050,18 @@ INDEX_HTML = r"""<!doctype html>
         .map(([type, count]) => `${typeName(type)} ${count} 个`)
         .join("，");
       const materialLines = Array.from(new Set(items.map((item) => materialText(item, spectrumMode))));
-      runSummary.innerHTML = [
-        `<strong>已选择 ${items.length} 个资源。</strong>`,
-        `<span>${types}</span>`,
-        `<span>将生成：${materialLines.join("；")}</span>`,
-        `<span>音乐频谱模式：${spectrumMode === "combined" ? "整包总频谱" : "单曲频谱"}</span>`,
-      ].join("");
+      renderRunSummary(`已选择 ${items.length} 个资源。`, [
+        types,
+        `将生成：${materialLines.join("；")}`,
+        `音乐频谱模式：${spectrumMode === "combined" ? "整包总频谱" : "单曲频谱"}`,
+      ]);
+      if (!taskRunning) setWorkflowPhase(3);
+      updateActionStates();
     }
 
     function updateModeCopy() {
-      const scanBtn = document.querySelector("#scanBtn");
       scanBtn.textContent = isLocalMode() ? "扫描本机资源" : "扫描 VPS 资源";
+      updateModeFields();
       if (!candidates.length) {
         candidateSummary.textContent = isLocalMode()
           ? "先扫描本机服务器，资源会显示在这里。"
@@ -1846,8 +2077,10 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadStatus() {
       const payload = await api("/api/status");
-      runtimeMode.textContent = payload.backend_available ? "Python 后端可用" : "Shell 回退后端";
-      runtimeDetail.textContent = payload.backend_status + "，配置文件：" + payload.config_path;
+      backendAvailable = Boolean(payload.backend_available);
+      backendStatusText = payload.backend_status || "";
+      updateRuntimeCopy();
+      return payload;
     }
 
     async function loadConfig() {
@@ -1864,10 +2097,20 @@ INDEX_HTML = r"""<!doctype html>
         }
       }
       form.remote_password.placeholder = config.password_saved ? "已保存密码，留空不修改" : "未保存密码";
-      selectedMaterialPlan = config.audio_spectrum_mode === "combined" ? "music-combined" : "auto";
+      let storedPlan = null;
+      try {
+        storedPlan = localStorage.getItem("ptbd-material-plan");
+      } catch (_) {
+        storedPlan = null;
+      }
+      const validPlans = new Set(["auto", "music-combined", "music-single"]);
+      selectedMaterialPlan = validPlans.has(storedPlan)
+        ? storedPlan
+        : (config.audio_spectrum_mode === "combined" ? "music-combined" : "auto");
       syncPlanCards();
       updateRunSummary();
       updateModeCopy();
+      return config;
     }
 
     async function saveConfig() {
@@ -1979,60 +2222,131 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function setTask(payload) {
-      activeTaskId = payload.task.id;
-      pollTask();
-      if (pollTimer) clearInterval(pollTimer);
-      pollTimer = setInterval(pollTask, 1200);
+      const task = payload.task || payload;
+      activeTaskId = task.id;
+      pollGeneration += 1;
+      pollFailures = 0;
+      const generation = pollGeneration;
+      setTaskRunning(["queued", "running"].includes(task.status));
+      if (task.kind === "scan") setWorkflowPhase(2);
+      else if (task.kind === "process") setWorkflowPhase(4);
+      else setWorkflowPhase(1);
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = setTimeout(() => void pollTask(task.id, generation), 0);
     }
 
-    async function pollTask() {
-      if (!activeTaskId) return;
-      const payload = await api(`/api/tasks/${activeTaskId}`);
-      const task = payload.task;
-      taskState.textContent = `${task.kind}：${task.status}${task.message ? "，" + task.message : ""}`;
-      logBox.textContent = task.logs.length ? task.logs.join("\n") : "等待任务输出。";
-      logBox.scrollTop = logBox.scrollHeight;
-      outputsEl.innerHTML = "";
-      for (const output of task.outputs || []) {
-        const item = document.createElement("div");
-        item.className = "output";
-        item.textContent = "成功：" + output;
-        outputsEl.appendChild(item);
-      }
-      for (const failed of task.failed || []) {
-        const item = document.createElement("div");
-        item.className = "output";
-        item.textContent = "失败：" + (failed.path || "") + " | " + (failed.error || "");
-        outputsEl.appendChild(item);
-      }
-      if (task.result_summary && Object.keys(task.result_summary).length) {
-        const item = document.createElement("div");
-        item.className = "output";
-        if (task.kind === "diagnose") {
-          item.textContent = "测连：" + JSON.stringify(task.result_summary);
-        } else {
-          item.textContent = `汇总：成功 ${task.result_summary.success || 0} / 失败 ${task.result_summary.failed || 0} / 共 ${task.result_summary.total || 0}`;
+    async function pollTask(taskId, generation) {
+      if (!taskId || activeTaskId !== taskId || pollGeneration !== generation) return;
+      try {
+        const payload = await api(`/api/tasks/${taskId}`);
+        if (activeTaskId !== taskId || pollGeneration !== generation) return;
+        pollFailures = 0;
+        const task = payload.task;
+        const kindName = {scan: "扫描", process: "生成", diagnose: "测试连接"}[task.kind] || task.kind;
+        const statusName = {
+          queued: "排队中",
+          running: "运行中",
+          success: "已完成",
+          partial: "部分成功",
+          error: "失败",
+          cancelled: "已取消",
+        }[task.status] || task.status;
+        taskState.textContent = `${kindName}：${statusName}${task.message ? "，" + task.message : ""}`;
+        logBox.textContent = task.logs.length ? task.logs.join("\n") : "等待任务输出。";
+        logBox.scrollTop = logBox.scrollHeight;
+        outputsEl.replaceChildren();
+        for (const output of task.outputs || []) {
+          const item = document.createElement("div");
+          item.className = "output";
+          item.textContent = "结果目录：" + output;
+          outputsEl.appendChild(item);
         }
-        outputsEl.appendChild(item);
-      }
-      if (task.kind === "scan" && task.status === "success") {
-        candidates = prepareCandidates(task.items || []);
-        selectedPaths.clear();
-        currentPage = 1;
-        showSelectedOnly = false;
-        selectedOnlyToggle.checked = false;
-        rebuildDirectoryFilter();
-        renderCandidates();
-        updateRunSummary();
-      }
-      if (!["queued", "running"].includes(task.status) && pollTimer) {
-        clearInterval(pollTimer);
+        lastFailedPaths = (task.failed || []).map((item) => String(item.path || "")).filter(Boolean);
+        for (const failed of task.failed || []) {
+          const item = document.createElement("div");
+          item.className = "output";
+          item.textContent = "失败：" + (failed.path || "") + " | " + (failed.error || "");
+          outputsEl.appendChild(item);
+        }
+        if (task.result_summary && Object.keys(task.result_summary).length) {
+          const item = document.createElement("div");
+          item.className = "output";
+          if (task.kind === "diagnose") {
+            item.textContent = "连接检查：" + JSON.stringify(task.result_summary);
+          } else {
+            item.textContent = `汇总：成功 ${task.result_summary.success || 0} / 失败 ${task.result_summary.failed || 0} / 共 ${task.result_summary.total || 0}`;
+          }
+          outputsEl.appendChild(item);
+        }
+        if (task.kind === "scan" && task.status === "success") {
+          candidates = prepareCandidates(task.items || []);
+          selectedPaths.clear();
+          scanFingerprint = pendingScanFingerprint || scanSourceFingerprint(loadedConfig);
+          pendingScanFingerprint = null;
+          currentPage = 1;
+          showSelectedOnly = false;
+          selectedOnlyToggle.checked = false;
+          rebuildDirectoryFilter();
+          renderCandidates();
+          setWorkflowPhase(3);
+        }
+        const running = ["queued", "running"].includes(task.status);
+        setTaskRunning(running);
+        if (running) {
+          pollTimer = setTimeout(() => void pollTask(taskId, generation), 1200);
+          return;
+        }
         pollTimer = null;
+        activeTaskId = null;
+        if (task.kind === "process") setWorkflowPhase(4);
+        else if (task.kind === "scan" && task.status !== "success") {
+          pendingScanFingerprint = null;
+          setWorkflowPhase(2);
+        } else if (task.kind === "diagnose") setWorkflowPhase(1);
+        runtimeStatus.dataset.tone = task.status === "error" ? "error" : "ready";
+        updateActionStates();
+      } catch (error) {
+        if (activeTaskId !== taskId || pollGeneration !== generation) return;
+        pollFailures += 1;
+        const delay = Math.min(10000, 1200 * (2 ** Math.min(pollFailures - 1, 3)));
+        setTaskRunning(true);
+        taskState.textContent = `任务状态暂时不可用，${Math.ceil(delay / 1000)} 秒后重试：${error.message}`;
+        if (pollFailures === 1 || pollFailures % 3 === 0) {
+          appendFrontendLog(`[web] 任务轮询失败（第 ${pollFailures} 次），将自动重试：${error.message}`);
+        }
+        if (pollFailures % 3 === 0) {
+          try {
+            const status = await api("/api/status");
+            if (activeTaskId !== taskId || pollGeneration !== generation) return;
+            if (!status.active_task) {
+              pollGeneration += 1;
+              pollTimer = null;
+              activeTaskId = null;
+              pendingScanFingerprint = null;
+              setTaskRunning(false);
+              runtimeStatus.dataset.tone = "error";
+              taskState.textContent = "任务记录已不存在，服务可能已重启。请重新提交任务。";
+              appendFrontendLog("[web] 当前任务记录已丢失，已解除界面锁定。请重新提交任务。");
+              setWorkflowPhase(candidates.length ? 3 : 1);
+              return;
+            }
+            if (status.active_task && status.active_task.id !== taskId) {
+              setTask(status.active_task);
+              return;
+            }
+          } catch (_) {
+            // Keep the known task id and retry; a transient proxy failure must not unlock the UI.
+          }
+        }
+        pollTimer = setTimeout(() => void pollTask(taskId, generation), delay);
       }
     }
 
     async function startScan() {
-      await saveConfig();
+      setWorkflowPhase(2);
+      const config = await saveConfig();
+      invalidateScanResults("正在按当前处理位置重新扫描资源。");
+      pendingScanFingerprint = scanSourceFingerprint(config);
       const payload = await api("/api/scan", {method: "POST", body: JSON.stringify({})});
       logBox.textContent = "扫描任务已提交。";
       setTask(payload);
@@ -2045,19 +2359,25 @@ INDEX_HTML = r"""<!doctype html>
       setTask(payload);
     }
 
-    async function startProcess() {
-      const paths = Array.from(selectedPaths);
+    async function startProcess(requestedPaths = null) {
+      const paths = Array.isArray(requestedPaths) ? requestedPaths : Array.from(selectedPaths);
       if (!paths.length) {
         appendFrontendLog("[web] 请先选择至少一个资源。");
         return;
       }
+      setWorkflowPhase(4);
       form.audio_spectrum_mode.value = recommendedSpectrumMode();
-      await saveConfig();
+      const config = await saveConfig();
+      if (!scanFingerprint || scanFingerprint !== scanSourceFingerprint(config)) {
+        invalidateScanResults("处理位置或扫描目录已改变，请重新扫描后再生成材料。");
+        throw new Error("扫描结果已失效，请重新扫描资源");
+      }
       const payload = await api("/api/process", {
         method: "POST",
         body: JSON.stringify({paths}),
       });
       logBox.textContent = "生成任务已提交。";
+      lastFailedPaths = [];
       setTask(payload);
     }
 
@@ -2089,10 +2409,31 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    document.querySelector("#scanBtn").addEventListener("click", startScan);
-    document.querySelector("#diagnoseBtn").addEventListener("click", startDiagnose);
-    document.querySelector("#processBtn").addEventListener("click", startProcess);
-    document.querySelector("#cancelBtn").addEventListener("click", cancelTask);
+    async function runAction(label, action) {
+      setUiBusy(true);
+      let failure = null;
+      try {
+        await action();
+      } catch (error) {
+        failure = error;
+      } finally {
+        setUiBusy(false);
+      }
+      if (failure) {
+        runtimeStatus.dataset.tone = "error";
+        taskState.textContent = `${label}失败：${failure.message}`;
+        appendFrontendLog(`[web] ${label}失败：${failure.message}`);
+      }
+    }
+
+    scanBtn.addEventListener("click", () => void runAction("扫描", startScan));
+    diagnoseBtn.addEventListener("click", () => void runAction("测试连接", startDiagnose));
+    processBtn.addEventListener("click", () => void runAction("生成", () => startProcess()));
+    cancelBtn.addEventListener("click", () => void runAction("停止任务", cancelTask));
+    retryFailedBtn.addEventListener("click", () => {
+      const paths = [...lastFailedPaths];
+      void runAction("重试失败项", () => startProcess(paths));
+    });
     document.querySelector("#selectPageBtn").addEventListener("click", () => {
       const state = pageState(filteredCandidates());
       for (const item of state.pageItems) selectedPaths.add(item.path);
@@ -2109,7 +2450,7 @@ INDEX_HTML = r"""<!doctype html>
     document.querySelector("#copyLogBtn").addEventListener("click", copyLog);
     document.querySelector("#clearLogBtn").addEventListener("click", () => {
       logBox.textContent = "前端日志已清空。";
-      outputsEl.innerHTML = "";
+      outputsEl.replaceChildren();
     });
     document.querySelector("#typeFilter").addEventListener("change", () => {
       resetResourceView();
@@ -2144,26 +2485,47 @@ INDEX_HTML = r"""<!doctype html>
     for (const card of materialCards) {
       card.addEventListener("click", () => {
         selectedMaterialPlan = card.dataset.plan || "auto";
+        try {
+          localStorage.setItem("ptbd-material-plan", selectedMaterialPlan);
+        } catch (_) {
+          // The current choice still applies when browser storage is unavailable.
+        }
         syncPlanCards();
         renderCandidates();
       });
     }
     form.mode.addEventListener("change", () => {
+      invalidateScanResults("处理位置已切换，请重新扫描资源。");
       updateModeCopy();
       renderCandidates();
+      if (!taskRunning) setWorkflowPhase(candidates.length ? 3 : 1);
     });
+    for (const name of ["local_root", "remote_host", "remote_port", "remote_cmd", "scan_include", "scan_exclude", "scan_full"]) {
+      const field = form.elements.namedItem(name);
+      if (!field) continue;
+      field.addEventListener("change", () => {
+        if (scanFingerprint && scanFingerprint !== scanSourceFingerprint()) {
+          invalidateScanResults("扫描来源配置已改变，请重新扫描资源。");
+        }
+      });
+    }
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      try {
-        await saveConfig();
-      } catch (error) {
-        appendFrontendLog("[web] 保存失败：" + error.message);
-      }
+      await runAction("保存设置", saveConfig);
     });
 
+    setWorkflowPhase(1);
+    updateActionStates();
     Promise.all([loadStatus(), loadConfig()])
-      .then(() => renderCandidates())
-      .catch((error) => appendFrontendLog("[web] 初始化失败：" + error.message));
+      .then(([status]) => {
+        renderCandidates();
+        if (status.active_task) setTask(status.active_task);
+      })
+      .catch((error) => {
+        runtimeStatus.dataset.tone = "error";
+        taskState.textContent = "初始化失败：" + error.message;
+        appendFrontendLog("[web] 初始化失败：" + error.message);
+      });
   </script>
 </body>
 </html>
@@ -2178,6 +2540,8 @@ def normalize_base_path(raw: str | None) -> str:
         text = "/" + text
     while len(text) > 1 and text.endswith("/"):
         text = text[:-1]
+    if not SAFE_BASE_PATH.fullmatch(text) or any(part in {".", ".."} for part in text.split("/")[1:]):
+        raise ValueError("base path 只能包含字母、数字、点、下划线、波浪号、连字符和单斜杠")
     return text
 
 
@@ -2195,7 +2559,9 @@ def strip_base_path(path: str, base_path: str) -> str | None:
 
 
 def render_index_html(base_path: str) -> bytes:
-    html = INDEX_HTML.replace("__PTBD_BASE_PATH_JSON__", json.dumps(base_path, ensure_ascii=False))
+    base_path_json = json.dumps(base_path, ensure_ascii=False)
+    base_path_json = base_path_json.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    html = INDEX_HTML.replace("__PTBD_BASE_PATH_JSON__", base_path_json)
     return html.encode("utf-8")
 
 
@@ -2232,6 +2598,21 @@ class WebHandler(BaseHTTPRequestHandler):
             raise ValueError("请求体必须是 JSON object。")
         return payload
 
+    def write_request_error(self) -> tuple[str, HTTPStatus] | None:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            return "写操作只接受 application/json。", HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+        fetch_site = self.headers.get("Sec-Fetch-Site", "").strip().lower()
+        if fetch_site == "cross-site":
+            return "拒绝跨站写请求。", HTTPStatus.FORBIDDEN
+        origin = self.headers.get("Origin", "").strip()
+        if origin:
+            parsed = urlparse(origin)
+            request_host = self.headers.get("Host", "").strip().lower()
+            if parsed.scheme not in {"http", "https"} or parsed.netloc.lower() != request_host:
+                return "写请求 Origin 与当前主机不匹配。", HTTPStatus.FORBIDDEN
+        return None
+
     def do_GET(self) -> None:
         base_path = getattr(self.server, "ptbd_base_path", "")
         path = strip_base_path(urlparse(self.path).path, base_path)
@@ -2242,6 +2623,7 @@ class WebHandler(BaseHTTPRequestHandler):
             self.send_bytes(render_index_html(base_path), "text/html; charset=utf-8")
             return
         if path == "/api/status":
+            active = running_task()
             self.send_json(
                 {
                     "ok": True,
@@ -2249,6 +2631,7 @@ class WebHandler(BaseHTTPRequestHandler):
                     "config_path": str(CONFIG_PATH),
                     "backend_available": backend_available(),
                     "backend_status": backend_status(),
+                    "active_task": active.to_public() if active is not None else None,
                 }
             )
             return
@@ -2270,6 +2653,11 @@ class WebHandler(BaseHTTPRequestHandler):
         path = strip_base_path(urlparse(self.path).path, base_path)
         if path is None:
             self.send_error_json("接口不存在。", HTTPStatus.NOT_FOUND)
+            return
+        request_error = self.write_request_error()
+        if request_error is not None:
+            message, status = request_error
+            self.send_error_json(message, status)
             return
         try:
             payload = self.read_json_body()
@@ -2336,7 +2724,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    base_path = normalize_base_path(args.base_path)
+    try:
+        base_path = normalize_base_path(args.base_path)
+    except ValueError as exc:
+        raise SystemExit(f"invalid --base-path: {exc}") from exc
     address = (args.host, args.port)
     server = ThreadingHTTPServer(address, WebHandler)
     server.ptbd_base_path = base_path  # type: ignore[attr-defined]
