@@ -31,8 +31,19 @@ class RemoteDependencyAssetTests(unittest.TestCase):
                 "printf '%s\\n' \"$*\" >> \"$PTBD_TEST_PACKAGE_LOG\"\n",
                 encoding="utf-8",
             )
+            fake_id = fake_bin / "id"
+            fake_id.write_text(
+                "#!/bin/sh\n"
+                "if [ \"${1:-}\" = '-u' ]; then\n"
+                "  printf '0\\n'\n"
+                "  exit 0\n"
+                "fi\n"
+                "exec /usr/bin/id \"$@\"\n",
+                encoding="utf-8",
+            )
             python.chmod(0o755)
             apt_get.chmod(0o755)
+            fake_id.chmod(0o755)
             env = os.environ.copy()
             env.update(
                 {
