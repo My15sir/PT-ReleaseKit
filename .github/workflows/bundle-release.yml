@@ -12,23 +12,32 @@ on:
       - PT-BDtool.command
       - PT-BDtool.desktop
       - bdtool
+      - bdtool-legacy.sh
       - bdtool.sh
       - install.sh
       - ptbd
       - ptbd-gui
       - ptbd-gui.py
+      - ptbd-web
+      - ptbd-web.py
       - ptbd_remote_backend.py
+      - ptbd_core/**
       - ptbd-remote.sh
       - ptbd-remote-start.sh
       - ptbd-start.sh
       - lib/**
       - scripts/build-bundle.sh
+      - scripts/audio-spectrum.py
       - scripts/deps.env
       - scripts/ensure-bundle.py
       - scripts/fetch-deps.sh
       - scripts/prepare-remote-runtime.sh
       - scripts/remote-upload-server.py
       - scripts/update-deps.sh
+
+concurrency:
+  group: bundle-latest-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -39,7 +48,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install fresh bundle inputs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg mediainfo libbluray-bin
+          mkdir -p .ci-bin
+          printf '%s\n' '#!/usr/bin/env bash' 'exec bd_info "$@"' > .ci-bin/BDInfo
+          chmod +x .ci-bin/BDInfo
+          echo "$PWD/.ci-bin" >> "$GITHUB_PATH"
+
       - name: Build Linux bundle asset
+        env:
+          PTBD_BUNDLE_FORCE_FETCH: "1"
+          PTBD_FETCH_MODE: system
         run: bash scripts/build-bundle.sh
 
       - name: Publish Linux bundle release
@@ -50,9 +71,10 @@ jobs:
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
-          artifacts: dist/PT-BDtool-linux-amd64.tar.gz
+          artifacts: dist/PT-BDtool-linux-amd64.tar.gz,dist/PT-BDtool-linux-amd64.tar.gz.sha256
           artifactErrorsFailBuild: true
           body: |
             自动更新的 Linux 离线运行包。
+            归档同时发布 SHA256 sidecar，控制端下载时会强制校验。
             主要给控制端打包和源码仓库按需下载使用。
             普通用户请优先使用 `portable-latest` 里的成品包。

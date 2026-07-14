@@ -1,218 +1,146 @@
 # PT-BDtool
 
-PT-BDtool 是一个给 PT 用户整理发种素材的小工具。
+PT-BDtool 用于扫描视频、音频、`BDMV` 和 `ISO`，生成截图、MediaInfo、频谱图或 BDInfo，并把结果打包。
 
-它会尽量把这几步串起来：
+当前架构是 **Python 模块化核心优先 + Shell 兼容层 + Windows/macOS 桌面 GUI + Docker VPS 本机处理**。Docker 是新增部署方式，不会替代现有桌面控制端。
 
-1. 连接你的 VPS
-2. 扫描视频 / 音频 / `BDMV` / `ISO`
-3. 生成截图和媒体信息
-4. 打包结果
-5. 下载回你的电脑
-6. 按设置清理 VPS 上这次生成的临时结果
+## 处理结果
 
-## 先分清两种用法
+- 视频：`mediainfo.txt`、`1.png` 至 `6.png`
+- 音频：`mediainfo.txt`、`频谱图.png`
+- `BDMV` / `ISO`：`BDInfo.txt`、`1.png` 至 `6.png`
+- 最终包：通常为 `.zip`，不可用时回退为 `.tar.gz`
 
-仓库导航：
+## 选择运行方式
 
-- 维护者可先看 `docs/REPO-INDEX.md`
+### Windows / macOS 桌面 GUI
 
-### 1. 普通用户
+桌面端继续保留，适合从个人电脑连接媒体 VPS，执行扫描、生成、回传和清理。
 
-如果你只是想直接用，**不要把当前源码仓库当成成品包**。
+从 [`portable-latest`](https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest) 下载：
 
-请去发布页下载便携版：
+- Windows：`PT-BDtool-windows-portable.zip`，解压后运行 `PT-BDtool.exe`
+- macOS：`PT-BDtool-macos-portable.zip`，解压后运行 `PT-BDtool.app`
+- Linux：`PT-BDtool-linux-portable.tar.gz`
 
-- `https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest`
+源码入口仍然可用：
 
-按系统下载：
+- Windows：`PT-BDtool.bat`
+- macOS：`PT-BDtool.command`
+- Linux：`PT-BDtool.sh`
+- 通用 GUI：`ptbd-gui`
 
-- Windows: `PT-BDtool-windows-portable.zip`
-- macOS: `PT-BDtool-macos-portable.zip`
-- Linux: `PT-BDtool-linux-portable.tar.gz`
+源码运行 GUI 至少需要 Python 3 和 Tk。连接诊断和内置远端后端需要 Paramiko；缺少 Paramiko 时，扫描和处理会回退到系统 Bash/SSH。发布包由 PyInstaller 构建并包含控制端依赖，不要求普通用户直接运行源码。
 
-发布包里才会有：
+首次连接一台新 VPS 前，请先在系统终端执行 `ssh -p 端口 用户@主机`，通过可信渠道核对服务器显示的主机密钥指纹后再接受。桌面端会读取 `~/.ssh/known_hosts`，并拒绝未知或发生变化的主机密钥，避免把 SSH 密码发送给未经确认的服务器。
 
-- Windows 的 `PT-BDtool.exe`
-- macOS 的 `PT-BDtool.app`
-- Linux 适合双击的启动文件
+首次使用时填写 VPS 地址（如 `root@host`）、SSH 端口、密码或已有密钥，以及本机保存目录。正常顺序是保存配置、扫描候选、选择条目、远端生成、下载归档；开启自动清理只会删除本次远端生成目录和临时包，不会删除原始媒体。
 
-### 2. 当前这个仓库
+桌面配置和日志位置：
 
-当前仓库是源码目录，不是 Windows / macOS 成品目录。
+- Linux：`~/.config/ptbd-gui/config.json` 与同目录的 `PT-BDtool.log`
+- Windows 便携版：程序旁的 `PT-BDtool-config.json`
+- macOS 便携版：`PT-BDtool.app` 同级目录的 `PT-BDtool-config.json`
+- Shell 远端模式：`~/.config/ptbd-remote/config.env`
 
-所以你在这里看不到：
+扫描或处理失败时，先检查系统终端能否直接 SSH 登录、VPS 账号是否能读取媒体目录，以及日志中是否有依赖或软件源错误。远端自动安装优先支持 Debian、Ubuntu 和 Alpine；其他发行版可能需要手动准备依赖。
 
-- `PT-BDtool.exe`
-- `PT-BDtool.app`
+VPS 禁用 SFTP 子系统时，内置后端会自动回退到 SSH 管道上传和下载，不需要为此开放额外端口。
 
-如果你是在当前源码目录里直接运行，请按下面的“源码仓库怎么跑”操作。
+### Docker：媒体 VPS 本机处理
 
-## 这个项目真实怎么运行
-
-### 实际入口
-
-- Linux 图形入口：`./PT-BDtool.sh`
-- 通用 GUI 包装：`./ptbd-gui`
-- 本机 Web 控制端：`./ptbd-web`
-- 新手模式入口：`./ptbd`
-- 远端 shell 流程：`./ptbd-remote.sh`
-- 本地 CLI 菜单：`./ptbd-start.sh`
-
-### 实际本地依赖
-
-源码直跑时，至少需要这些：
-
-- `bash`
-- `python3`
-- `ssh`
-
-如果你要跑图形界面，还需要：
-
-- `tkinter`
-
-说明：
-
-- `paramiko` 有就走内置 Python 后端
-- 没有 `paramiko` 时，GUI 会回退旧版 shell 后端
-- 所以 `paramiko` 不是必装项，但 `python3` 和 `tkinter` 对源码 GUI 很关键
-
-Linux 上如果 GUI 启动时报缺少 `tkinter`，常见修复是安装 `python3-tk`。
-
-### 远端 VPS 真实依赖
-
-VPS 主流程至少依赖：
-
-- `tar`
-- `bash`
-- `python3`
-- `curl`
-- `ffmpeg`
-- `ffprobe`
-- `mediainfo`
-
-程序会优先尝试在 VPS 上自动安装这些依赖。
-
-当前自动安装优先支持：
-
-- `Debian`
-- `Ubuntu`
-- `Alpine`
-
-如果自动安装还是不够，才会回退上传内置 Linux 运行包。
-
-## 安装前先准备什么
-
-无论你是用发布包还是源码，至少要准备：
-
-- 一台能 SSH 登录的 VPS
-- VPS 上已经放好你要处理的视频 / 音频 / `BDMV` / `ISO`
-- VPS 的 IP、端口、账号和密码，或者可用的 SSH 密钥
-- 你电脑上的一个结果保存目录
-
-## 普通用户怎么用发布包
-
-### Windows
-
-1. 下载 `PT-BDtool-windows-portable.zip`
-2. 解压
-3. 双击 `PT-BDtool.exe`
-
-如果被系统拦住：
-
-- 点“更多信息”
-- 再点“仍要运行”
-
-### macOS
-
-1. 下载 `PT-BDtool-macos-portable.zip`
-2. 解压
-3. 双击 `PT-BDtool.app`
-
-如果第一次打不开：
-
-- 右键 `PT-BDtool.app`
-- 点一次“打开”
-- 按系统提示继续
-
-### Linux
-
-1. 下载 `PT-BDtool-linux-portable.tar.gz`
-2. 解压
-3. 先双击 `PT-BDtool.desktop`
-4. 如果桌面文件不生效，再双击 `PT-BDtool.sh`
-
-如果提示没权限，先在终端执行：
+Docker 应部署在**媒体文件所在的 VPS**。容器直接读取该 VPS 上的媒体目录并把结果写回宿主机，不再通过 SSH 把媒体搬到另一个处理节点。
 
 ```bash
-chmod +x PT-BDtool.sh PT-BDtool.command ptbd-gui ptbd-start.sh
+export PTBD_UID=1000
+export PTBD_GID=1000
+sudo mkdir -p /srv/media /srv/ptbd/output /srv/ptbd/config
+sudo chown "$PTBD_UID:$PTBD_GID" /srv/ptbd/output /srv/ptbd/config
+
+PTBD_MEDIA_DIR=/srv/media \
+PTBD_OUTPUT_DIR=/srv/ptbd/output \
+PTBD_CONFIG_DIR=/srv/ptbd/config \
+docker compose up -d --build
 ```
 
-## 源码仓库怎么跑
-
-如果你当前就在这个仓库目录里：
-
-### Linux
-
-优先执行：
+Compose 默认只绑定 VPS 回环地址。先在桌面电脑建立 SSH 隧道：
 
 ```bash
-./PT-BDtool.sh
+ssh -L 8899:127.0.0.1:8899 user@VPS-IP
 ```
 
-如果你只想走命令行菜单：
-
-```bash
-./ptbd
-```
-
-如果你想在浏览器里操作：
-
-```bash
-./ptbd-web --open
-```
-
-默认地址是：
+然后在桌面浏览器访问：
 
 ```text
 http://127.0.0.1:8899/
 ```
 
-Web 控制端默认只监听本机地址。它会复用远端扫描和生成流程，支持填写 VPS、扫描候选、选择视频 / 音频 / `BDMV` / `ISO`，并启动素材生成。
+挂载规则：
 
-如果部署在 VPS 并由 Nginx / FileBrowser 反向代理到子路径，可以指定前缀：
+- `PTBD_MEDIA_DIR` → `/media`，只读
+- `PTBD_OUTPUT_DIR` → `/output`，可写，保存生成结果
+- `PTBD_CONFIG_DIR` → `/config`，可写，保存配置与运行状态
+- `PTBD_UID` / `PTBD_GID`，容器进程使用的非 root 宿主用户 ID，默认 `1000:1000`
+- `PTBD_WEB_PORT`，宿主回环 Web 端口，默认 `8899`
 
-```bash
-./ptbd-web --host 127.0.0.1 --port 8899 --base-path /ptbd
-```
+容器默认以非 root 用户运行、删除全部 Linux capabilities，并启用 `no-new-privileges`。输出和配置目录必须允许配置的 UID/GID 写入。
 
-VPS 本机处理模式可通过配置文件或环境变量启用，用于直接扫描当前服务器上的 FileBrowser 根目录：
+完整的部署、升级、反向代理和排障说明见 [`docs/DOCKER.md`](docs/DOCKER.md)。
 
-```bash
-PTBD_WEB_MODE=local PTBD_WEB_LOCAL_ROOT=/data/downloads ./ptbd-web --base-path /ptbd
-```
+### Linux / VPS 命令行
 
-### macOS
-
-优先执行：
+直接处理一个媒体文件或目录：
 
 ```bash
-./PT-BDtool.command
+./bdtool /path/to/movie.mkv --out /path/to/output
 ```
 
-### Windows
+扫描并输出 JSON：
 
-优先双击：
+```bash
+./bdtool scan-json --dir /path/to/media
+```
 
-- `PT-BDtool.bat`
+检查依赖：
 
-但要注意：
+```bash
+./bdtool doctor
+./bdtool status
+```
 
-- 当前源码仓库里没有 `PT-BDtool.exe`
-- 所以它会回退到本机 Python 去启动 `ptbd-gui.py`
-- 也就是说，Windows 源码直跑需要你自己先装 Python 3
+Python 核心需要 `python3`、`ffmpeg`、`ffprobe` 和 `mediainfo`；处理蓝光时建议提供 `BDInfo`。安装脚本和 Docker 镜像会准备相应运行环境。
 
-## 第一次打开后怎么填
+单曲频谱不要求额外 Python 图像模块；只有“组合频谱”需要 NumPy 和 Pillow。远端自动安装会按所选模式补齐它们，Docker 镜像则已内置。
+
+仍保留的其他入口：`./ptbd` 是新手流程，`./ptbd-start.sh` 是本地菜单，`./ptbd-remote.sh` 是直接使用 Shell 控制远端 VPS 的兼容流程。
+
+## Python-first 与 Shell 兼容
+
+`bdtool` 是稳定入口，默认把处理命令交给 `python3 -m ptbd_core.cli`。Python 包按职责拆分：
+
+- `scanner.py`：媒体发现与类型识别
+- `media_tools.py`：外部媒体工具调用
+- `artifacts.py`：截图、MediaInfo、频谱图和 BDInfo 产物
+- `pipeline.py`：处理流程编排
+- `returns.py`：打包与回传
+- `config.py`、`models.py`、`jobs.py`：共享配置、模型和任务状态
+
+为避免破坏旧用户流程，以下情况仍进入 `bdtool-legacy.sh`：
+
+- `bdtool` 不带参数时打开旧交互菜单
+- 使用 `start`、`install`、`--lang` 或 `--non-interactive` 等旧菜单参数
+- 显式设置 `PTBD_PYTHON_CORE=0`
+- 找不到 Python 3 时自动回退
+
+需要直接运行兼容实现时：
+
+```bash
+./bdtool-legacy.sh
+```
+
+Shell 层承担兼容、旧菜单，以及 GUI/Web 缺少 Paramiko 时的远端 fallback；新处理逻辑应优先放入 `ptbd_core/`。
+
+## 桌面 GUI 使用流程
 
 图形界面里先填这些：
 
@@ -230,6 +158,8 @@ PTBD_WEB_MODE=local PTBD_WEB_LOCAL_ROOT=/data/downloads ./ptbd-web --base-path /
 - `扫描白名单`
   - 不懂就留空
   - 留空时默认优先扫描：`/home /root /data /mnt /media /srv`
+  - 显式白名单优先于全盘扫描开关
+  - 多个根目录可用空格或逗号分隔；含空格、逗号或撇号的单个路径请使用双引号，例如 `"/data/PT Movies" "/mnt/O'Brien, Archive"`
 - `启用全盘扫描（高级）`
   - 默认关闭
   - 只有媒体不在常见目录时再打开
@@ -314,82 +244,70 @@ PTBD_WEB_MODE=local PTBD_WEB_LOCAL_ROOT=/data/downloads ./ptbd-web --base-path /
 4. VPS 软件源是不是可用
 5. 日志里是不是提示缺依赖或 SSH 失败
 
-GUI 里可以直接点：
+GUI 里可以直接点“打开日志文件”。
 
-- “打开日志文件”
+## Web 模式
 
-### 2. Linux 双击没反应
-
-先试：
+源码可启动本机 Web 控制端：
 
 ```bash
-chmod +x PT-BDtool.sh PT-BDtool.command ptbd-gui ptbd-start.sh
-./PT-BDtool.sh
+./ptbd-web --host 127.0.0.1 --port 8899 --open
 ```
 
-如果提示缺少 `tkinter`，先装 `python3-tk` 再试。
+Web 控制端支持两种模式：
 
-### 3. Windows 源码仓库双击没反应
+- `remote`：桌面或控制端通过 SSH 操作远端 VPS
+- `local`：直接扫描当前主机目录；Docker 默认并应保持此模式，扫描根目录使用 `/media`
 
-重点确认：
+Web 和 GUI 都支持测连、批量逐项处理及成功/失败汇总。Web 任务可能结束为 `success`、`partial`、`error` 或 `cancelled`；GUI 可直接重试上一批失败条目。
 
-- 你现在用的是源码仓库，不是发布包
-- 本机已经安装 Python 3
-- `PT-BDtool.bat` 和 `ptbd-gui.py` 在同一个目录
+直接在 Linux 主机运行 local 模式：
 
-如果你不想装 Python，就不要跑源码仓库，直接改用发布页的 `PT-BDtool.exe`。
+```bash
+PTBD_WEB_MODE=local \
+PTBD_WEB_LOCAL_ROOT=/srv/media \
+./ptbd-web --host 127.0.0.1 --port 8899
+```
 
-### 4. macOS 源码仓库打不开
+启动后在 Web 配置中把保存目录设为 `/srv/ptbd/output`。
 
-重点确认：
+## 安装源码版本
 
-- 你运行的是 `PT-BDtool.command`
-- 本机已经安装 Python 3
-- 当前目录里确实有 `ptbd-gui`
+```bash
+bash install.sh --offline --no-launch
+export PATH="$HOME/.local/bin:$PATH"
+hash -r
+```
 
-如果你只想双击即用，优先下载发布页里的 `PT-BDtool.app`。
+安装后可验证：
 
-### 5. VPS 依赖装不上
+```bash
+bdtool --version
+bdtool doctor
+ptbd-gui --self-check
+```
 
-重点看 VPS 自己的问题：
+`install.sh` 不通过系统包管理器修改宿主机；离线 bundle 可由 `scripts/ensure-bundle.py` 准备。官方 bundle 优先校验 Release 的 `.sha256` sidecar；旧版官方资产使用仓库内固定摘要完成首次迁移。
 
-- 软件源是否可用
-- 网络是否可用
-- 当前账号是否有权限装包
+使用自定义 bundle 镜像时可配置：
 
-当前优先适配的是：
+- `PTBD_BUNDLE_URL`：自定义归档地址
+- `PTBD_BUNDLE_SHA256`：可信 SHA256 摘要，优先级最高
+- `PTBD_BUNDLE_CHECKSUM_URL`：自定义 sidecar 地址，默认是归档地址加 `.sha256`
+- `PTBD_BUNDLE_ALLOW_UNVERIFIED=1`：仅在明确接受风险时允许“校验地址不可用”的自定义下载；默认关闭，格式损坏的 sidecar 仍会失败
 
-- `Debian`
-- `Ubuntu`
-- `Alpine`
+## 开发验证
 
-其他发行版不保证自动安装一定成功。
+```bash
+python3 -m unittest discover -s tests
+python3 -m compileall -q ptbd_core ptbd-gui.py ptbd-web.py ptbd_remote_backend.py
+./scripts/full-test.sh
+docker build -t pt-bdtool:local .
+```
 
-### 6. 扫描不到你要的文件
+更多维护信息：
 
-先确认：
-
-- 源文件确实已经放到 VPS 上
-- 当前账号对目录有读取权限
-- 你没有把白名单写错
-- 你没有把目标目录误加进排除列表
-
-## 这项目现在更适合谁
-
-适合：
-
-- 已经有 VPS
-- 知道 SSH 是什么
-- 想把扫描、截图、媒体信息、下载、清理串起来的人
-
-不适合：
-
-- 完全没有 SSH / VPS 使用基础
-- 希望任何系统都 100% 免配置即开即用的人
-
-## 给维护者
-
-维护说明看：
-
-- `docs/DEVELOPMENT.md`
-- `docs/README.en.md`
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)
+- [`docs/REPO-INDEX.md`](docs/REPO-INDEX.md)
+- [`docs/README.en.md`](docs/README.en.md)
+- [`docs/DOCKER.md`](docs/DOCKER.md)

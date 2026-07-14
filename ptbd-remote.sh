@@ -10,7 +10,11 @@ PTBD_REMOTE_RETURN_PORT="${PTBD_REMOTE_RETURN_PORT:-18080}"
 PTBD_LOCAL_HTTP_PORT="${PTBD_LOCAL_HTTP_PORT:-18080}"
 PTBD_LOCAL_SAVE_DIR="${PTBD_LOCAL_SAVE_DIR:-}"
 PTBD_SCAN_INCLUDE_ROOTS="${PTBD_SCAN_INCLUDE_ROOTS:-}"
+PTBD_SCAN_INCLUDE_ROOTS_JSON="${PTBD_SCAN_INCLUDE_ROOTS_JSON:-}"
+PTBD_SCAN_INCLUDE_ROOTS_LINES="${PTBD_SCAN_INCLUDE_ROOTS_LINES:-}"
 PTBD_SCAN_EXCLUDE_ROOTS="${PTBD_SCAN_EXCLUDE_ROOTS:-}"
+PTBD_SCAN_EXCLUDE_ROOTS_JSON="${PTBD_SCAN_EXCLUDE_ROOTS_JSON:-}"
+PTBD_SCAN_EXCLUDE_ROOTS_LINES="${PTBD_SCAN_EXCLUDE_ROOTS_LINES:-}"
 PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE:-single}"
 PTBD_AUDIO_SPECTRUM_BACKEND="${PTBD_AUDIO_SPECTRUM_BACKEND:-auto}"
 PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS="${PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}"
@@ -109,7 +113,11 @@ Environment variables:
   PTBD_REMOTE_BOOTSTRAP
   PTBD_LOCAL_SAVE_DIR
   PTBD_SCAN_INCLUDE_ROOTS
+  PTBD_SCAN_INCLUDE_ROOTS_JSON
+  PTBD_SCAN_INCLUDE_ROOTS_LINES
   PTBD_SCAN_EXCLUDE_ROOTS
+  PTBD_SCAN_EXCLUDE_ROOTS_JSON
+  PTBD_SCAN_EXCLUDE_ROOTS_LINES
   PTBD_AUDIO_SPECTRUM_MODE
   PTBD_AUDIO_SPECTRUM_BACKEND
   PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS
@@ -128,6 +136,100 @@ normalize_bool() {
     0|false|FALSE|no|NO|off|OFF) printf '0' ;;
     *) return 1 ;;
   esac
+}
+
+derive_scan_roots() {
+  local raw="${1:-}"
+  local input_format="${2:-legacy}"
+  local output_format="${3:-json}"
+  PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" python3 - "$raw" "$input_format" "$output_format" <<'PY'
+import json
+import sys
+
+from ptbd_core.config import (
+    normalize_scan_roots,
+    parse_path_roots_json,
+    parse_path_roots_lines,
+    split_path_roots,
+)
+
+raw, input_format, output_format = sys.argv[1:]
+try:
+    if input_format == "json":
+        roots = parse_path_roots_json(raw)
+    elif input_format == "lines":
+        roots = parse_path_roots_lines(raw)
+    else:
+        roots = split_path_roots(raw)
+except ValueError as exc:
+    print(f"invalid scan roots {input_format}: {exc}", file=sys.stderr)
+    raise SystemExit(2) from exc
+
+if output_format == "lines":
+    print("\n".join(roots), end="")
+elif output_format == "legacy":
+    print(normalize_scan_roots(roots), end="")
+else:
+    print(json.dumps(roots, ensure_ascii=False), end="")
+PY
+}
+
+prepare_scan_root_metadata() {
+  local raw=""
+  local input_format=""
+  local normalized_json=""
+  local normalized_lines=""
+  local normalized_legacy=""
+
+  if [[ -n "$PTBD_SCAN_INCLUDE_ROOTS_JSON" ]]; then
+    raw="$PTBD_SCAN_INCLUDE_ROOTS_JSON"
+    input_format="json"
+  elif [[ -n "$PTBD_SCAN_INCLUDE_ROOTS_LINES" ]]; then
+    raw="$PTBD_SCAN_INCLUDE_ROOTS_LINES"
+    input_format="lines"
+  elif [[ -n "$PTBD_SCAN_INCLUDE_ROOTS" ]]; then
+    raw="$PTBD_SCAN_INCLUDE_ROOTS"
+    input_format="legacy"
+  fi
+  if [[ -n "$input_format" ]]; then
+    normalized_json="$(derive_scan_roots "$raw" "$input_format" json)" || return 2
+    normalized_lines="$(derive_scan_roots "$raw" "$input_format" lines)" || return 2
+    normalized_legacy="$(derive_scan_roots "$raw" "$input_format" legacy)" || return 2
+    if [[ "$normalized_json" == "[]" ]]; then
+      err "scan include whitelist is configured but contains no valid roots"
+      return 2
+    fi
+    PTBD_SCAN_INCLUDE_ROOTS_JSON="$normalized_json"
+    PTBD_SCAN_INCLUDE_ROOTS_LINES="$normalized_lines"
+    PTBD_SCAN_INCLUDE_ROOTS="$normalized_legacy"
+  fi
+
+  raw=""
+  input_format=""
+  if [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS_JSON" ]]; then
+    raw="$PTBD_SCAN_EXCLUDE_ROOTS_JSON"
+    input_format="json"
+  elif [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS_LINES" ]]; then
+    raw="$PTBD_SCAN_EXCLUDE_ROOTS_LINES"
+    input_format="lines"
+  elif [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS" ]]; then
+    raw="$PTBD_SCAN_EXCLUDE_ROOTS"
+    input_format="legacy"
+  fi
+  if [[ -n "$input_format" ]]; then
+    normalized_json="$(derive_scan_roots "$raw" "$input_format" json)" || return 2
+    if [[ "$normalized_json" == "[]" ]]; then
+      PTBD_SCAN_EXCLUDE_ROOTS=""
+      PTBD_SCAN_EXCLUDE_ROOTS_JSON=""
+      PTBD_SCAN_EXCLUDE_ROOTS_LINES=""
+      return 0
+    fi
+    normalized_lines="$(derive_scan_roots "$raw" "$input_format" lines)" || return 2
+    normalized_legacy="$(derive_scan_roots "$raw" "$input_format" legacy)" || return 2
+    PTBD_SCAN_EXCLUDE_ROOTS_JSON="$normalized_json"
+    PTBD_SCAN_EXCLUDE_ROOTS_LINES="$normalized_lines"
+    PTBD_SCAN_EXCLUDE_ROOTS="$normalized_legacy"
+  fi
 }
 
 resolve_save_dir() {
@@ -268,8 +370,18 @@ while [[ $# -gt 0 ]]; do
     --save-dir) PTBD_LOCAL_SAVE_DIR="${2:-}"; shift 2 ;;
     --local-port) PTBD_LOCAL_HTTP_PORT="${2:-}"; shift 2 ;;
     --remote-return-port) PTBD_REMOTE_RETURN_PORT="${2:-}"; shift 2 ;;
-    --scan-include) PTBD_SCAN_INCLUDE_ROOTS="${2:-}"; shift 2 ;;
-    --scan-exclude) PTBD_SCAN_EXCLUDE_ROOTS="${2:-}"; shift 2 ;;
+    --scan-include)
+      PTBD_SCAN_INCLUDE_ROOTS="${2:-}"
+      PTBD_SCAN_INCLUDE_ROOTS_JSON=""
+      PTBD_SCAN_INCLUDE_ROOTS_LINES=""
+      shift 2
+      ;;
+    --scan-exclude)
+      PTBD_SCAN_EXCLUDE_ROOTS="${2:-}"
+      PTBD_SCAN_EXCLUDE_ROOTS_JSON=""
+      PTBD_SCAN_EXCLUDE_ROOTS_LINES=""
+      shift 2
+      ;;
     --audio-spectrum) PTBD_AUDIO_SPECTRUM_MODE="${2:-}"; shift 2 ;;
     --audio-spectrum-backend) PTBD_AUDIO_SPECTRUM_BACKEND="${2:-}"; shift 2 ;;
     --audio-spectrum-seconds) PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS="${2:-}"; shift 2 ;;
@@ -288,10 +400,12 @@ if [[ "$SETUP_MODE" == "1" ]]; then
   exit 0
 fi
 
+command -v python3 >/dev/null 2>&1 || { err "missing python3"; exit 1; }
+prepare_scan_root_metadata
+
 [[ -n "$PTBD_REMOTE_HOST" ]] || { err "missing --host"; usage; exit 2; }
 [[ -f "$UPLOAD_SERVER_SCRIPT" ]] || { err "missing upload server script: $UPLOAD_SERVER_SCRIPT"; exit 1; }
 command -v ssh >/dev/null 2>&1 || { err "missing ssh"; exit 1; }
-command -v python3 >/dev/null 2>&1 || { err "missing python3"; exit 1; }
 PTBD_REMOTE_BOOTSTRAP="$(normalize_bool "$PTBD_REMOTE_BOOTSTRAP" 2>/dev/null || true)"
 [[ -n "$PTBD_REMOTE_BOOTSTRAP" ]] || { err "invalid --bootstrap value, expected 0 or 1"; exit 2; }
 PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE:-single}"
@@ -317,9 +431,6 @@ if [[ "$PTBD_REMOTE_BOOTSTRAP" == "1" ]]; then
   log "bootstrapping remote runtime for blank VPS"
   log "bootstrap now prefers remote auto-install on Debian/Ubuntu/Alpine; only fallback bundle uploads may reach about 300MB"
   PREPARE_CMD=("$REMOTE_PREPARE_SCRIPT" --host "$PTBD_REMOTE_HOST" --port "$PTBD_REMOTE_PORT")
-  if [[ -n "$PTBD_REMOTE_PASSWORD" ]]; then
-    PREPARE_CMD+=(--password "$PTBD_REMOTE_PASSWORD")
-  fi
   EFFECTIVE_REMOTE_CMD="$("${PREPARE_CMD[@]}")"
   [[ -n "$EFFECTIVE_REMOTE_CMD" ]] || { err "remote bootstrap returned empty command"; exit 1; }
   log "remote runtime ready: $EFFECTIVE_REMOTE_CMD"
@@ -335,21 +446,25 @@ sleep 1
 kill -0 "$UPLOAD_SERVER_PID" 2>/dev/null || { err "failed to start local upload server"; exit 1; }
 log "local receive server started on 127.0.0.1:${PTBD_LOCAL_HTTP_PORT}"
 
-SSH_CMD=(ssh -tt -p "$PTBD_REMOTE_PORT" -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new)
+SSH_CMD=(ssh -tt -p "$PTBD_REMOTE_PORT" -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes)
 setup_ssh_auth
 
-nohup "${SSH_AUTH_PREFIX[@]}" ssh -N -p "$PTBD_REMOTE_PORT" -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -R "${PTBD_REMOTE_RETURN_PORT}:127.0.0.1:${PTBD_LOCAL_HTTP_PORT}" "$PTBD_REMOTE_HOST" >/tmp/ptbd_remote_tunnel.log 2>&1 &
+nohup "${SSH_AUTH_PREFIX[@]}" ssh -N -p "$PTBD_REMOTE_PORT" -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -R "${PTBD_REMOTE_RETURN_PORT}:127.0.0.1:${PTBD_LOCAL_HTTP_PORT}" "$PTBD_REMOTE_HOST" >/tmp/ptbd_remote_tunnel.log 2>&1 &
 TUNNEL_PID="$!"
 sleep 3
 kill -0 "$TUNNEL_PID" 2>/dev/null || { err "failed to create reverse SSH tunnel"; exit 1; }
 log "reverse tunnel ready: remote 127.0.0.1:${PTBD_REMOTE_RETURN_PORT} -> local ${PTBD_LOCAL_HTTP_PORT}"
 
 REMOTE_SCRIPT="export BDTOOL_RETURN_MODE=http; export BDTOOL_RETURN_HTTP_URL=$(quote_sh "http://127.0.0.1:${PTBD_REMOTE_RETURN_PORT}/upload"); export BDTOOL_AUTO_CLEANUP=$(quote_sh "$PTBD_AUTO_CLEANUP"); export BDTOOL_AUDIO_SPECTRUM_MODE=$(quote_sh "${PTBD_AUDIO_SPECTRUM_MODE:-single}"); export BDTOOL_AUDIO_SPECTRUM_BACKEND=$(quote_sh "${PTBD_AUDIO_SPECTRUM_BACKEND:-auto}"); export BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS=$(quote_sh "${PTBD_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS:-12}");"
-if [[ -n "$PTBD_SCAN_INCLUDE_ROOTS" ]]; then
+if [[ -n "$PTBD_SCAN_INCLUDE_ROOTS_JSON" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_INCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS");"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_INCLUDE_ROOTS_JSON=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS_JSON");"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_INCLUDE_ROOTS_LINES=$(quote_sh "$PTBD_SCAN_INCLUDE_ROOTS_LINES");"
 fi
-if [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS" ]]; then
+if [[ -n "$PTBD_SCAN_EXCLUDE_ROOTS_JSON" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_EXCLUDE_ROOTS=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS");"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_EXCLUDE_ROOTS_JSON=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS_JSON");"
+  REMOTE_SCRIPT="${REMOTE_SCRIPT} export BDTOOL_SCAN_EXCLUDE_ROOTS_LINES=$(quote_sh "$PTBD_SCAN_EXCLUDE_ROOTS_LINES");"
 fi
 if [[ -n "$PTBD_REMOTE_TARGET_PATH" ]]; then
   REMOTE_SCRIPT="${REMOTE_SCRIPT} exec $(quote_sh "$EFFECTIVE_REMOTE_CMD") generate-path --path $(quote_sh "$PTBD_REMOTE_TARGET_PATH") --lang zh --audio-spectrum $(quote_sh "${PTBD_AUDIO_SPECTRUM_MODE:-single}")"

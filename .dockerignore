@@ -1,0 +1,15 @@
+.git
+.github
+.tmp
+.tmp-*
+__pycache__
+*.py[cod]
+*.log
+bdtool-output
+build
+config
+dist
+media
+output
+tests
+third_party

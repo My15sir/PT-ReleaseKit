@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
+import json
 import os
-import re
-import shlex
-import shutil
 import stat
 import subprocess
 import sys
@@ -13,10 +12,32 @@ import tarfile
 import tempfile
 import time
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Callable
-from urllib.parse import urlsplit
+
+from ptbd_core.bundle_archive import (
+    OFFICIAL_BOOTSTRAP_SHA256,
+    OFFICIAL_BUNDLE_URL,
+    OFFICIAL_CHECKSUM_URL,
+    BundleArchiveError,
+    BundleChecksumSidecarDigestError,
+    BundleChecksumSidecarEncodingError,
+    BundleChecksumUnavailableError,
+    ExplicitBundleChecksumError,
+    extract_bundle_archive,
+    resolve_bundle_checksum,
+    verify_bundle_checksum,
+)
+from ptbd_core.config import (
+    normalize_remote_connection,
+    normalize_scan_roots,
+    parse_port,
+    parse_remote_target,
+    split_path_roots,
+)
+from ptbd_core.runtime_assets import read_shared_asset, validate_profile
 
 try:
     import paramiko
@@ -30,9 +51,11 @@ else:  # pragma: no cover
 LogFunc = Callable[[str], None]
 BUNDLE_DOWNLOAD_URL = os.environ.get(
     "PTBD_BUNDLE_URL",
-    "https://github.com/My15sir/PT-BDtool/releases/download/bundle-latest/PT-BDtool-linux-amd64.tar.gz",
+    OFFICIAL_BUNDLE_URL,
 )
-BUNDLE_MARKER_PARTS = ("third_party", "bundle", "linux-amd64")
+BUNDLE_SHA256 = os.environ.get("PTBD_BUNDLE_SHA256", "").strip()
+BUNDLE_CHECKSUM_URL = os.environ.get("PTBD_BUNDLE_CHECKSUM_URL", f"{BUNDLE_DOWNLOAD_URL}.sha256")
+BUNDLE_ALLOW_UNVERIFIED = os.environ.get("PTBD_BUNDLE_ALLOW_UNVERIFIED", "0") == "1"
 PREFERRED_SCAN_ROOTS = ("/home", "/root", "/data", "/mnt", "/media", "/srv")
 
 
@@ -54,16 +77,16 @@ def bool_config(value: object, default: bool = False) -> bool:
 
 
 def split_path_list(raw: object) -> list[str]:
-    text = str(raw or "").replace(",", " ")
-    return [item for item in text.split() if item]
+    return split_path_roots(raw)
 
 
 def build_effective_scan_include(config: dict) -> str:
     explicit = split_path_list(config.get("scan_include"))
     if explicit:
-        return " ".join(explicit)
+        return normalize_scan_roots(explicit)
     if bool_config(config.get("scan_full"), default=False):
-        return ""
+        # An explicit root bypasses the remote-session preferred-root fallback.
+        return "/"
     return preferred_scan_roots_text()
 
 
@@ -81,185 +104,7 @@ def quote_sh(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
-SSH_OPTIONS_WITH_VALUE = {
-    "-b",
-    "-c",
-    "-D",
-    "-E",
-    "-F",
-    "-I",
-    "-i",
-    "-J",
-    "-L",
-    "-l",
-    "-m",
-    "-O",
-    "-o",
-    "-p",
-    "-Q",
-    "-R",
-    "-S",
-    "-W",
-    "-w",
-}
-
-IGNORED_HOST_TOKENS = {
-    "host",
-    "password",
-    "passwd",
-    "port",
-    "ssh",
-    "user",
-    "vps",
-}
-
-REMOTE_TARGET_PATTERN = re.compile(
-    r"""
-    (?<![A-Za-z0-9_.-])
-    (?:(?P<user>[A-Za-z0-9._-]+)@)?
-    (?P<host>
-        \[[0-9A-Fa-f:.]+\]
-        |
-        (?:\d{1,3}\.){3}\d{1,3}
-        |
-        localhost
-        |
-        [A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*
-    )
-    (?::(?P<port>\d{1,5}))?
-    """,
-    re.VERBOSE,
-)
-
-
-def clean_remote_host_token(hostname: str) -> str:
-    cleaned = hostname.strip().strip("\"'<>[](){}")
-    if not cleaned:
-        raise ValueError("缺少 VPS 地址。")
-    return cleaned
-
-
-def score_remote_target_candidate(username: str | None, hostname: str, port: int | None) -> int:
-    score = 0
-    lowered = hostname.lower()
-    if username:
-        score += 4
-    if "." in hostname or ":" in hostname or hostname.replace(".", "").isdigit():
-        score += 3
-    if port is not None:
-        score += 2
-    if lowered in IGNORED_HOST_TOKENS:
-        score -= 6
-    return score
-
-
-def parse_port_value(value: str | int | None) -> int | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    if not text.isdigit():
-        raise ValueError(f"SSH 端口格式无效：{value}")
-    port = int(text)
-    if not (1 <= port <= 65535):
-        raise ValueError(f"SSH 端口超出范围：{value}")
-    return port
-
-
-def parse_ssh_command_target(text: str) -> tuple[str | None, str, int | None] | None:
-    try:
-        tokens = shlex.split(text)
-    except ValueError:
-        return None
-    if not tokens or tokens[0] != "ssh":
-        return None
-
-    username: str | None = None
-    port: int | None = None
-    index = 1
-    while index < len(tokens):
-        token = tokens[index]
-        if token in SSH_OPTIONS_WITH_VALUE:
-            if index + 1 >= len(tokens):
-                break
-            value = tokens[index + 1]
-            if token == "-l":
-                username = value
-            elif token == "-p":
-                port = parse_port_value(value)
-            index += 2
-            continue
-        if token.startswith("-p") and token != "-p":
-            port = parse_port_value(token[2:])
-            index += 1
-            continue
-        if token.startswith("-l") and token != "-l":
-            username = token[2:] or None
-            index += 1
-            continue
-        if token.startswith("-"):
-            index += 1
-            continue
-
-        target = token
-        if "@" in target:
-            parsed_user, _, hostname = target.rpartition("@")
-            username = parsed_user or username
-        else:
-            hostname = target
-        hostname = clean_remote_host_token(hostname)
-        return username or None, hostname, port
-    return None
-
-
-def parse_remote_target(remote_host: str) -> tuple[str | None, str, int | None]:
-    text = remote_host.strip()
-    if not text:
-        raise ValueError("缺少 VPS 地址。")
-
-    if text.startswith("ssh://"):
-        parsed = urlsplit(text)
-        if not parsed.hostname:
-            raise ValueError(f"VPS 地址格式无效：{remote_host}")
-        return parsed.username or None, parsed.hostname, parse_port_value(parsed.port)
-
-    ssh_target = parse_ssh_command_target(text)
-    if ssh_target is not None:
-        return ssh_target
-
-    candidates: list[tuple[int, str | None, str, int | None]] = []
-    for match in REMOTE_TARGET_PATTERN.finditer(text):
-        hostname = clean_remote_host_token(match.group("host"))
-        username = match.group("user") or None
-        port = parse_port_value(match.group("port"))
-        score = score_remote_target_candidate(username, hostname, port)
-        candidates.append((score, username, hostname, port))
-    if candidates:
-        _, username, hostname, port = max(candidates, key=lambda item: item[0])
-        return username, hostname, port
-
-    direct = clean_remote_host_token(text)
-    if " " in direct:
-        raise ValueError(f"VPS 地址格式无效：{remote_host}")
-    if "@" not in direct:
-        return None, direct, None
-    username, _, hostname = direct.rpartition("@")
-    if not hostname:
-        raise ValueError(f"VPS 地址格式无效：{remote_host}")
-    return username or None, clean_remote_host_token(hostname), None
-
-
-def format_remote_host(username: str | None, hostname: str) -> str:
-    return f"{username}@{hostname}" if username else hostname
-
-
-def normalize_remote_connection(remote_host: str, remote_port: str | int | None) -> tuple[str, str]:
-    username, hostname, embedded_port = parse_remote_target(remote_host)
-    port = embedded_port if embedded_port is not None else parse_port_value(remote_port)
-    if port is None:
-        port = 22
-    return format_remote_host(username, hostname), str(port)
+parse_port_value = parse_port
 
 
 def parse_remote_host(remote_host: str) -> tuple[str | None, str]:
@@ -283,17 +128,6 @@ def unique_local_path(directory: Path, filename: str) -> Path:
         if not trial.exists():
             return trial
         index += 1
-
-
-def bundle_member_relative_path(member_name: str) -> Path | None:
-    parts = PurePosixPath(member_name).parts
-    for index in range(len(parts) - len(BUNDLE_MARKER_PARTS) + 1):
-        if parts[index : index + len(BUNDLE_MARKER_PARTS)] == BUNDLE_MARKER_PARTS:
-            remainder = parts[index + len(BUNDLE_MARKER_PARTS) :]
-            if not remainder:
-                return None
-            return Path(*remainder)
-    return None
 
 
 @dataclass
@@ -358,10 +192,11 @@ class RemoteSystemInfo:
                 self.has_ffmpeg,
                 self.has_ffprobe,
                 self.has_mediainfo,
-                self.has_numpy,
-                self.has_pil,
             )
         )
+
+    def spectrum_python_deps_ready(self) -> bool:
+        return self.has_numpy and self.has_pil
 
 
 @dataclass
@@ -378,199 +213,50 @@ class RemoteCommandError(RuntimeError):
     pass
 
 
+class UnknownHostKeyError(RuntimeError):
+    def __init__(self, hostname: str, key_type: str, fingerprint: str) -> None:
+        self.hostname = hostname
+        self.key_type = key_type
+        self.fingerprint = fingerprint
+        super().__init__(f"unknown SSH host key for {hostname}: {key_type} {fingerprint}")
+
+
+class RejectUnknownHostKeyPolicy:
+    def missing_host_key(self, _client, hostname: str, key) -> None:
+        try:
+            key_type = key.get_name()
+        except Exception:
+            key_type = "unknown"
+        try:
+            digest = hashlib.sha256(key.asbytes()).digest()
+            fingerprint = "SHA256:" + base64.b64encode(digest).decode("ascii").rstrip("=")
+        except Exception:
+            fingerprint = "unavailable"
+        raise UnknownHostKeyError(hostname, key_type, fingerprint)
+
+
 class TaskCancelledError(RuntimeError):
     pass
 
 
-PROBE_REMOTE_SYSTEM_SCRIPT = r"""
-set -eu
-
-if [ -r /etc/os-release ]; then
-  . /etc/os-release
-fi
-
-has_cmd() {
-  if command -v "$1" >/dev/null 2>&1; then
-    printf '1'
-  else
-    printf '0'
-  fi
-}
-
-has_py_mod() {
-  if python3 - "$1" <<'PY' >/dev/null 2>&1
-import importlib.util
-import sys
-raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
-PY
-  then
-    printf '1'
-  else
-    printf '0'
-  fi
-}
-
-printf 'REMOTE_OS=%s\n' "$(uname -s 2>/dev/null || echo unknown)"
-printf 'REMOTE_ARCH=%s\n' "$(uname -m 2>/dev/null || echo unknown)"
-printf 'REMOTE_HOME=%s\n' "${HOME:-}"
-printf 'REMOTE_ID=%s\n' "${ID:-}"
-printf 'REMOTE_ID_LIKE=%s\n' "${ID_LIKE:-}"
-printf 'REMOTE_VERSION_ID=%s\n' "${VERSION_ID:-}"
-printf 'REMOTE_HAS_TAR=%s\n' "$(has_cmd tar)"
-printf 'REMOTE_HAS_BASH=%s\n' "$(has_cmd bash)"
-printf 'REMOTE_HAS_PYTHON3=%s\n' "$(has_cmd python3)"
-printf 'REMOTE_HAS_CURL=%s\n' "$(has_cmd curl)"
-printf 'REMOTE_HAS_FFMPEG=%s\n' "$(has_cmd ffmpeg)"
-printf 'REMOTE_HAS_FFPROBE=%s\n' "$(has_cmd ffprobe)"
-printf 'REMOTE_HAS_MEDIAINFO=%s\n' "$(has_cmd mediainfo)"
-printf 'REMOTE_HAS_NUMPY=%s\n' "$(has_py_mod numpy)"
-printf 'REMOTE_HAS_PIL=%s\n' "$(has_py_mod PIL)"
-printf 'REMOTE_HAS_BDINFO=%s\n' "$(has_cmd BDInfo)"
-printf 'REMOTE_HAS_BD_INFO=%s\n' "$(has_cmd bd_info)"
-"""
+def system_known_hosts_files() -> tuple[Path, ...]:
+    candidates = [Path("/etc/ssh/ssh_known_hosts"), Path("/etc/ssh/ssh_known_hosts2")]
+    program_data = os.environ.get("PROGRAMDATA", "").strip()
+    if program_data:
+        candidates.append(Path(program_data) / "ssh" / "ssh_known_hosts")
+    return tuple(path for path in candidates if path.is_file())
 
 
-ENSURE_REMOTE_SYSTEM_DEPS_SCRIPT = r"""
-set -eu
-
-if [ -r /etc/os-release ]; then
-  . /etc/os-release
-fi
-
-id="${ID:-}"
-id_like="${ID_LIKE:-}"
-
-has_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-word_match() {
-  case " $1 " in
-    *" $2 "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-is_debian_like() {
-  word_match "$id $id_like" debian || word_match "$id $id_like" ubuntu
-}
-
-is_alpine_like() {
-  word_match "$id $id_like" alpine
-}
-
-as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-    return $?
-  fi
-  if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-    sudo -n "$@"
-    return $?
-  fi
-  return 97
-}
-
-enable_ubuntu_universe() {
-  if [ "$id" != "ubuntu" ]; then
-    return 0
-  fi
-  if apt-cache show mediainfo >/dev/null 2>&1 && apt-cache show ffmpeg >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "[remote] Ubuntu universe repo looks unavailable; trying to enable it" >&2
-  if ! command -v add-apt-repository >/dev/null 2>&1; then
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common >/dev/null
-  fi
-  if command -v add-apt-repository >/dev/null 2>&1; then
-    as_root add-apt-repository -y universe >/dev/null 2>&1 || true
-  fi
-}
-
-enable_alpine_community() {
-  if grep -Eq '^[[:space:]]*[^#].*/community/?[[:space:]]*$' /etc/apk/repositories 2>/dev/null; then
-    return 0
-  fi
-  echo "[remote] Alpine community repo looks unavailable; trying to enable it" >&2
-  as_root sh -eu <<'EOS'
-tmp_file="$(mktemp)"
-cleanup() {
-  rm -f "$tmp_file"
-}
-trap cleanup EXIT
-
-if grep -Eq '^[[:space:]]*#.*\/community/?[[:space:]]*$' /etc/apk/repositories 2>/dev/null; then
-  awk '
-    /^[[:space:]]*#/ && /\/community\/?[[:space:]]*$/ { sub(/^[[:space:]]*#[[:space:]]*/, "", $0) }
-    { print }
-  ' /etc/apk/repositories > "$tmp_file"
-else
-  awk '
-    { print }
-    /^[[:space:]]*[^#].*\/main\/?[[:space:]]*$/ {
-      line=$0
-      sub(/\/main\/?[[:space:]]*$/, "/community", line)
-      print line
-    }
-  ' /etc/apk/repositories > "$tmp_file"
-fi
-
-cp "$tmp_file" /etc/apk/repositories
-EOS
-}
-
-missing_required=""
-for cmd in tar bash python3 curl ffmpeg ffprobe mediainfo; do
-  if ! has_cmd "$cmd"; then
-    missing_required="$missing_required $cmd"
-  fi
-done
-
-need_optional_bd="0"
-if ! has_cmd BDInfo && ! has_cmd bd_info; then
-  need_optional_bd="1"
-fi
-
-if [ -z "${missing_required# }" ] && [ "$need_optional_bd" = "0" ]; then
-  echo "status=ready"
-  exit 0
-fi
-
-if is_debian_like; then
-  if ! as_root true >/dev/null 2>&1; then
-    echo "status=missing-required-no-privilege"
-    exit 0
-  fi
-  echo "[remote] Debian/Ubuntu detected; installing system packages for PT-BDtool" >&2
-  as_root apt-get update >/dev/null
-  if ! as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 python3-numpy python3-pil tar ffmpeg mediainfo zip >/dev/null 2>&1; then
-    enable_ubuntu_universe
-    as_root apt-get update >/dev/null
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 python3-numpy python3-pil tar ffmpeg mediainfo zip >/dev/null
-  fi
-  as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y libbluray-bin >/dev/null 2>&1 || true
-  echo "status=installed"
-  exit 0
-fi
-
-if is_alpine_like; then
-  if ! as_root true >/dev/null 2>&1; then
-    echo "status=missing-required-no-privilege"
-    exit 0
-  fi
-  echo "[remote] Alpine detected; installing system packages for PT-BDtool" >&2
-  if ! as_root apk add --no-cache bash curl python3 py3-numpy py3-pillow tar ffmpeg mediainfo zip >/dev/null 2>&1; then
-    enable_alpine_community
-    as_root apk update >/dev/null
-    as_root apk add --no-cache bash curl python3 py3-numpy py3-pillow tar ffmpeg mediainfo zip >/dev/null
-  fi
-  as_root apk add --no-cache libbluray >/dev/null 2>&1 || true
-  echo "status=installed"
-  exit 0
-fi
-
-echo "status=unsupported"
-"""
+def host_key_help(remote_host: str, hostname: str, port: int) -> str:
+    known_hosts = Path.home() / ".ssh" / "known_hosts"
+    return (
+        "请先通过可信渠道核对服务器 SSH 主机密钥指纹，然后在系统终端执行：\n"
+        f"  ssh -p {port} {remote_host}\n"
+        "确认终端显示的指纹无误并接受后，再重试 PT-BDtool。也可将经核验的公钥写入：\n"
+        f"  {known_hosts}\n"
+        f"采集候选公钥可使用：ssh-keyscan -p {port} {hostname}\n"
+        "不要在未核对指纹时直接信任 ssh-keyscan 的输出。"
+    )
 
 
 class PTBDRemoteBackend:
@@ -600,6 +286,7 @@ class PTBDRemoteBackend:
 
     def connect(self) -> None:
         self.ensure_available()
+        self.ensure_not_cancelled()
         if self.client is not None:
             return
         normalized_host, normalized_port = normalize_remote_connection(
@@ -609,58 +296,123 @@ class PTBDRemoteBackend:
         username, hostname = parse_remote_host(normalized_host)
         password = self.config.get("remote_password") or None
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(
-            hostname=hostname,
-            port=int(normalized_port),
-            username=username,
-            password=password,
-            allow_agent=not password,
-            look_for_keys=not password,
-            compress=True,
-            timeout=20,
-            banner_timeout=20,
-            auth_timeout=20,
-        )
-        self.client = client
-        # SFTP is optional: some VPS disable the subsystem. Open on demand.
+        port = int(normalized_port)
+        try:
+            self.client = client
+            self.ensure_not_cancelled()
+            # Paramiko's default path is the current user's ~/.ssh/known_hosts.
+            client.load_system_host_keys()
+            for known_hosts_file in system_known_hosts_files():
+                client.load_system_host_keys(str(known_hosts_file))
+            client.set_missing_host_key_policy(RejectUnknownHostKeyPolicy())
+            self.ensure_not_cancelled()
+            client.connect(
+                hostname=hostname,
+                port=port,
+                username=username,
+                password=password,
+                allow_agent=not password,
+                look_for_keys=not password,
+                compress=True,
+                timeout=20,
+                banner_timeout=20,
+                auth_timeout=20,
+            )
+            self.ensure_not_cancelled()
+        except UnknownHostKeyError as exc:
+            self._discard_connect_attempt(client)
+            raise RemoteCommandError(
+                "VPS 主机密钥不在 known_hosts 中，已拒绝连接。\n"
+                f"服务器展示的候选密钥：{exc.key_type} {exc.fingerprint}\n"
+                f"{host_key_help(normalized_host, hostname, port)}"
+            ) from exc
+        except paramiko.BadHostKeyException as exc:
+            self._discard_connect_attempt(client)
+            raise RemoteCommandError(
+                "VPS 主机密钥与 known_hosts 记录不一致，已拒绝连接。"
+                "这可能是服务器密钥已变更，也可能是中间人攻击。\n"
+                "不要直接删除原记录；请先通过可信渠道确认服务器的新指纹。\n"
+                f"连接目标：{normalized_host}:{port}\n原始错误：{exc}"
+            ) from exc
+        except TaskCancelledError:
+            self._discard_connect_attempt(client)
+            raise
+        except Exception:
+            self._discard_connect_attempt(client)
+            if self._cancelled:
+                raise TaskCancelledError("任务已取消。")
+            raise
 
     def ensure_sftp(self) -> None:
         self.connect()
+        self.ensure_not_cancelled()
         if self.sftp is not None:
             return
+        client = self.client
+        if client is None:
+            raise RemoteCommandError("SSH 连接已断开，无法打开 SFTP。")
+        sftp = None
         try:
-            self.sftp = self.client.open_sftp()
+            sftp = client.open_sftp()
+            self.ensure_not_cancelled()
+            if self.client is not client:
+                raise RemoteCommandError("SSH 连接在打开 SFTP 时已变更。")
+            self.sftp = sftp
+            self.ensure_not_cancelled()
+        except TaskCancelledError:
+            self._discard_sftp_attempt(sftp)
+            raise
         except Exception as exc:
+            self._discard_sftp_attempt(sftp)
+            if self._cancelled:
+                raise TaskCancelledError("任务已取消。") from exc
             raise RemoteCommandError(
                 "SSH 已连通，但 SFTP 子系统不可用（Channel closed）。"
                 "将尝试用 SSH 管道传输文件；若仍失败，请在 VPS 启用 Subsystem sftp。"
                 f" 原始错误：{exc}"
             ) from exc
 
+    def _discard_sftp_attempt(self, sftp) -> None:
+        if sftp is not None:
+            try:
+                sftp.close()
+            except Exception:
+                pass
+        if self.sftp is sftp:
+            self.sftp = None
+
     def put_file(self, local_path: Path | str, remote_path: str) -> None:
-        """Upload a local file. Prefer SFTP; fall back to SSH stdin pipe."""
+        """Upload a local file. Prefer SFTP; fall back to an SSH stdin pipe."""
         self.connect()
         self.ensure_not_cancelled()
         local = Path(local_path)
         try:
             self.ensure_sftp()
             self.sftp.put(str(local), remote_path)
+            self.ensure_not_cancelled()
             return
+        except TaskCancelledError:
+            raise
         except Exception as sftp_exc:
+            self.ensure_not_cancelled()
             self.log(f"[gui] SFTP 上传不可用，回退 SSH 管道：{sftp_exc}")
 
-        transport = self.client.get_transport()
-        if transport is None:
-            raise RemoteCommandError("SSH 连接已断开，无法上传文件。")
-        # Ensure parent dir exists
         parent = str(PurePosixPath(remote_path).parent)
         if parent and parent not in {".", "/"}:
             self.run_script(f"mkdir -p {quote_sh(parent)}", check=False)
-        channel = transport.open_session()
-        channel.settimeout(600)
-        self._active_channel = channel
+        self.ensure_not_cancelled()
+        client = self.client
+        if client is None:
+            raise RemoteCommandError("SSH 连接已断开，无法上传文件。")
+        transport = client.get_transport()
+        if transport is None:
+            raise RemoteCommandError("SSH 连接已断开，无法上传文件。")
+        channel = None
         try:
+            channel = transport.open_session()
+            channel.settimeout(600)
+            self._active_channel = channel
+            self.ensure_not_cancelled()
             channel.exec_command(f"cat > {quote_sh(remote_path)}")
             with local.open("rb") as handle:
                 while True:
@@ -670,8 +422,8 @@ class PTBDRemoteBackend:
                         break
                     channel.sendall(chunk)
             channel.shutdown_write()
-            # Drain remote output/errors
             while not channel.exit_status_ready():
+                self.ensure_not_cancelled()
                 if channel.recv_ready():
                     channel.recv(4096)
                 if channel.recv_stderr_ready():
@@ -685,68 +437,109 @@ class PTBDRemoteBackend:
                 raise RemoteCommandError(
                     f"SSH 管道上传失败 rc={rc}: {err.decode('utf-8', errors='replace') or remote_path}"
                 )
+        except TaskCancelledError:
+            raise
+        except Exception as exc:
+            if self._cancelled:
+                raise TaskCancelledError("任务已取消。") from exc
+            if isinstance(exc, RemoteCommandError):
+                raise
+            raise RemoteCommandError(f"SSH 管道上传失败：{exc}") from exc
         finally:
-            try:
-                channel.close()
-            except Exception:
-                pass
-            if self._active_channel is channel:
-                self._active_channel = None
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+                if self._active_channel is channel:
+                    self._active_channel = None
 
     def get_file(self, remote_path: str, local_path: Path | str) -> None:
-        """Download a remote file. Prefer SFTP; fall back to SSH stdout pipe."""
+        """Download a remote file. Prefer SFTP; fall back to an SSH stdout pipe."""
         self.connect()
         self.ensure_not_cancelled()
         local = Path(local_path)
         local.parent.mkdir(parents=True, exist_ok=True)
+        partial = local.with_name(f".{local.name}.{uuid.uuid4().hex}.part")
         try:
-            self.ensure_sftp()
-            self.sftp.get(remote_path, str(local))
-            return
-        except Exception as sftp_exc:
-            self.log(f"[gui] SFTP 下载不可用，回退 SSH 管道：{sftp_exc}")
-
-        transport = self.client.get_transport()
-        if transport is None:
-            raise RemoteCommandError("SSH 连接已断开，无法下载文件。")
-        channel = transport.open_session()
-        channel.settimeout(600)
-        self._active_channel = channel
-        try:
-            channel.exec_command(f"cat {quote_sh(remote_path)}")
-            with local.open("wb") as handle:
-                while True:
-                    self.ensure_not_cancelled()
-                    if channel.recv_ready():
-                        chunk = channel.recv(65536)
-                        if not chunk:
-                            break
-                        handle.write(chunk)
-                        continue
-                    if channel.exit_status_ready():
-                        while channel.recv_ready():
-                            handle.write(channel.recv(65536))
-                        break
-                    time.sleep(0.05)
-            rc = channel.recv_exit_status()
-            if rc != 0 or not local.exists() or local.stat().st_size <= 0:
-                err = b""
-                while channel.recv_stderr_ready():
-                    err += channel.recv_stderr(4096)
-                try:
-                    local.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                raise RemoteCommandError(
-                    f"SSH 管道下载失败 rc={rc}: {err.decode('utf-8', errors='replace') or remote_path}"
-                )
-        finally:
             try:
-                channel.close()
-            except Exception:
-                pass
-            if self._active_channel is channel:
-                self._active_channel = None
+                self.ensure_sftp()
+                self.sftp.get(remote_path, str(partial))
+                self.ensure_not_cancelled()
+                if not partial.is_file() or partial.stat().st_size <= 0:
+                    raise RemoteCommandError("SFTP 下载结果为空")
+                os.replace(partial, local)
+                return
+            except TaskCancelledError:
+                raise
+            except Exception as sftp_exc:
+                partial.unlink(missing_ok=True)
+                self.ensure_not_cancelled()
+                self.log(f"[gui] SFTP 下载不可用，回退 SSH 管道：{sftp_exc}")
+
+            client = self.client
+            if client is None:
+                raise RemoteCommandError("SSH 连接已断开，无法下载文件。")
+            transport = client.get_transport()
+            if transport is None:
+                raise RemoteCommandError("SSH 连接已断开，无法下载文件。")
+            channel = None
+            try:
+                channel = transport.open_session()
+                channel.settimeout(600)
+                self._active_channel = channel
+                self.ensure_not_cancelled()
+                channel.exec_command(f"cat {quote_sh(remote_path)}")
+                with partial.open("xb") as handle:
+                    while True:
+                        self.ensure_not_cancelled()
+                        if channel.recv_ready():
+                            chunk = channel.recv(65536)
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+                            continue
+                        if channel.exit_status_ready():
+                            while channel.recv_ready():
+                                handle.write(channel.recv(65536))
+                            break
+                        time.sleep(0.05)
+                rc = channel.recv_exit_status()
+                if rc != 0 or not partial.exists() or partial.stat().st_size <= 0:
+                    err = b""
+                    while channel.recv_stderr_ready():
+                        err += channel.recv_stderr(4096)
+                    raise RemoteCommandError(
+                        f"SSH 管道下载失败 rc={rc}: {err.decode('utf-8', errors='replace') or remote_path}"
+                    )
+                os.replace(partial, local)
+            except TaskCancelledError:
+                raise
+            except Exception as exc:
+                if self._cancelled:
+                    raise TaskCancelledError("任务已取消。") from exc
+                if isinstance(exc, RemoteCommandError):
+                    raise
+                raise RemoteCommandError(f"SSH 管道下载失败：{exc}") from exc
+            finally:
+                if channel is not None:
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
+                    if self._active_channel is channel:
+                        self._active_channel = None
+        finally:
+            partial.unlink(missing_ok=True)
+
+    def _discard_connect_attempt(self, client, sftp=None) -> None:
+        self._discard_sftp_attempt(sftp)
+        try:
+            client.close()
+        except Exception:
+            pass
+        if self.client is client:
+            self.client = None
 
     def close(self) -> None:
         channel = self._active_channel
@@ -795,17 +588,23 @@ class PTBDRemoteBackend:
         stream_output: bool = False,
         check: bool = True,
     ) -> CommandResult:
+        self.ensure_not_cancelled()
         self.connect()
         self.ensure_not_cancelled()
-        transport = self.client.get_transport()
-        if transport is None:
-            raise RemoteCommandError("SSH 连接已断开。")
-        channel = transport.open_session()
-        channel.set_combine_stderr(True)
         command = self.build_shell_command(script, use_bash=use_bash, env=env)
-        self._active_channel = channel
+        channel = None
         raw_output = io.StringIO()
         try:
+            client = self.client
+            if client is None:
+                raise RemoteCommandError("SSH 连接已断开。")
+            transport = client.get_transport()
+            if transport is None:
+                raise RemoteCommandError("SSH 连接已断开。")
+            channel = transport.open_session()
+            channel.set_combine_stderr(True)
+            self._active_channel = channel
+            self.ensure_not_cancelled()
             channel.exec_command(command)
             stream = channel.makefile("r", -1)
             while True:
@@ -817,27 +616,32 @@ class PTBDRemoteBackend:
                 if stream_output:
                     self.log(line.rstrip("\r\n"))
             exit_code = channel.recv_exit_status()
+            self.ensure_not_cancelled()
         except TaskCancelledError:
-            try:
-                channel.close()
-            except Exception:
-                pass
             raise
         except Exception as exc:
-            try:
-                channel.close()
-            except Exception:
-                pass
+            if self._cancelled:
+                raise TaskCancelledError("任务已取消。") from exc
             raise RemoteCommandError(str(exc)) from exc
         finally:
-            self._active_channel = None
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+                if self._active_channel is channel:
+                    self._active_channel = None
         output = raw_output.getvalue().strip()
+        self.ensure_not_cancelled()
         if check and exit_code != 0:
             raise RemoteCommandError(output or f"远端命令失败，退出码：{exit_code}")
         return CommandResult(exit_code=exit_code, output=output)
 
     def diagnose_connection(self) -> dict:
         """Probe SSH + remote deps without starting a full scan/generate job."""
+        explicit_scan_roots = split_path_list(self.config.get("scan_include"))
+        full_scan = bool_config(self.config.get("scan_full"), default=False) and not explicit_scan_roots
+        scan_mode = "whitelist" if explicit_scan_roots else ("full" if full_scan else "preferred")
         report: dict = {
             "ok": False,
             "remote_host": self.config.get("remote_host"),
@@ -849,7 +653,7 @@ class PTBDRemoteBackend:
             "core_deps_ready": False,
             "missing_core_deps": [],
             "has_bdinfo": False,
-            "scan_mode": "full" if bool_config(self.config.get("scan_full"), default=False) else "preferred",
+            "scan_mode": scan_mode,
             "scan_roots": build_effective_scan_include(self.config),
             "bootstrap": bool_config(self.config.get("remote_bootstrap"), default=True),
             "message": "",
@@ -858,6 +662,8 @@ class PTBDRemoteBackend:
         try:
             self.connect()
             info = self.probe_remote_system()
+        except TaskCancelledError:
+            raise
         except Exception as exc:
             report["message"] = f"连接失败：{exc}"
             report["hints"] = [
@@ -874,7 +680,7 @@ class PTBDRemoteBackend:
         report["core_deps_ready"] = info.core_deps_ready()
         report["has_bdinfo"] = bool(info.has_bdinfo or info.has_bd_info)
         missing = []
-        for label, ready in (
+        required_checks = [
             ("tar", info.has_tar),
             ("bash", info.has_bash),
             ("python3", info.has_python3),
@@ -882,9 +688,10 @@ class PTBDRemoteBackend:
             ("ffmpeg", info.has_ffmpeg),
             ("ffprobe", info.has_ffprobe),
             ("mediainfo", info.has_mediainfo),
-            ("numpy", info.has_numpy),
-            ("PIL", info.has_pil),
-        ):
+        ]
+        if str(self.config.get("audio_spectrum_mode") or "single") == "combined":
+            required_checks.extend((("numpy", info.has_numpy), ("PIL", info.has_pil)))
+        for label, ready in required_checks:
             if not ready:
                 missing.append(label)
         report["missing_core_deps"] = missing
@@ -906,14 +713,18 @@ class PTBDRemoteBackend:
             hints.append("未检测到 BDInfo/bd_info：原盘/ISO 可能走降级报告")
         if report["scan_mode"] == "preferred":
             hints.append(f"默认扫描优先目录：{report['scan_roots'] or preferred_scan_roots_text()}")
-        else:
+        elif report["scan_mode"] == "full":
             hints.append("当前为全盘扫描模式，媒体多时可能较慢")
+        else:
+            hints.append(f"当前仅扫描显式白名单：{report['scan_roots']}")
 
         # Probe SFTP availability without failing diagnose.
         sftp_ok = False
         try:
             self.ensure_sftp()
             sftp_ok = True
+        except TaskCancelledError:
+            raise
         except Exception as sftp_exc:
             hints.append(f"SFTP 不可用，将回退 SSH 管道传输：{sftp_exc}")
         report["sftp_available"] = sftp_ok
@@ -929,7 +740,8 @@ class PTBDRemoteBackend:
         return report
 
     def probe_remote_system(self) -> RemoteSystemInfo:
-        result = self.run_script(PROBE_REMOTE_SYSTEM_SCRIPT)
+        script = read_shared_asset(self.app_root, "ptbd_core/assets/remote-probe.sh")
+        result = self.run_script(script)
         info = RemoteSystemInfo.from_output(result.output)
         self.remote_info = info
         if not self.remote_cache_root:
@@ -938,7 +750,14 @@ class PTBDRemoteBackend:
         return info
 
     def ensure_remote_system_deps(self) -> None:
-        result = self.run_script(ENSURE_REMOTE_SYSTEM_DEPS_SCRIPT, stream_output=True, check=False)
+        script = read_shared_asset(self.app_root, "ptbd_core/assets/remote-install-deps.sh")
+        spectrum_mode = str(self.config.get("audio_spectrum_mode") or "single")
+        result = self.run_script(
+            script,
+            env={"PTBD_AUDIO_SPECTRUM_MODE": spectrum_mode},
+            stream_output=True,
+            check=False,
+        )
         if result.exit_code != 0:
             self.log(f"[gui] 远端依赖自动安装返回退出码：{result.exit_code}，继续按回退逻辑处理")
         status_line = ""
@@ -965,53 +784,67 @@ class PTBDRemoteBackend:
         ]
         return all(path.exists() for path in required)
 
+    def expected_bundle_checksum(self) -> str | None:
+        def read_checksum_sidecar(url: str) -> bytes:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                return response.read()
+
+        try:
+            resolution = resolve_bundle_checksum(
+                bundle_url=BUNDLE_DOWNLOAD_URL,
+                checksum_url=BUNDLE_CHECKSUM_URL,
+                explicit_checksum=BUNDLE_SHA256,
+                allow_unverified=BUNDLE_ALLOW_UNVERIFIED,
+                read_checksum_sidecar=read_checksum_sidecar,
+            )
+        except ExplicitBundleChecksumError as exc:
+            raise RemoteCommandError(f"PTBD_BUNDLE_SHA256 无效：{exc}") from (exc.__cause__ or exc)
+        except BundleChecksumUnavailableError as exc:
+            raise RemoteCommandError(
+                "bundle checksum 不可用；请提供 PTBD_BUNDLE_SHA256、可用的 .sha256 sidecar，"
+                "或显式设置 PTBD_BUNDLE_ALLOW_UNVERIFIED=1。"
+            ) from (exc.__cause__ or exc)
+        except BundleChecksumSidecarEncodingError as exc:
+            raise RemoteCommandError("bundle checksum sidecar 不是 ASCII 文本。") from (
+                exc.__cause__ or exc
+            )
+        except BundleChecksumSidecarDigestError as exc:
+            raise RemoteCommandError(f"bundle checksum sidecar 无效：{exc}") from (
+                exc.__cause__ or exc
+            )
+
+        if resolution.source == "official-bootstrap":
+            self.log("[gui] bundle checksum sidecar 不可用，使用官方旧资产固定摘要")
+        elif resolution.source == "unverified":
+            self.log(f"[gui] 警告：已显式允许未校验 bundle：{resolution.unavailable_error}")
+        return resolution.checksum
+
     def download_local_bundle(self) -> None:
         bundle_root = self.app_root / "third_party" / "bundle" / "linux-amd64"
         self.log(f"[gui] 本地 linux bundle 缺失，尝试下载：{BUNDLE_DOWNLOAD_URL}")
         with tempfile.TemporaryDirectory(prefix="ptbd-bundle-download-") as temp_dir:
             archive_path = Path(temp_dir) / "PT-BDtool-linux-amd64.tar.gz"
-            with urllib.request.urlopen(BUNDLE_DOWNLOAD_URL, timeout=120) as response, archive_path.open("wb") as handle:
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-
-            stage_root = Path(temp_dir) / "linux-amd64"
-            with tarfile.open(archive_path, "r:gz") as archive:
-                extracted = 0
-                for member in archive.getmembers():
-                    relative_path = bundle_member_relative_path(member.name)
-                    if relative_path is None:
-                        continue
-                    target_path = stage_root / relative_path
-                    if member.isdir():
-                        target_path.mkdir(parents=True, exist_ok=True)
-                        extracted += 1
-                        continue
-                    if not member.isfile():
-                        continue
-                    target_path.parent.mkdir(parents=True, exist_ok=True)
-                    source_handle = archive.extractfile(member)
-                    if source_handle is None:
-                        raise RemoteCommandError(f"bundle 资产内容损坏：{member.name}")
-                    with source_handle, target_path.open("wb") as output_handle:
-                        while True:
-                            chunk = source_handle.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            output_handle.write(chunk)
-                    try:
-                        os.chmod(target_path, member.mode)
-                    except OSError:
-                        pass
-                    extracted += 1
-            if extracted == 0:
-                raise RemoteCommandError("bundle 资产里没有 third_party/bundle/linux-amd64")
-            bundle_root.parent.mkdir(parents=True, exist_ok=True)
-            if bundle_root.exists():
-                shutil.rmtree(bundle_root, ignore_errors=True)
-            stage_root.rename(bundle_root)
+            try:
+                with urllib.request.urlopen(BUNDLE_DOWNLOAD_URL, timeout=120) as response, archive_path.open(
+                    "wb"
+                ) as handle:
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+            except (OSError, ValueError) as exc:
+                raise RemoteCommandError(f"bundle 下载失败：{exc}") from exc
+            expected = self.expected_bundle_checksum()
+            if expected:
+                try:
+                    verify_bundle_checksum(archive_path, expected)
+                except (BundleArchiveError, OSError) as exc:
+                    raise RemoteCommandError(f"bundle SHA256 校验失败：{exc}") from exc
+            try:
+                extract_bundle_archive(archive_path, bundle_root)
+            except (BundleArchiveError, OSError, tarfile.TarError) as exc:
+                raise RemoteCommandError(f"bundle 资产校验失败：{exc}") from exc
         self.log(f"[gui] 本地 linux bundle 已就绪：{bundle_root}")
 
     def ensure_local_bundle(self) -> None:
@@ -1022,11 +855,8 @@ class PTBDRemoteBackend:
             raise RemoteCommandError("本地 bundle 拉取结束，但文件仍不完整。")
 
     def require_local_runtime_files(self, archive_mode: str) -> None:
-        required = [
-            self.app_root / "bdtool",
-            self.app_root / "bdtool.sh",
-            self.app_root / "lib" / "ui.sh",
-        ]
+        validate_profile(self.app_root, "remote")
+        required: list[Path] = []
         if archive_mode == "bundle":
             self.ensure_local_bundle()
             required.extend(
@@ -1041,10 +871,8 @@ class PTBDRemoteBackend:
 
     def runtime_members(self, archive_mode: str) -> list[tuple[Path, str]]:
         members = [
-            (self.app_root / "bdtool", "bdtool"),
-            (self.app_root / "bdtool.sh", "bdtool.sh"),
-            (self.app_root / "lib" / "ui.sh", "lib/ui.sh"),
-            (self.app_root / "scripts" / "audio-spectrum.py", "scripts/audio-spectrum.py"),
+            (entry.source, entry.relative_path)
+            for entry in validate_profile(self.app_root, "remote")
         ]
         if archive_mode == "bundle":
             bundle_root = self.app_root / "third_party" / "bundle" / "linux-amd64"
@@ -1156,6 +984,13 @@ class PTBDRemoteBackend:
             self.log("[gui] 已识别 Debian / Ubuntu / Alpine，先尝试自动装依赖")
             self.ensure_remote_system_deps()
             info = self.probe_remote_system()
+        if (
+            str(self.config.get("audio_spectrum_mode") or "single") == "combined"
+            and not info.spectrum_python_deps_ready()
+        ):
+            raise RemoteCommandError(
+                "组合音频频谱需要远端 Python numpy 和 Pillow；自动安装未能补齐，请先手动安装。"
+            )
         archive_mode = "minimal"
         if info.core_deps_ready():
             self.log("[gui] 远端系统依赖已齐，使用轻量运行包")
@@ -1229,7 +1064,7 @@ if [ -f "$archive_path" ]; then
 fi
 
 mkdir -p "$work_dir/bin" "$(dirname "$runtime_dir")"
-chmod +x "$work_dir/bdtool" "$work_dir/bdtool.sh"
+chmod +x "$work_dir/bdtool" "$work_dir/bdtool-legacy.sh" "$work_dir/bdtool.sh"
 
 rm -f "$work_dir/bin/BDInfo"
 if [ "$archive_mode" = "minimal" ] && ! command -v BDInfo >/dev/null 2>&1 && command -v bd_info >/dev/null 2>&1; then
@@ -1284,14 +1119,15 @@ rm -f "$archive_path"
         scan_exclude = self.config.get("scan_exclude", "")
         env["BDTOOL_SCAN_FULL_ROOT"] = scan_root
         if scan_include:
-            roots: list[str] = []
-            # Prefer explicit/preferred roots only; avoid silently expanding to "/" full-disk.
-            for item in split_path_list(scan_include):
-                if item and item not in roots:
-                    roots.append(item)
-            env["BDTOOL_SCAN_INCLUDE_ROOTS"] = " ".join(roots)
+            roots = split_path_list(scan_include)
+            env["BDTOOL_SCAN_INCLUDE_ROOTS"] = normalize_scan_roots(roots)
+            env["BDTOOL_SCAN_INCLUDE_ROOTS_JSON"] = json.dumps(roots, ensure_ascii=False)
+            env["BDTOOL_SCAN_INCLUDE_ROOTS_LINES"] = "\n".join(roots)
         if scan_exclude:
-            env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = str(scan_exclude)
+            excluded = split_path_list(scan_exclude)
+            env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = normalize_scan_roots(excluded)
+            env["BDTOOL_SCAN_EXCLUDE_ROOTS_JSON"] = json.dumps(excluded, ensure_ascii=False)
+            env["BDTOOL_SCAN_EXCLUDE_ROOTS_LINES"] = "\n".join(excluded)
         env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(self.config.get("audio_spectrum_mode") or "single")
         env["BDTOOL_AUDIO_SPECTRUM_BACKEND"] = str(self.config.get("audio_spectrum_backend") or "auto")
         env["BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS"] = str(
@@ -1307,7 +1143,13 @@ rm -f "$archive_path"
     def scan_items(self) -> list[dict]:
         remote_cmd = self.resolve_remote_command()
         scan_include = build_effective_scan_include(self.config)
-        mode = "全盘" if bool_config(self.config.get("scan_full"), default=False) and not split_path_list(self.config.get("scan_include")) else "优先目录"
+        explicit_scan_roots = split_path_list(self.config.get("scan_include"))
+        if explicit_scan_roots:
+            mode = "白名单"
+        elif bool_config(self.config.get("scan_full"), default=False):
+            mode = "全盘"
+        else:
+            mode = "优先目录"
         self.log(f"[gui] 扫描模式：{mode}；根目录：{scan_include or '(系统默认全盘候选根)'}")
         result = self.run_script(
             f"exec {quote_sh(remote_cmd)} {self.scan_command_suffix()}",

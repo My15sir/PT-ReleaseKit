@@ -1,0 +1,27 @@
+services:
+  ptbd:
+    build:
+      context: .
+    image: pt-bdtool:local
+    user: "${PTBD_UID:-1000}:${PTBD_GID:-1000}"
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${PTBD_WEB_PORT:-8899}:8899"
+    environment:
+      PTBD_WEB_HOST: 0.0.0.0
+      PTBD_WEB_PORT: 8899
+      PTBD_WEB_MODE: local
+      PTBD_WEB_LOCAL_ROOT: /media
+      PTBD_WEB_CONFIG: /config/config.json
+      PTBD_CONTAINER_SAVE_DIR: /output
+      BDTOOL_DATA_DIR: /config/runtime
+    volumes:
+      - "${PTBD_MEDIA_DIR:-./media}:/media:ro"
+      - "${PTBD_OUTPUT_DIR:-./output}:/output"
+      - "${PTBD_CONFIG_DIR:-./config}:/config"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512m

@@ -1,50 +1,175 @@
 # PT-BDtool
 
-PT-BDtool is a media info packaging tool.  
-It turns videos, audio files, Blu-ray `BDMV` folders, and Blu-ray `ISO` images into a cleaner result package that is easier to organize, share, or archive.
+PT-BDtool scans videos, audio files, `BDMV` directories, and `ISO` images. It creates screenshots, MediaInfo, audio spectra or BDInfo reports, then packages the generated files.
 
-## Current Status (2026-03)
+The project now uses a **Python-first modular core**, keeps a Shell compatibility layer, retains the Windows/macOS desktop GUI, and adds a Docker deployment for local processing on the media VPS.
 
-This repository is no longer just the old shell-only version.  
-The current project already includes these newer capabilities:
+## Generated Files
 
-- **Windows controller**: can be packaged as a standalone single-file `PT-BDtool.exe`
-- **macOS controller**: can be packaged as a standalone `PT-BDtool.app`
-- **Linux controller**: can be packaged as a portable `PT-BDtool-linux-portable.tar.gz`
-- **Windows portable config**: prefers saving config next to `PT-BDtool.exe`
-- **macOS portable config**: prefers saving config next to `PT-BDtool.app`
-- **Linux portable config**: prefers saving config next to the extracted Linux binary
-- **GitHub Releases portable apps**: pushing to `main` refreshes the `portable-latest` Windows/macOS/Linux download packages
-- **VPS dependency auto-detect**: `Debian` / `Ubuntu` / `Alpine` are auto-detected first
-- **Remote main flow**: scan → pick item → generate → return to local machine → cleanup on VPS
+- Video: `mediainfo.txt` and `1.png` through `6.png`
+- Audio: `mediainfo.txt` and `频谱图.png`
+- `BDMV` / `ISO`: `BDInfo.txt` and `1.png` through `6.png`
+- Package: normally `.zip`, with `.tar.gz` as a fallback
 
-If you only care whether the project is already usable for non-technical users, read these sections first:
+## Choose a Runtime
 
-- `4.1) Real standalone Windows / macOS controller`
-- `4.2) How to release Windows / macOS controller builds`
-- `6) Double-click does nothing, or it says bash / ssh / Python is missing`
+### Windows and macOS desktop GUI
 
-Typical output looks like this:
-- Video: `mediainfo.txt` + `1.png` to `6.png`
-- Audio: `mediainfo.txt` + `频谱图.png`
-- Disc / ISO: `BDInfo.txt` + `1.png` to `6.png`
+The desktop applications remain supported. They are intended for users who control a media VPS from a personal computer and want the scan, processing, download, and cleanup flow in one interface.
 
-If this is your first time using the project, follow the **quickest beginner path** below first.
+Download a package from the [`portable-latest`](https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest) release:
 
-## Quickest Beginner Path
+- Windows: extract `PT-BDtool-windows-portable.zip` and run `PT-BDtool.exe`
+- macOS: extract `PT-BDtool-macos-portable.zip` and run `PT-BDtool.app`
+- Linux: extract `PT-BDtool-linux-portable.tar.gz`
 
-### 1) Know which environment you are in
+Source launchers are also retained:
 
-Most users fall into one of these two cases:
+- Windows: `PT-BDtool.bat`
+- macOS: `PT-BDtool.command`
+- Linux: `PT-BDtool.sh`
+- Cross-platform GUI wrapper: `ptbd-gui`
 
-- **Local machine**: run on your own computer and keep the result there
-- **VPS / remote Linux**: run on a server, then download the result later
+Running the GUI from source requires Python 3 and Tk. Connection diagnostics and the built-in remote backend require Paramiko; without it, scan and processing operations fall back to system Bash and SSH. Release applications are built with PyInstaller and include the controller dependencies.
 
-If you are not sure, just start with the local-machine workflow.
+Before connecting to a new VPS for the first time, run `ssh -p PORT USER@HOST` in a system terminal and verify the displayed host-key fingerprint through a trusted channel before accepting it. The desktop controller reads `~/.ssh/known_hosts` and rejects unknown or changed host keys so SSH credentials are not sent to an unverified server.
 
-### 2) Install
+On first use, enter the VPS target (for example `root@host`), SSH port, a password or existing key, and the local save directory. The normal flow is save configuration, scan candidates, select entries, process remotely, and download the archive. Automatic cleanup only removes output directories and temporary packages created by that run; it never deletes the source media.
 
-For beginners, this is the safer install path:
+Desktop configuration and log locations:
+
+- Linux: `~/.config/ptbd-gui/config.json` and `PT-BDtool.log` in the same directory
+- Windows portable app: `PT-BDtool-config.json` next to the executable
+- macOS portable app: `PT-BDtool-config.json` next to `PT-BDtool.app`
+- Shell remote mode: `~/.config/ptbd-remote/config.env`
+
+If scanning or processing fails, first confirm that the system terminal can log in over SSH, that the VPS account can read the media directory, and that the log does not report missing dependencies or package-repository failures. Remote automatic installation primarily supports Debian, Ubuntu, and Alpine; other distributions may need manual dependency setup.
+
+If the VPS disables the SFTP subsystem, the built-in backend automatically falls back to SSH pipe transfers. No additional network port is required.
+
+### Docker on the media VPS
+
+Deploy Docker on the **same VPS that stores the media**. The container reads media from a read-only bind mount and writes generated files to a host output directory. It is not a separate remote-processing hop.
+
+```bash
+export PTBD_UID=1000
+export PTBD_GID=1000
+sudo mkdir -p /srv/media /srv/ptbd/output /srv/ptbd/config
+sudo chown "$PTBD_UID:$PTBD_GID" /srv/ptbd/output /srv/ptbd/config
+
+PTBD_MEDIA_DIR=/srv/media \
+PTBD_OUTPUT_DIR=/srv/ptbd/output \
+PTBD_CONFIG_DIR=/srv/ptbd/config \
+docker compose up -d --build
+```
+
+Compose binds the Web port to the VPS loopback interface by default. Create an SSH tunnel from the desktop computer:
+
+```bash
+ssh -L 8899:127.0.0.1:8899 user@VPS-IP
+```
+
+Then open locally:
+
+```text
+http://127.0.0.1:8899/
+```
+
+Compose mounts:
+
+- `PTBD_MEDIA_DIR` at `/media` as read-only
+- `PTBD_OUTPUT_DIR` at `/output` as writable
+- `PTBD_CONFIG_DIR` at `/config` as writable
+- `PTBD_UID` / `PTBD_GID` select the non-root container identity; the default is `1000:1000`
+- `PTBD_WEB_PORT` selects the loopback host port; the default is `8899`
+
+The container drops all Linux capabilities, enables `no-new-privileges`, and runs as a non-root user. The output and config directories must be writable by the configured UID/GID.
+
+See [`DOCKER.md`](DOCKER.md) for deployment, upgrades, reverse proxy examples, permissions, and troubleshooting.
+
+### Linux or VPS command line
+
+Process one file or directory:
+
+```bash
+./bdtool /path/to/movie.mkv --out /path/to/output
+```
+
+Scan a directory and return JSON:
+
+```bash
+./bdtool scan-json --dir /path/to/media
+```
+
+Check runtime commands:
+
+```bash
+./bdtool doctor
+./bdtool status
+```
+
+The Python core requires `python3`, `ffmpeg`, `ffprobe`, and `mediainfo`. `BDInfo` is recommended for Blu-ray processing. NumPy and Pillow are required only for combined audio spectra, not single-track spectra. Remote bootstrap installs them according to the selected mode, while the Docker image includes them. The installer and Docker image prepare the intended runtime environment.
+
+Other retained entrypoints are `./ptbd` for the guided flow, `./ptbd-start.sh` for the local menu, and `./ptbd-remote.sh` for the direct Shell remote workflow.
+
+## Python-first and Shell Compatibility
+
+`bdtool` remains the stable entrypoint. Processing commands are dispatched to `python3 -m ptbd_core.cli` by default. The core is split by responsibility:
+
+- `scanner.py`: media discovery and classification
+- `media_tools.py`: external media-tool execution
+- `artifacts.py`: screenshots, MediaInfo, spectra, and BDInfo artifacts
+- `pipeline.py`: processing orchestration
+- `returns.py`: packaging and return transports
+- `config.py`, `models.py`, and `jobs.py`: shared configuration, models, and task state
+
+Compatibility behavior is deliberate. `bdtool` delegates to `bdtool-legacy.sh` when:
+
+- it is called without arguments, preserving the interactive menu
+- it receives legacy menu arguments such as `start`, `install`, `--lang`, or `--non-interactive`
+- `PTBD_PYTHON_CORE=0` is set
+- Python 3 is unavailable
+
+Run the compatibility implementation explicitly with:
+
+```bash
+./bdtool-legacy.sh
+```
+
+New processing behavior should be implemented in `ptbd_core/`; Shell remains for compatibility, the legacy menu, and GUI/Web remote fallback when Paramiko is unavailable.
+
+## Desktop Workflow
+
+The remote scan defaults to `/home /root /data /mnt /media /srv`. Use an explicit scan whitelist to restrict the roots; it takes precedence over full scan. Enable full scan only when media is outside the preferred roots. Separate multiple roots with spaces or commas. Double-quote an individual path containing spaces, commas, or apostrophes, for example `"/data/PT Movies" "/mnt/O'Brien, Archive"`.
+
+The normal workflow is save configuration, run connection diagnostics, scan, select one or more entries, and process them. Batch processing continues after an individual failure, reports separate success and failure totals, and lets the GUI retry the failed entries.
+
+## Web Modes
+
+Start the source Web controller locally:
+
+```bash
+./ptbd-web --host 127.0.0.1 --port 8899 --open
+```
+
+The controller supports:
+
+- `remote`: the desktop/controller machine operates a VPS over SSH
+- `local`: the process scans a directory on its own host; Docker uses this mode with `/media` as its root
+
+The Web API supports connection diagnostics and batch results. Process jobs expose `failed` and `result_summary`, and finish as `success`, `partial`, `error`, or `cancelled`.
+
+Run local mode directly on Linux:
+
+```bash
+PTBD_WEB_MODE=local \
+PTBD_WEB_LOCAL_ROOT=/srv/media \
+./ptbd-web --host 127.0.0.1 --port 8899
+```
+
+After startup, set the save directory to `/srv/ptbd/output` in the Web configuration.
+
+## Install from Source
 
 ```bash
 bash install.sh --offline --no-launch
@@ -52,561 +177,29 @@ export PATH="$HOME/.local/bin:$PATH"
 hash -r
 ```
 
-What this does:
-- `--no-launch`: install first, do not jump straight into the menu yet
-- `export PATH=...`: make the freshly installed commands visible in the current terminal
-- `hash -r`: refresh the shell command cache so it does not keep pointing to an older install
-
-Then verify these two commands first:
+Verify the installation:
 
 ```bash
-ptbd --help
-bdtool status
-```
-
-If both look normal, continue.
-If you also want to confirm that the GUI entry can locate its runtime files, run:
-
-```bash
+bdtool --version
+bdtool doctor
 ptbd-gui --self-check
 ```
 
-### 3) Make PATH persistent
+`install.sh` does not invoke a host package manager. The offline bundle can be prepared with `scripts/ensure-bundle.py`. Official downloads prefer the Release `.sha256` sidecar; the legacy official asset is authenticated by a repository-pinned digest during migration.
 
-A common beginner problem is: it works once, then fails in a new terminal.  
-That usually means `~/.local/bin` is not permanently added to `PATH`.
+Custom bundle mirrors support `PTBD_BUNDLE_URL`, the highest-priority trusted digest `PTBD_BUNDLE_SHA256`, and `PTBD_BUNDLE_CHECKSUM_URL` (default: the archive URL plus `.sha256`). Downloads fail closed by default. `PTBD_BUNDLE_ALLOW_UNVERIFIED=1` explicitly permits a custom download only when its checksum URL is unavailable; a malformed sidecar still fails.
 
-For `bash`:
-
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
-```
-
-For `zsh`, replace `~/.bashrc` with `~/.zshrc`.
-
-### 4) Start
-
-From now on, **`ptbd` is the recommended single entrypoint** for beginners.
-
-The simplest start command is:
+## Development Checks
 
 ```bash
-ptbd
+python3 -m unittest discover -s tests
+python3 -m compileall -q ptbd_core ptbd-gui.py ptbd-web.py ptbd_remote_backend.py
+./scripts/full-test.sh
+docker build -t pt-bdtool:local .
 ```
 
-Notes:
-- `ptbd`: beginner entrypoint; uses local or VPS mode based on saved setup
-- `pt` / `bdtool`: open menu mode by default
-- `pt --help` / `bdtool --help`: show CLI help
-
-If your workflow is “**control a VPS from your local machine and return the result to your local desktop automatically**”, use:
-
-```bash
-ptbd --setup
-```
-
-On first run, `--setup` asks for:
-- VPS host
-- SSH port
-- password or key mode
-- default scan roots
-- local save directory
-
-After setup, you can simply run:
-
-```bash
-ptbd
-```
-
-If you prefer a more double-click-friendly entry, you can also use:
-
-```bash
-ptbd-start
-```
-
-It automatically:
-- starts a temporary local receive server
-- creates the return tunnel to the VPS
-- opens the remote `pt` menu
-- lets you choose an item
-- returns the generated package to your local desktop
-- cleans the remote generated directory by default
-
-If you want a more GUI-style workflow on **Windows / macOS / Linux**, you can also try:
-
-```bash
-ptbd-gui
-```
-
-This is the current cross-platform GUI MVP. It helps you:
-- fill in the VPS address, password, and local save dir
-- fetch the VPS candidate list directly into the GUI
-- double-click a scanned candidate to run generate → return → cleanup automatically
-- if only 1 candidate is found, clicking “one-click start” scans first and then starts automatically
-- if multiple candidates are found, the GUI selects the first one but still waits for your double-click confirmation
-- password mode now prefers SSH askpass, so it no longer hard-requires local `sshpass`
-
-The repo also includes double-click launcher files:
-- `PT-BDtool.bat`: better for Windows
-- `PT-BDtool.command`: better for macOS
-- `PT-BDtool.desktop`: better for Linux
-
-These 3 launcher files now try to open the `ptbd-gui` window first, instead of dropping you straight into the old menu flow.
-
-The practical idea is:
-- **Windows**: double-click `PT-BDtool.bat`; install Python 3 and Git for Windows first
-- **macOS**: double-click `PT-BDtool.command`; if macOS blocks the first launch, right-click and choose “Open” once
-- **Linux**: double-click `PT-BDtool.desktop`; if your desktop does not honor it, double-click `PT-BDtool.sh` instead
-
-Recommended beginner flow after the GUI opens:
-1. fill in VPS host, port, password, and local save directory
-2. click “scan VPS candidates”
-3. double-click the item you want
-4. wait for generate → return → cleanup to finish automatically
-
-### 5) Follow the menu
-
-Inside the menu, the normal path is:
-
-1. type `1` to start scanning
-2. choose full scan or directory scan
-3. wait for the scan to finish
-4. enter the item number you want
-5. wait for generation and packaging
-6. open the shown result directory
-
----
-
-## The 3 Most Practical Workflows
-
-### Option 1: Run on your local machine
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-pt
-```
-
-The result is stored on the current machine.
-
-### Option 2: Run on a VPS and keep the result on the VPS first
-
-This is the simplest and safest VPS workflow:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
-pt
-```
-
-After processing, the result is usually here:
-
-```bash
-$HOME/PT-BDtool-downloads
-```
-
-Then download it from your local machine:
-
-```bash
-scp user@your-vps-ip:$HOME/PT-BDtool-downloads/*.zip .
-```
-
-If `zip` is not available, the package may be `tar.gz`.
-
-### Option 3: Skip the menu and process one file directly
-
-```bash
-bdtool /path/to/movie.mp4 --out /path/to/output
-```
-
-Example:
-
-```bash
-bdtool ~/Videos/test.mp4 --out ~/PT-output
-```
-
----
-
-## Actual Runtime Model
-
-This is the recommended way to think about it now:
-
-- `install.sh`: installs the app and bundled offline dependencies
-- `ptbd`: beginner entrypoint
-- `ptbd --setup`: first-time setup
-- `ptbd-start`: double-click-friendly starter
-- `ptbd-gui`: cross-platform GUI launcher MVP
-- `pt` / `bdtool`: legacy and advanced entrypoints
-- `bdtool <file-or-dir>`: run direct CLI processing
-- `bdtool doctor`: check runtime dependencies
-- `bdtool status`: check installation state
-- `bdtool clean`: remove the default output directory
-
-## Project Layout
-
-To keep the repository understandable instead of turning into a dumping ground, it helps to think of it in a few simple buckets:
-
-- **Main entrypoints**: `ptbd`, `ptbd-start.sh`, `ptbd-gui`, `ptbd-remote.sh`
-- **Core processing logic**: `bdtool`; `bdtool.sh` is a compatibility launcher that forwards to `bdtool`
-- **Shared helpers**: `lib/`
-- **Install and dependency bundling**: `install.sh`, `scripts/`, `scripts/ensure-bundle.py`, `third_party/bundle/` (generated on demand)
-- **Double-click launchers**: `PT-BDtool.bat`, `PT-BDtool.command`, `PT-BDtool.desktop`
-- **CI / regression testing**: `.github/workflows/ci.yml`, `scripts/full-test.sh`
-
-The following are usually **generated runtime files**, not source files. Deleting them does not remove project features:
-
-- `bdtool-output/`
-- `.tmp/`, `.tmp-fetch-deps/`
-- `.full-test*`
-- `.rmtest/`
-- `__pycache__/`
-
-For most beginners, only these two commands matter:
-
-```bash
-bash install.sh --offline
-ptbd --setup
-```
-
----
-
-## Best Practice For VPS Users
-
-If you are on a VPS, start with this and do not configure auto-return yet:
-
-```bash
-bash install.sh --offline
-export PATH="$HOME/.local/bin:$PATH"
-export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
-pt
-```
-
-Why this is recommended:
-- no desktop requirement
-- no upload/return setup required
-- easier troubleshooting
-- lower chance of user error
-
-### VPS Scan Advice
-
-When `pt` runs a **full scan over SSH / on a VPS**, it now prefers these roots by default:
-
-```bash
-/home /root /data /mnt /media /srv
-```
-
-This helps avoid common noise such as:
-- `node_modules`
-- `.git`
-- `.cache`
-- `/var/lib/docker`
-- `/proc` `/sys` `/dev` `/run`
-
-If you want to define an explicit whitelist, use:
-
-```bash
-export BDTOOL_SCAN_INCLUDE_ROOTS="/home/admin/Downloads /data/media"
-pt
-```
-
-If you also want extra excludes, use:
-
-```bash
-export BDTOOL_SCAN_EXCLUDE_ROOTS="/home/admin/.cache /home/admin/test"
-pt
-```
-
-Notes:
-- `BDTOOL_SCAN_INCLUDE_ROOTS`: whitelist roots, separated by spaces or commas
-- `BDTOOL_SCAN_EXCLUDE_ROOTS`: extra excluded roots, separated by spaces or commas
-- If you already know your media lives under `~/Downloads`, using a whitelist is strongly recommended
-
-### One-Step VPS Workflow: Local Control + Auto Return
-
-If you want end users to install once, select an item, and let everything else happen automatically, use:
-
-```bash
-ptbd --setup
-```
-
-Then for daily use:
-
-```bash
-ptbd
-```
-
-In this mode, the user only needs to:
-
-1. run `ptbd` on the local machine
-2. choose the target item in the remote menu
-
-Desktop users can also run:
-
-```bash
-ptbd-start
-```
-
-Everything after that runs automatically:
-- generate artifacts
-- package the result
-- return it to the local desktop
-- clean the generated directory on the VPS
-
-Default local target:
-
-```bash
-~/Desktop
-```
-
-To save somewhere else:
-
-```bash
-ptbd --setup
-```
-
-If you prefer a one-off command without setup, this still works:
-
-```bash
-ptbd-remote --host root@your-vps-ip --password 'your-password' --scan-include "/home/admin/Downloads" --save-dir /your/save/path
-```
-
----
-
-## If You Want Automatic Return To Your Local Machine
-
-This is an advanced feature. It works, but only set it up after the basic flow works.
-
-Use `BDTOOL_RETURN_MODE`:
-
-- `local`: keep result on the current machine
-- `http`: upload to an HTTP receiver
-- `scp`: send back with `scp`
-
-### Option A: HTTP auto-return
-
-```bash
-export BDTOOL_RETURN_MODE=http
-export BDTOOL_RETURN_HTTP_URL='http://127.0.0.1:18080/upload'
-pt
-```
-
-Legacy variable `BDTOOL_CLIENT_UPLOAD_URL` is still supported.
-
-### Option B: SCP auto-return
-
-SSH key authentication is strongly recommended.
-
-```bash
-export BDTOOL_RETURN_MODE=scp
-export BDTOOL_RETURN_SCP_HOST='127.0.0.1'
-export BDTOOL_RETURN_SCP_PORT='10022'
-export BDTOOL_RETURN_SCP_USER='your-local-user'
-export BDTOOL_RETURN_SCP_REMOTE_DIR='/home/your-local-user/Downloads/PT-BDtool'
-export BDTOOL_RETURN_SCP_IDENTITY_FILE="$HOME/.ssh/id_ed25519"
-pt
-```
-
-Optional variables:
-- `BDTOOL_RETURN_SCP_PASSWORD`: only if password auth is unavoidable
-- `BDTOOL_RETURN_SCP_STRICT_HOST_KEY_CHECKING`: default is `accept-new`
-
-Notes:
-- If the VPS cannot reach your local machine, set up port forwarding or a reverse tunnel first
-- If you are unsure, use the “save on VPS first” workflow
-
----
-
-## Useful Commands
-
-### Show help
-
-```bash
-bdtool --help
-```
-
-### Check dependencies
-
-```bash
-bdtool doctor
-```
-
-### Check install status
-
-```bash
-bdtool status
-```
-
-### Start the menu
-
-```bash
-pt
-```
-
-### Clean the default output directory
-
-```bash
-bdtool clean
-```
-
----
-
-## Direct CLI Examples
-
-### Process one video
-
-```bash
-bdtool /data/movie.mkv --out /data/output
-```
-
-### Process one audio file
-
-```bash
-bdtool /data/song.flac --out /data/output
-```
-
-### Process a whole directory
-
-```bash
-bdtool /data/media-dir --out /data/output
-```
-
-### Dry run only
-
-```bash
-bdtool /data/movie.mkv --mode dry --out /data/output
-```
-
-### Enable debug logs
-
-```bash
-bdtool /data/movie.mkv --log-level debug --out /data/output
-```
-
----
-
-## Common Problems
-
-### 1) `pt: command not found` / `ptbd: command not found`
-
-Usually `~/.local/bin` is not in `PATH`.
-
-Try:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-ptbd --help
-```
-
-If that fixes it, add the PATH line to `~/.bashrc` or `~/.zshrc`.
-
-### 2) You already installed it, but the shell still points to an old command
-
-This usually means one of these:
-
-- your current terminal still cached the old command path
-- an older install is still earlier in `PATH`
-
-Check it with:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-command -v ptbd
-command -v bdtool
-command -v pt
-```
-
-If the printed paths are not the ones you just installed, the simplest fix is to reinstall from the project root:
-
-```bash
-bash install.sh --offline --no-launch
-export PATH="$HOME/.local/bin:$PATH"
-hash -r
-```
-
-### 3) Missing `ffmpeg`, `mediainfo`, or `BDInfo`
-
-Do not guess first. Check with:
-
-```bash
-bdtool doctor
-```
-
-If dependencies are incomplete, go back to the project root and run:
-
-```bash
-bash install.sh --offline
-```
-
-### 4) The menu opens but finds no files
-
-Make sure you entered a directory, not an executable script path.  
-Main supported inputs:
-
-- video: `mkv`, `mp4`, `m2ts`, `ts`, `avi`, `mov`
-- audio: `mp3`, `flac`, `wav`, `m4a`, `aac`
-- Blu-ray: `BDMV` folders and `iso` files
-
-### 5) On a VPS, you do not know where the package went
-
-Set an explicit download directory:
-
-```bash
-export BDTOOL_DOWNLOAD_DIR="$HOME/PT-BDtool-downloads"
-pt
-```
-
-Then everything is collected under `$HOME/PT-BDtool-downloads`.
-
----
-
-## Already Verified
-
-The current repository already has scripted verification for:
-
-- `bdtool --help`
-- `bdtool doctor`
-- `bdtool status`
-- direct CLI processing of a sample video
-- menu scan + generate flow
-- VPS-like local-save / SCP return flows
-
-If you just want to get started, follow the install and launch steps above.
-
-## What You Usually Get
-
-### Video
-- `mediainfo.txt`
-- `1.png`
-- `2.png`
-- `3.png`
-- `4.png`
-- `5.png`
-- `6.png`
-
-### Audio
-- `mediainfo.txt`
-- `频谱图.png`
-
-### Disc / ISO
-- `BDInfo.txt`
-- `1.png`
-- `2.png`
-- `3.png`
-- `4.png`
-- `5.png`
-- `6.png`
-
-## Uninstall
-
-```bash
-set -euo pipefail
-rm -f "$HOME/.local/bin/bdtool" "$HOME/.local/bin/ptbd" "$HOME/.local/bin/ptbd-gui" \
-  "$HOME/.local/bin/ptbd-start" "$HOME/.local/bin/ptbd-remote" "$HOME/.local/bin/ptbd-remote-start" \
-  "$HOME/.local/bin/pt" "$HOME/.local/bin/pts" "$HOME/.local/bin/BDInfo"
-rm -rf "$HOME/.local/share/pt-bdtool/PT-BDtool-app"
-rm -f "$HOME/.local/share/applications/PT-BDtool.desktop" "$HOME/Desktop/PT-BDtool.desktop" "$HOME/桌面/PT-BDtool.desktop" 2>/dev/null || true
-rm -f /usr/local/bin/bdtool /usr/local/bin/ptbd /usr/local/bin/ptbd-gui /usr/local/bin/ptbd-start \
-  /usr/local/bin/ptbd-remote /usr/local/bin/ptbd-remote-start /usr/local/bin/pt /usr/local/bin/pts /usr/local/bin/BDInfo 2>/dev/null || true
-```
+Maintainer documentation:
+
+- [`DEVELOPMENT.md`](DEVELOPMENT.md)
+- [`REPO-INDEX.md`](REPO-INDEX.md)
+- [`DOCKER.md`](DOCKER.md)

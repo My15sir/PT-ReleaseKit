@@ -50,6 +50,7 @@ preflight_install_context() {
   local req=""
   local required_project_files=(
     "$SCRIPT_DIR/bdtool"
+    "$SCRIPT_DIR/bdtool-legacy.sh"
     "$SCRIPT_DIR/bdtool.sh"
     "$SCRIPT_DIR/ptbd"
     "$SCRIPT_DIR/ptbd-gui"
@@ -66,6 +67,8 @@ preflight_install_context() {
     "$SCRIPT_DIR/scripts/fetch-deps.sh"
     "$SCRIPT_DIR/scripts/build-bundle.sh"
     "$SCRIPT_DIR/scripts/remote-upload-server.py"
+    "$SCRIPT_DIR/scripts/audio-spectrum.py"
+    "$SCRIPT_DIR/ptbd_core/runtime_assets.py"
   )
 
   for req in "${required_project_files[@]}"; do
@@ -74,6 +77,14 @@ preflight_install_context() {
       missing=1
     fi
   done
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    err "missing required command: python3"
+    missing=1
+  elif ! python3 "$SCRIPT_DIR/ptbd_core/runtime_assets.py" validate \
+    --profile install --source-root "$SCRIPT_DIR"; then
+    missing=1
+  fi
 
   if [[ "$missing" -ne 0 ]]; then
     err "install.sh must run from a complete local PT-BDtool repository or extracted offline bundle."
@@ -115,6 +126,22 @@ copy_if_changed() {
   cp -f "$src" "$dst"
   log "copied: $label"
   COPIED_COUNT=$((COPIED_COUNT + 1))
+}
+
+copy_manifest_prefix() {
+  local profile="$1"
+  local prefix="$2"
+  local relative_path=""
+  while IFS= read -r relative_path; do
+    [[ "$relative_path" == "$prefix"* ]] || continue
+    copy_if_changed \
+      "$SCRIPT_DIR/$relative_path" \
+      "$INSTALL_ROOT/$relative_path" \
+      "$relative_path"
+  done < <(
+    python3 "$SCRIPT_DIR/ptbd_core/runtime_assets.py" list \
+      --profile "$profile" --source-root "$SCRIPT_DIR"
+  )
 }
 
 bundle_dep_status() {
@@ -262,10 +289,13 @@ post_install_self_check() {
   local self_check_path="$bin_dir:${PATH:-}"
   local required_files=(
     "$install_root/bdtool"
+    "$install_root/bdtool-legacy.sh"
     "$install_root/bdtool.sh"
     "$install_root/ptbd"
     "$install_root/ptbd-gui"
     "$install_root/ptbd-gui.py"
+    "$install_root/ptbd-web"
+    "$install_root/ptbd-web.py"
     "$install_root/ptbd_remote_backend.py"
     "$install_root/ptbd-start.sh"
     "$install_root/ptbd-remote.sh"
@@ -273,6 +303,9 @@ post_install_self_check() {
     "$install_root/PT-BDtool.sh"
     "$install_root/lib/ui.sh"
     "$install_root/scripts/remote-upload-server.py"
+    "$install_root/scripts/audio-spectrum.py"
+    "$install_root/ptbd_core/cli.py"
+    "$install_root/ptbd_core/runtime_assets.py"
     "$install_root/third_party/bundle/linux-amd64/bin/ffmpeg"
     "$install_root/third_party/bundle/linux-amd64/bin/ffprobe"
     "$install_root/third_party/bundle/linux-amd64/bin/mediainfo"
@@ -551,10 +584,13 @@ INSTALL_TS="$(date +%s)"
 log "install root: $INSTALL_ROOT"
 mkdir -p "$INSTALL_ROOT/lib" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
 copy_if_changed "$SCRIPT_DIR/bdtool" "$INSTALL_ROOT/bdtool" "bdtool"
+copy_if_changed "$SCRIPT_DIR/bdtool-legacy.sh" "$INSTALL_ROOT/bdtool-legacy.sh" "bdtool-legacy.sh"
 copy_if_changed "$SCRIPT_DIR/bdtool.sh" "$INSTALL_ROOT/bdtool.sh" "bdtool.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd" "$INSTALL_ROOT/ptbd" "ptbd"
 copy_if_changed "$SCRIPT_DIR/ptbd-gui" "$INSTALL_ROOT/ptbd-gui" "ptbd-gui"
 copy_if_changed "$SCRIPT_DIR/ptbd-gui.py" "$INSTALL_ROOT/ptbd-gui.py" "ptbd-gui.py"
+copy_if_changed "$SCRIPT_DIR/ptbd-web" "$INSTALL_ROOT/ptbd-web" "ptbd-web"
+copy_if_changed "$SCRIPT_DIR/ptbd-web.py" "$INSTALL_ROOT/ptbd-web.py" "ptbd-web.py"
 copy_if_changed "$SCRIPT_DIR/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "ptbd_remote_backend.py"
 copy_if_changed "$SCRIPT_DIR/ptbd-start.sh" "$INSTALL_ROOT/ptbd-start.sh" "ptbd-start.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote.sh" "ptbd-remote.sh"
@@ -576,8 +612,10 @@ if [[ -f "$SCRIPT_DIR/scripts/ensure-bundle.py" ]]; then
 fi
 copy_if_changed "$SCRIPT_DIR/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/remote-upload-server.py" "scripts/remote-upload-server.py"
 copy_if_changed "$SCRIPT_DIR/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "scripts/prepare-remote-runtime.sh"
+copy_if_changed "$SCRIPT_DIR/scripts/audio-spectrum.py" "$INSTALL_ROOT/scripts/audio-spectrum.py" "scripts/audio-spectrum.py"
+copy_manifest_prefix "install" "ptbd_core/"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/PT-BDtool.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/PT-BDtool.command" 2>/dev/null || true
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool-legacy.sh" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-web" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/PT-BDtool.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/audio-spectrum.py" "$INSTALL_ROOT/PT-BDtool.command" 2>/dev/null || true
 if [[ -f "$INSTALL_ROOT/scripts/ensure-bundle.py" ]]; then
   chmod +x "$INSTALL_ROOT/scripts/ensure-bundle.py"
 fi

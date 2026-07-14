@@ -11,23 +11,30 @@ import subprocess
 import sys
 import tempfile
 import threading
-import time
-import uuid
 import webbrowser
-from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from ptbd_core.config import default_config as core_default_config
+from ptbd_core.config import default_save_dir
+from ptbd_core.config import load_config as core_load_config
+from ptbd_core.config import normalize_scan_roots
+from ptbd_core.config import public_config as core_public_config
+from ptbd_core.config import sanitize_config as core_sanitize_config
+from ptbd_core.config import save_config as core_save_config
+from ptbd_core.config import split_path_roots as core_split_path_roots
+from ptbd_core.jobs import Job as WebTask
+from ptbd_core.jobs import JobRegistry
+from ptbd_core.returns import parse_return_record
 from ptbd_remote_backend import (
     PTBDRemoteBackend,
     TaskCancelledError,
     backend_available,
     backend_status,
     build_effective_scan_include,
-    normalize_remote_connection,
     preferred_scan_roots_text,
 )
 
@@ -35,7 +42,6 @@ from ptbd_remote_backend import (
 APP_NAME = "PT-BDtool Web"
 CONFIG_PATH = Path(os.environ.get("PTBD_WEB_CONFIG", Path.home() / ".config/ptbd-web/config.json"))
 DEFAULT_PORT = 8899
-MAX_LOG_LINES = 2000
 
 
 def resolve_script_path(path: str) -> Path:
@@ -70,120 +76,24 @@ def find_app_root() -> Path:
 APP_ROOT = find_app_root()
 
 
-def default_save_dir() -> str:
-    home = Path.home()
-    for candidate in (home / "Desktop", home / "桌面", home / "Downloads"):
-        if candidate.is_dir():
-            return str(candidate)
-    return str(home / "PT-BDtool-downloads")
-
-
-DEFAULT_CONFIG: dict[str, Any] = {
-    "mode": os.environ.get("PTBD_WEB_MODE", "remote"),
-    "local_root": os.environ.get("PTBD_WEB_LOCAL_ROOT", "/"),
-    "remote_host": "root@your-vps",
-    "remote_port": "22",
-    "remote_password": "",
-    "remote_cmd": "pt",
-    "remote_bootstrap": True,
-    "save_dir": default_save_dir(),
-    "scan_include": "",
-    "scan_exclude": "",
-    "scan_full": False,
-    "audio_spectrum_mode": "single",
-    "audio_spectrum_backend": "auto",
-    "audio_spectrum_combined_track_seconds": "12",
-    "auto_cleanup": True,
-}
+DEFAULT_CONFIG: dict[str, Any] = core_default_config().to_dict()
 
 
 def load_config(*, include_secret: bool = False) -> dict[str, Any]:
-    data = DEFAULT_CONFIG.copy()
-    if CONFIG_PATH.is_file():
-        try:
-            raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                data.update(raw)
-        except Exception:
-            pass
-    if not include_secret:
-        data["remote_password"] = ""
-        data["password_saved"] = bool(load_config(include_secret=True).get("remote_password"))
-    return data
+    return core_load_config(CONFIG_PATH, include_secret=include_secret)
 
 
 def sanitize_config(raw: dict[str, Any], *, existing: dict[str, Any] | None = None) -> dict[str, Any]:
-    existing = existing or load_config(include_secret=True)
-    data = DEFAULT_CONFIG.copy()
-    data.update(existing)
-
-    for key in ("remote_host", "remote_port", "remote_cmd", "save_dir", "scan_include", "scan_exclude", "local_root"):
-        if key in raw:
-            data[key] = str(raw.get(key) or "").strip()
-
-    if "mode" in raw:
-        data["mode"] = "local" if str(raw.get("mode") or "").strip().lower() == "local" else "remote"
-    if "audio_spectrum_mode" in raw:
-        requested_spectrum_mode = str(raw.get("audio_spectrum_mode") or "").strip().lower()
-        data["audio_spectrum_mode"] = requested_spectrum_mode if requested_spectrum_mode in {"single", "combined"} else "single"
-    if "audio_spectrum_backend" in raw:
-        requested_backend = str(raw.get("audio_spectrum_backend") or "").strip().lower()
-        data["audio_spectrum_backend"] = requested_backend if requested_backend in {"auto", "sox", "sox_ng", "ffmpeg"} else "auto"
-    if "audio_spectrum_combined_track_seconds" in raw:
-        raw_seconds = raw.get("audio_spectrum_combined_track_seconds")
-        requested_seconds = str(raw_seconds if raw_seconds is not None else "").strip()
-        data["audio_spectrum_combined_track_seconds"] = requested_seconds if requested_seconds.isdigit() and int(requested_seconds) >= 0 else "12"
-
-    data["mode"] = "local" if str(data.get("mode") or "").strip().lower() == "local" else "remote"
-    data["audio_spectrum_mode"] = (
-        str(data.get("audio_spectrum_mode") or "single").strip().lower()
-        if str(data.get("audio_spectrum_mode") or "").strip().lower() in {"single", "combined"}
-        else "single"
-    )
-    data["audio_spectrum_backend"] = (
-        str(data.get("audio_spectrum_backend") or "auto").strip().lower()
-        if str(data.get("audio_spectrum_backend") or "").strip().lower() in {"auto", "sox", "sox_ng", "ffmpeg"}
-        else "auto"
-    )
-    raw_spectrum_seconds = data.get("audio_spectrum_combined_track_seconds")
-    spectrum_seconds = str(raw_spectrum_seconds if raw_spectrum_seconds is not None else "12").strip()
-    data["audio_spectrum_combined_track_seconds"] = spectrum_seconds if spectrum_seconds.isdigit() and int(spectrum_seconds) >= 0 else "12"
-    data["local_root"] = data["local_root"] or DEFAULT_CONFIG["local_root"]
-    data["remote_host"] = data["remote_host"] or DEFAULT_CONFIG["remote_host"]
-    data["remote_port"] = data["remote_port"] or "22"
-    data["remote_cmd"] = data["remote_cmd"] or "pt"
-    data["save_dir"] = data["save_dir"] or default_save_dir()
-
-    for key in ("remote_bootstrap", "auto_cleanup", "scan_full"):
-        if key in raw:
-            data[key] = bool(raw.get(key))
-
-    password = raw.get("remote_password", None)
-    if raw.get("clear_password"):
-        data["remote_password"] = ""
-    elif password is not None and str(password) != "":
-        data["remote_password"] = str(password)
-
-    normalized_host, normalized_port = normalize_remote_connection(data["remote_host"], data["remote_port"])
-    data["remote_host"] = normalized_host
-    data["remote_port"] = normalized_port
-    return data
+    current = existing or load_config(include_secret=True)
+    return core_sanitize_config(raw, existing=current).to_dict()
 
 
 def save_config(data: dict[str, Any]) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    try:
-        os.chmod(CONFIG_PATH, 0o600)
-    except OSError:
-        pass
+    core_save_config(CONFIG_PATH, data)
 
 
 def public_config(data: dict[str, Any]) -> dict[str, Any]:
-    visible = data.copy()
-    visible["password_saved"] = bool(data.get("remote_password"))
-    visible["remote_password"] = ""
-    return visible
+    return core_public_config(data)
 
 
 def find_bash() -> str | None:
@@ -202,13 +112,38 @@ def find_bash() -> str | None:
     return None
 
 
+def askpass_script_payload(password: str, *, windows: bool) -> tuple[str, str]:
+    if windows:
+        escaped = password
+        for old, new in (
+            ("^", "^^"),
+            ("&", "^&"),
+            ("|", "^|"),
+            ("<", "^<"),
+            (">", "^>"),
+            ("(", "^("),
+            (")", "^)"),
+            ("%", "%%"),
+        ):
+            escaped = escaped.replace(old, new)
+        return ".cmd", f"@echo off\r\nsetlocal DisableDelayedExpansion\r\necho({escaped}\r\n"
+    return "", "#!/usr/bin/env sh\nprintf '%s\\n' " + shlex.quote(password) + "\n"
+
+
 def create_askpass_script(password: str) -> Path:
-    handle = tempfile.NamedTemporaryFile("w", delete=False, prefix="ptbd-web-askpass-", encoding="utf-8")
+    suffix, payload = askpass_script_payload(password, windows=os.name == "nt")
+    handle = tempfile.NamedTemporaryFile(
+        "w",
+        delete=False,
+        prefix="ptbd-web-askpass-",
+        suffix=suffix,
+        encoding="utf-8",
+    )
     with handle:
-        handle.write("#!/usr/bin/env sh\n")
-        handle.write("printf '%s\\n' " + shlex.quote(password) + "\n")
+        handle.write(payload)
     path = Path(handle.name)
-    os.chmod(path, 0o700)
+    if os.name != "nt":
+        os.chmod(path, 0o700)
     return path
 
 
@@ -233,8 +168,23 @@ def cleanup_askpass(path: Path | None) -> None:
         pass
 
 
-def terminate_process_tree(process: subprocess.Popen[str], *, force: bool = False) -> None:
-    if os.name != "nt":
+def terminate_process_tree(process: subprocess.Popen[Any], *, force: bool = False) -> None:
+    if os.name == "nt":
+        taskkill = shutil.which("taskkill")
+        if taskkill:
+            command = [taskkill, "/PID", str(process.pid), "/T", "/F"]
+            try:
+                result = subprocess.run(
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    return
+            except OSError:
+                pass
+    else:
         try:
             os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
             return
@@ -249,6 +199,43 @@ def terminate_process_tree(process: subprocess.Popen[str], *, force: bool = Fals
             process.terminate()
     except OSError:
         pass
+
+
+def run_capture_process(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    task: WebTask,
+    timeout: int = 1800,
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(APP_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        start_new_session=(os.name != "nt"),
+    )
+
+    def cancel_process() -> None:
+        terminate_process_tree(process)
+
+    task.add_cancel_callback(cancel_process)
+    try:
+        try:
+            stdout_raw, stderr_raw = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            terminate_process_tree(process, force=True)
+            process.communicate(timeout=5)
+            raise RuntimeError(f"command timed out after {timeout}s")
+    finally:
+        task.remove_cancel_callback(cancel_process)
+    if task.cancel_event.is_set():
+        raise TaskCancelledError("任务已取消。")
+    stdout = (stdout_raw or b"").decode("utf-8", errors="replace")
+    stderr = (stderr_raw or b"").decode("utf-8", errors="replace")
+    return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
 
 
 def normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -269,87 +256,15 @@ def normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return normalized
 
 
-@dataclass
-class WebTask:
-    kind: str
-    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
-    status: str = "queued"
-    message: str = ""
-    logs: list[str] = field(default_factory=list)
-    items: list[dict[str, Any]] = field(default_factory=list)
-    outputs: list[str] = field(default_factory=list)
-    failed: list[dict[str, str]] = field(default_factory=list)
-    result_summary: dict[str, Any] = field(default_factory=dict)
-    created_at: float = field(default_factory=time.time)
-    started_at: float | None = None
-    ended_at: float | None = None
-    cancel_event: threading.Event = field(default_factory=threading.Event)
-    backend: PTBDRemoteBackend | None = None
-    process: subprocess.Popen[str] | None = None
-
-    def log(self, message: str) -> None:
-        line = str(message).rstrip("\r\n")
-        if not line:
-            return
-        stamp = time.strftime("%H:%M:%S")
-        with TASK_LOCK:
-            self.logs.append(f"[{stamp}] {line}")
-            if len(self.logs) > MAX_LOG_LINES:
-                self.logs = self.logs[-MAX_LOG_LINES:]
-
-    def start(self) -> None:
-        self.status = "running"
-        self.started_at = time.time()
-        self.log(f"{self.kind} 任务开始")
-
-    def finish(self, status: str, message: str) -> None:
-        with TASK_LOCK:
-            self.status = status
-            self.message = message
-            self.ended_at = time.time()
-        self.log(message)
-
-    def cancel(self) -> None:
-        self.cancel_event.set()
-        if self.backend is not None:
-            self.backend.cancel()
-        if self.process is not None:
-            terminate_process_tree(self.process)
-
-    def to_public(self) -> dict[str, Any]:
-        with TASK_LOCK:
-            return {
-                "id": self.id,
-                "kind": self.kind,
-                "status": self.status,
-                "message": self.message,
-                "logs": list(self.logs),
-                "items": list(self.items),
-                "outputs": list(self.outputs),
-                "failed": list(self.failed),
-                "result_summary": dict(self.result_summary),
-                "created_at": self.created_at,
-                "started_at": self.started_at,
-                "ended_at": self.ended_at,
-            }
-
-
-TASKS: dict[str, WebTask] = {}
-TASK_LOCK = threading.RLock()
+TASK_REGISTRY = JobRegistry(max_completed=100)
 
 
 def running_task() -> WebTask | None:
-    with TASK_LOCK:
-        for task in TASKS.values():
-            if task.status in {"queued", "running"}:
-                return task
-    return None
+    return TASK_REGISTRY.active()
 
 
 def cancel_active_tasks(reason: str) -> None:
-    with TASK_LOCK:
-        tasks = [task for task in TASKS.values() if task.status in {"queued", "running"}]
-    for task in tasks:
+    for task in TASK_REGISTRY.active_jobs():
         task.log(reason)
         task.cancel()
 
@@ -364,11 +279,6 @@ def install_shutdown_handlers(server: ThreadingHTTPServer) -> None:
             signal.signal(sig, handle_shutdown)
         except (OSError, ValueError):
             pass
-
-
-def register_task(task: WebTask) -> None:
-    with TASK_LOCK:
-        TASKS[task.id] = task
 
 
 def prepare_remote_runtime(config: dict[str, Any], task: WebTask) -> str:
@@ -387,20 +297,8 @@ def prepare_remote_runtime(config: dict[str, Any], task: WebTask) -> str:
         }
     )
     cmd = [bash_bin, str(helper_script), "--host", str(config["remote_host"]), "--port", str(config["remote_port"])]
-    password = str(config.get("remote_password") or "")
-    if password:
-        cmd.extend(["--password", password])
     task.log("开始准备远端运行包")
-    result = subprocess.run(
-        cmd,
-        cwd=str(APP_ROOT),
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=1800,
-        check=False,
-        stdin=subprocess.DEVNULL,
-    )
+    result = run_capture_process(cmd, env=env, task=task)
     for line in result.stderr.strip().splitlines():
         task.log(line)
     if result.returncode != 0:
@@ -417,6 +315,8 @@ def build_scan_command(config: dict[str, Any], remote_cmd: str) -> list[str]:
     if not ssh_bin:
         raise RuntimeError("本机缺少 ssh。")
     include_roots = scan_include_env_value(config)
+    include_values = split_path_roots(include_roots)
+    exclude_values = split_path_roots(str(config.get("scan_exclude") or ""))
     remote_script = " ".join(
         part
         for part in (
@@ -424,8 +324,20 @@ def build_scan_command(config: dict[str, Any], remote_cmd: str) -> list[str]:
             f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(include_roots)};"
             if include_roots
             else "",
-            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(str(config['scan_exclude']))};"
-            if config.get("scan_exclude")
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS_JSON={shlex.quote(json.dumps(include_values, ensure_ascii=False))};"
+            if include_values
+            else "",
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS_LINES={shlex.quote(chr(10).join(include_values))};"
+            if include_values
+            else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(normalize_scan_roots(exclude_values))};"
+            if exclude_values
+            else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS_JSON={shlex.quote(json.dumps(exclude_values, ensure_ascii=False))};"
+            if exclude_values
+            else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS_LINES={shlex.quote(chr(10).join(exclude_values))};"
+            if exclude_values
             else "",
             f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
         )
@@ -436,7 +348,7 @@ def build_scan_command(config: dict[str, Any], remote_cmd: str) -> list[str]:
         "-p",
         str(config["remote_port"]),
         "-o",
-        "StrictHostKeyChecking=accept-new",
+        "StrictHostKeyChecking=yes",
         str(config["remote_host"]),
         f"bash -lc {shlex.quote(remote_script)}",
     ]
@@ -451,16 +363,7 @@ def shell_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
     env, askpass_path = build_ssh_env(config)
     try:
         task.log("通过 ssh 执行 scan-json")
-        result = subprocess.run(
-            cmd,
-            cwd=str(APP_ROOT),
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=1800,
-            check=False,
-            stdin=subprocess.DEVNULL,
-        )
+        result = run_capture_process(cmd, env=env, task=task)
     finally:
         cleanup_askpass(askpass_path)
     if result.stderr.strip():
@@ -482,26 +385,43 @@ def shell_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
 def local_runtime_env(config: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
     env.setdefault("HOME", str(Path.home()))
-    local_root = effective_scan_root(config)
+    local_root = str(Path(effective_scan_root(config)).expanduser().resolve())
     include_roots = scan_include_env_value(config)
     env["BDTOOL_SCAN_FULL_ROOT"] = local_root
     if include_roots:
         env["BDTOOL_SCAN_INCLUDE_ROOTS"] = include_roots
+        structured_roots = [local_root, *(str(Path(root).expanduser().resolve()) for root in extra_scan_roots(config))]
+        env["BDTOOL_SCAN_INCLUDE_ROOTS_JSON"] = json.dumps(structured_roots, ensure_ascii=False)
+        env["BDTOOL_SCAN_INCLUDE_ROOTS_LINES"] = "\n".join(structured_roots)
     else:
         env.pop("BDTOOL_SCAN_INCLUDE_ROOTS", None)
-    env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = str(config.get("scan_exclude") or "")
+        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS_JSON", None)
+        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS_LINES", None)
+    exclude_values = split_path_roots(str(config.get("scan_exclude") or ""))
+    env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = normalize_scan_roots(exclude_values)
+    if exclude_values:
+        env["BDTOOL_SCAN_EXCLUDE_ROOTS_JSON"] = json.dumps(exclude_values, ensure_ascii=False)
+        env["BDTOOL_SCAN_EXCLUDE_ROOTS_LINES"] = "\n".join(exclude_values)
+    else:
+        env.pop("BDTOOL_SCAN_EXCLUDE_ROOTS_JSON", None)
+        env.pop("BDTOOL_SCAN_EXCLUDE_ROOTS_LINES", None)
     env["BDTOOL_DOWNLOAD_DIR"] = str(config.get("save_dir") or default_save_dir())
+    env["BDTOOL_RETURN_MODE"] = "local"
     env["BDTOOL_AUTO_CLEANUP"] = "1" if config.get("auto_cleanup", True) else "0"
     env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(config.get("audio_spectrum_mode") or "single")
     env["BDTOOL_AUDIO_SPECTRUM_BACKEND"] = str(config.get("audio_spectrum_backend") or "auto")
     env["BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS"] = str(config.get("audio_spectrum_combined_track_seconds") or "12")
     env["BDTOOL_POST_ACTION"] = "0"
     env["LANG_CODE"] = "zh"
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env["LANG"] = env.get("LANG") or "C.UTF-8"
+    env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
     return env
 
 
 def split_path_roots(raw: str) -> list[str]:
-    return [item for item in raw.replace(",", " ").split() if item]
+    return core_split_path_roots(raw)
 
 
 def effective_scan_root(config: dict[str, Any]) -> str:
@@ -520,16 +440,13 @@ def extra_scan_roots(config: dict[str, Any]) -> list[str]:
 
 
 def scan_include_env_value(config: dict[str, Any]) -> str:
-    # Explicit whitelist always wins.
+    mode = str(config.get("mode") or "").strip().lower()
     explicit = str(config.get("scan_include") or "").strip()
-    if explicit:
-        return build_effective_scan_include(config)
-    # Full scan: no include roots.
-    if bool(config.get("scan_full")):
+    if mode == "local":
+        if explicit:
+            return " ".join(str(Path(root).expanduser().resolve()) for root in extra_scan_roots(config))
         return ""
-    # Local mode should stay on local_root, not Linux VPS preferred roots.
-    if str(config.get("mode") or "").strip().lower() == "local":
-        return ""
+    # Remote explicit whitelist, full root, or bounded preferred roots.
     return build_effective_scan_include(config)
 
 
@@ -544,47 +461,27 @@ def local_allowed_roots(config: dict[str, Any]) -> list[Path]:
     return resolved or [Path("/")]
 
 
-def ensure_local_path_allowed(config: dict[str, Any], selected_path: str) -> None:
+def ensure_local_path_allowed(config: dict[str, Any], selected_path: str) -> Path:
     target = Path(selected_path).expanduser().resolve()
     for root in local_allowed_roots(config):
         if target == root or root in target.parents:
-            return
+            return target
     raise ValueError(f"路径不在允许扫描范围内：{selected_path}")
 
 
 def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, Any]]:
-    bash_bin = find_bash()
-    if not bash_bin:
-        raise RuntimeError("本机缺少 bash，无法执行本地扫描。")
-    bdtool = APP_ROOT / "bdtool"
-    if not bdtool.is_file():
-        raise RuntimeError(f"找不到 bdtool：{bdtool}")
     env = local_runtime_env(config)
-    # Ensure Git usr/bin tools and python are visible to bdtool under Windows.
-    git_bins = [
-        r"C:\Program Files\Git\usr\bin",
-        r"C:\Program Files\Git\mingw64\bin",
-        r"C:\Program Files\Git\bin",
-    ]
-    env["PATH"] = os.pathsep.join([*git_bins, env.get("PATH", "")])
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["LANG"] = env.get("LANG") or "C.UTF-8"
-    env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
     if env.get("BDTOOL_SCAN_INCLUDE_ROOTS"):
         task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}；额外目录：{env['BDTOOL_SCAN_INCLUDE_ROOTS']}")
     else:
         task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}")
-    result = subprocess.run(
-        [bash_bin, str(bdtool), "scan-json", "--full", "--lang", "zh"],
-        cwd=str(APP_ROOT),
+    result = run_capture_process(
+        [sys.executable, "-m", "ptbd_core.cli", "scan-json", "--full", "--lang", "zh"],
         env=env,
-        capture_output=True,
-        timeout=1800,
-        check=False,
-        stdin=subprocess.DEVNULL,
+        task=task,
     )
-    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
-    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+    stdout = result.stdout or ""
+    stderr = result.stderr or ""
     if stderr.strip():
         task.log("scan-json stderr:")
         for line in stderr.strip().splitlines():
@@ -611,13 +508,12 @@ def run_scan_task(task: WebTask, config: dict[str, Any]) -> None:
         elif backend_available():
             task.log(f"启动方式：内置 Python 后端，{backend_status()}")
             backend = PTBDRemoteBackend(APP_ROOT, config, logger=task.log)
-            task.backend = backend
+            task.add_cancel_callback(backend.cancel)
             items = normalize_items(backend.scan_items())
         else:
             task.log(f"启动方式：shell 回退后端，{backend_status()}")
             items = shell_scan_items(config, task)
-        with TASK_LOCK:
-            task.items = items
+        task.set_items(items)
         task.finish("success", f"扫描完成，共发现 {len(items)} 个候选")
     except TaskCancelledError:
         task.finish("cancelled", "扫描已取消")
@@ -625,11 +521,17 @@ def run_scan_task(task: WebTask, config: dict[str, Any]) -> None:
         task.finish("error", f"扫描失败：{exc}")
     finally:
         if backend is not None:
+            task.remove_cancel_callback(backend.cancel)
             backend.close()
-        task.backend = None
 
 
-def run_process_stream(cmd: list[str], env: dict[str, str], task: WebTask) -> int:
+def run_process_stream(
+    cmd: list[str],
+    env: dict[str, str],
+    task: WebTask,
+    *,
+    output_lines: list[str] | None = None,
+) -> int:
     process = subprocess.Popen(
         cmd,
         cwd=str(APP_ROOT),
@@ -639,13 +541,19 @@ def run_process_stream(cmd: list[str], env: dict[str, str], task: WebTask) -> in
         stdin=subprocess.DEVNULL,
         start_new_session=(os.name != "nt"),
     )
-    task.process = process
-    assert process.stdout is not None
+
+    def cancel_process() -> None:
+        terminate_process_tree(process)
+
+    task.add_cancel_callback(cancel_process)
     try:
+        assert process.stdout is not None
         for raw in process.stdout:
             line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
             if line:
                 task.log(line)
+                if output_lines is not None:
+                    output_lines.append(line)
             if task.cancel_event.is_set():
                 terminate_process_tree(process)
                 break
@@ -657,7 +565,29 @@ def run_process_stream(cmd: list[str], env: dict[str, str], task: WebTask) -> in
     finally:
         if task.cancel_event.is_set():
             terminate_process_tree(process, force=True)
-        task.process = None
+        task.remove_cancel_callback(cancel_process)
+
+
+def local_archive_from_output(output_lines: list[str], save_dir: Path) -> Path:
+    records = [record for line in output_lines if (record := parse_return_record(line)) is not None]
+    if len(records) != 1:
+        raise RuntimeError(f"本机处理未返回唯一归档路径，收到 {len(records)} 条结果记录。")
+    record = records[0]
+    if record.mode != "local":
+        raise RuntimeError(f"本机处理返回了非本地模式：{record.mode}")
+
+    archive = Path(record.destination).expanduser()
+    if not archive.is_absolute():
+        archive = save_dir / archive
+    try:
+        save_root = save_dir.resolve(strict=True)
+        resolved_archive = archive.resolve(strict=True)
+        resolved_archive.relative_to(save_root)
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"本机处理返回了保存目录之外的归档：{archive}") from exc
+    if not resolved_archive.is_file() or resolved_archive.stat().st_size <= 0:
+        raise RuntimeError(f"本机处理返回的归档不存在或为空：{resolved_archive}")
+    return resolved_archive
 
 
 def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask) -> None:
@@ -668,7 +598,10 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
     if not remote_script.is_file():
         raise RuntimeError(f"找不到远端流程脚本：{remote_script}")
 
-    success = 0
+    scan_include = scan_include_env_value(config)
+    include_values = split_path_roots(scan_include)
+    exclude_values = split_path_roots(str(config.get("scan_exclude") or ""))
+
     for index, selected_path in enumerate(paths, start=1):
         if task.cancel_event.is_set():
             raise TaskCancelledError("任务已取消。")
@@ -682,8 +615,12 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
                 "PTBD_REMOTE_PT_CMD": str(config.get("remote_cmd") or "pt"),
                 "PTBD_REMOTE_BOOTSTRAP": "1" if config.get("remote_bootstrap") else "0",
                 "PTBD_LOCAL_SAVE_DIR": str(config["save_dir"]),
-                "PTBD_SCAN_INCLUDE_ROOTS": scan_include_env_value(config),
-                "PTBD_SCAN_EXCLUDE_ROOTS": str(config.get("scan_exclude") or ""),
+                "PTBD_SCAN_INCLUDE_ROOTS": normalize_scan_roots(include_values),
+                "PTBD_SCAN_INCLUDE_ROOTS_JSON": json.dumps(include_values, ensure_ascii=False),
+                "PTBD_SCAN_INCLUDE_ROOTS_LINES": "\n".join(include_values),
+                "PTBD_SCAN_EXCLUDE_ROOTS": normalize_scan_roots(exclude_values),
+                "PTBD_SCAN_EXCLUDE_ROOTS_JSON": json.dumps(exclude_values, ensure_ascii=False),
+                "PTBD_SCAN_EXCLUDE_ROOTS_LINES": "\n".join(exclude_values),
                 "PTBD_AUTO_CLEANUP": "1" if config.get("auto_cleanup", True) else "0",
                 "PTBD_AUDIO_SPECTRUM_MODE": str(config.get("audio_spectrum_mode") or "single"),
                 "PTBD_AUDIO_SPECTRUM_BACKEND": str(config.get("audio_spectrum_backend") or "auto"),
@@ -711,82 +648,72 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
             "--audio-spectrum-seconds",
             str(config.get("audio_spectrum_combined_track_seconds") or "12"),
         ]
-        password = str(config.get("remote_password") or "")
-        if password:
-            cmd.extend(["--password", password])
         try:
             rc = run_process_stream(cmd, env, task)
             if rc != 0:
                 if task.cancel_event.is_set():
                     raise TaskCancelledError("任务已取消。")
                 raise RuntimeError(f"远端处理失败，退出码：{rc}")
-            task.outputs.append(str(config["save_dir"]))
-            success += 1
+            task.add_output(str(config["save_dir"]))
             task.log(f"完成处理 {index}/{len(paths)}")
         except TaskCancelledError:
             raise
         except Exception as exc:
-            task.failed.append({"path": selected_path, "error": str(exc)})
+            task.add_failure(selected_path, str(exc))
             task.log(f"失败 {index}/{len(paths)}：{selected_path} -> {exc}")
-    task.result_summary = {
-        "success": success,
-        "failed": len(task.failed),
-        "total": len(paths),
-        "outputs": list(task.outputs),
-        "failed_items": list(task.failed),
-    }
+    task.summarize_batch(len(paths))
 
 
 def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask) -> None:
-    bash_bin = find_bash()
-    if not bash_bin:
-        raise RuntimeError("本机缺少 bash，无法执行本地生成。")
-    bdtool = APP_ROOT / "bdtool"
-    if not bdtool.is_file():
-        raise RuntimeError(f"找不到 bdtool：{bdtool}")
-
-    save_dir = Path(str(config.get("save_dir") or default_save_dir())).expanduser()
+    save_dir = Path(str(config.get("save_dir") or default_save_dir())).expanduser().resolve()
     save_dir.mkdir(parents=True, exist_ok=True)
     env = local_runtime_env(config)
+    env["BDTOOL_DOWNLOAD_DIR"] = str(save_dir)
+    data_root = Path(os.environ.get("BDTOOL_DATA_DIR") or tempfile.gettempdir()).expanduser().resolve()
+    env["BDTOOL_DATA_DIR"] = str(data_root)
+    task_work_root = data_root / "ptbd-web" / "jobs" / task.id
 
-    success = 0
-    for index, selected_path in enumerate(paths, start=1):
-        if task.cancel_event.is_set():
-            raise TaskCancelledError("任务已取消。")
-        try:
-            ensure_local_path_allowed(config, selected_path)
-            task.log(f"开始本地处理 {index}/{len(paths)}：{selected_path}")
-            cmd = [
-                bash_bin,
-                str(bdtool),
-                "generate-path",
-                "--path",
-                selected_path,
-                "--lang",
-                "zh",
-                "--audio-spectrum",
-                str(config.get("audio_spectrum_mode") or "single"),
-            ]
-            rc = run_process_stream(cmd, env, task)
-            if rc != 0:
-                if task.cancel_event.is_set():
-                    raise TaskCancelledError("任务已取消。")
-                raise RuntimeError(f"本地处理失败，退出码：{rc}")
-            task.outputs.append(str(save_dir))
-            success += 1
-            task.log(f"完成本地处理 {index}/{len(paths)}，输出目录：{save_dir}")
-        except TaskCancelledError:
-            raise
-        except Exception as exc:
-            task.failed.append({"path": selected_path, "error": str(exc)})
-            task.log(f"本地失败 {index}/{len(paths)}：{selected_path} -> {exc}")
-    task.result_summary = {
-        "success": success,
-        "failed": len(task.failed),
-        "total": len(paths),
-        "outputs": list(task.outputs),
-        "failed_items": list(task.failed),
-    }
+    try:
+        for index, selected_path in enumerate(paths, start=1):
+            if task.cancel_event.is_set():
+                raise TaskCancelledError("任务已取消。")
+            try:
+                source_path = ensure_local_path_allowed(config, selected_path)
+                work_dir = task_work_root / f"{index:04d}"
+                task.log(f"开始本地处理 {index}/{len(paths)}：{selected_path}")
+                cmd = [
+                    sys.executable,
+                    "-m",
+                    "ptbd_core.cli",
+                    "generate-path",
+                    "--path",
+                    str(source_path),
+                    "--work-dir",
+                    str(work_dir),
+                    "--lang",
+                    "zh",
+                    "--audio-spectrum",
+                    str(config.get("audio_spectrum_mode") or "single"),
+                    "--result-json",
+                ]
+                output_lines: list[str] = []
+                rc = run_process_stream(cmd, env, task, output_lines=output_lines)
+                if rc != 0:
+                    if task.cancel_event.is_set():
+                        raise TaskCancelledError("任务已取消。")
+                    raise RuntimeError(f"本地处理失败，退出码：{rc}")
+                archive = local_archive_from_output(output_lines, save_dir)
+                task.add_output(str(archive))
+                task.log(f"完成本地处理 {index}/{len(paths)}，归档：{archive}")
+            except TaskCancelledError:
+                raise
+            except Exception as exc:
+                task.add_failure(selected_path, str(exc))
+                task.log(f"本地失败 {index}/{len(paths)}：{selected_path} -> {exc}")
+    finally:
+        if config.get("auto_cleanup", True):
+            shutil.rmtree(task_work_root, ignore_errors=True)
+    task.summarize_batch(len(paths))
 
 
 def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) -> None:
@@ -802,36 +729,29 @@ def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) ->
         elif backend_available():
             task.log(f"启动方式：内置 Python 后端，{backend_status()}")
             backend = PTBDRemoteBackend(APP_ROOT, config, logger=task.log)
-            task.backend = backend
-            success = 0
+            task.add_cancel_callback(backend.cancel)
             for index, selected_path in enumerate(paths, start=1):
                 if task.cancel_event.is_set():
                     raise TaskCancelledError("任务已取消。")
                 task.log(f"开始处理 {index}/{len(paths)}：{selected_path}")
                 try:
                     local_path = backend.process_selected_path(selected_path, save_dir)
-                    task.outputs.append(str(local_path))
-                    success += 1
+                    task.add_output(str(local_path))
                     task.log(f"完成处理 {index}/{len(paths)}：{local_path}")
                 except TaskCancelledError:
                     raise
                 except Exception as item_exc:
-                    task.failed.append({"path": selected_path, "error": str(item_exc)})
+                    task.add_failure(selected_path, str(item_exc))
                     task.log(f"失败 {index}/{len(paths)}：{selected_path} -> {item_exc}")
-            task.result_summary = {
-                "success": success,
-                "failed": len(task.failed),
-                "total": len(paths),
-                "outputs": list(task.outputs),
-                "failed_items": list(task.failed),
-            }
+            task.summarize_batch(len(paths))
         else:
             task.log(f"启动方式：shell 回退后端，{backend_status()}")
             shell_process_paths(config, paths, task)
 
-        summary = task.result_summary or {
-            "success": len(task.outputs),
-            "failed": len(task.failed),
+        state = task.to_public()
+        summary = state["result_summary"] or {
+            "success": len(state["outputs"]),
+            "failed": len(state["failed"]),
             "total": len(paths),
         }
         msg = f"处理完成：成功 {summary.get('success', 0)} / 失败 {summary.get('failed', 0)} / 共 {summary.get('total', len(paths))}"
@@ -847,29 +767,36 @@ def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) ->
         task.finish("error", f"处理失败：{exc}")
     finally:
         if backend is not None:
+            task.remove_cancel_callback(backend.cancel)
             backend.close()
-        task.backend = None
 
 
 def run_diagnose_task(task: WebTask, config: dict[str, Any]) -> None:
     task.start()
     backend: PTBDRemoteBackend | None = None
     try:
+        if task.cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
         if config.get("mode") == "local":
-            task.result_summary = {
+            local_roots = [effective_scan_root(config), *extra_scan_roots(config)]
+            task.set_result_summary({
                 "ok": True,
                 "mode": "local",
                 "message": "本机模式无需 SSH 测连",
-                "scan_roots": scan_include_env_value(config) or preferred_scan_roots_text(),
-            }
+                "scan_roots": " ".join(local_roots),
+            })
+            if task.cancel_event.is_set():
+                raise TaskCancelledError("任务已取消。")
             task.finish("success", "本机模式：无需远程测连")
             return
         if not backend_available():
             raise RuntimeError("当前环境缺少 paramiko，无法执行独立测连。")
         backend = PTBDRemoteBackend(APP_ROOT, config, logger=task.log)
-        task.backend = backend
+        task.add_cancel_callback(backend.cancel)
         report = backend.diagnose_connection()
-        task.result_summary = report
+        if task.cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
+        task.set_result_summary(report)
         if report.get("ok"):
             task.finish("success", str(report.get("message") or "连接成功"))
         else:
@@ -880,8 +807,8 @@ def run_diagnose_task(task: WebTask, config: dict[str, Any]) -> None:
         task.finish("error", f"测连失败：{exc}")
     finally:
         if backend is not None:
+            task.remove_cancel_callback(backend.cancel)
             backend.close()
-        task.backend = None
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -2330,8 +2257,7 @@ class WebHandler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/tasks/"):
             task_id = path.rsplit("/", 1)[-1]
-            with TASK_LOCK:
-                task = TASKS.get(task_id)
+            task = TASK_REGISTRY.get(task_id)
             if task is None:
                 self.send_error_json("任务不存在。", HTTPStatus.NOT_FOUND)
                 return
@@ -2354,41 +2280,39 @@ class WebHandler(BaseHTTPRequestHandler):
                 return
 
             if path in {"/api/scan", "/api/process", "/api/diagnose"}:
-                active = running_task()
-                if active is not None:
-                    self.send_error_json(f"已有任务正在运行：{active.id}", HTTPStatus.CONFLICT)
-                    return
                 config = sanitize_config(payload.get("config", {}) if isinstance(payload.get("config"), dict) else {})
                 save_config(config)
+                kind = path.removeprefix("/api/")
+                task, active = TASK_REGISTRY.reserve(kind)
+                if active is not None or task is None:
+                    active_id = active.id if active is not None else "unknown"
+                    self.send_error_json(f"已有任务正在运行：{active_id}", HTTPStatus.CONFLICT)
+                    return
                 if path == "/api/scan":
-                    task = WebTask(kind="scan")
-                    register_task(task)
-                    threading.Thread(target=run_scan_task, args=(task, config), daemon=True).start()
-                    self.send_json({"ok": True, "task": task.to_public()})
-                    return
-                if path == "/api/diagnose":
-                    task = WebTask(kind="diagnose")
-                    register_task(task)
-                    threading.Thread(target=run_diagnose_task, args=(task, config), daemon=True).start()
-                    self.send_json({"ok": True, "task": task.to_public()})
-                    return
-                paths = payload.get("paths", [])
-                if not isinstance(paths, list):
-                    raise ValueError("paths 必须是数组。")
-                selected_paths = [str(item) for item in paths if str(item).strip()]
-                if not selected_paths:
-                    self.send_error_json("请至少选择一个候选路径。", HTTPStatus.BAD_REQUEST)
-                    return
-                task = WebTask(kind="process")
-                register_task(task)
-                threading.Thread(target=run_process_task, args=(task, config, selected_paths), daemon=True).start()
+                    target = run_scan_task
+                    args: tuple[Any, ...] = (task, config)
+                elif path == "/api/diagnose":
+                    target = run_diagnose_task
+                    args = (task, config)
+                else:
+                    target = run_process_task
+                    paths = payload.get("paths", [])
+                    if not isinstance(paths, list):
+                        task.finish("error", "paths 必须是数组。")
+                        raise ValueError("paths 必须是数组。")
+                    selected_paths = [str(item) for item in paths if str(item).strip()]
+                    if not selected_paths:
+                        task.finish("error", "请至少选择一个候选路径。")
+                        self.send_error_json("请至少选择一个候选路径。", HTTPStatus.BAD_REQUEST)
+                        return
+                    args = (task, config, selected_paths)
+                threading.Thread(target=target, args=args, daemon=True).start()
                 self.send_json({"ok": True, "task": task.to_public()})
                 return
 
             if path.startswith("/api/tasks/") and path.endswith("/cancel"):
                 task_id = path.split("/")[-2]
-                with TASK_LOCK:
-                    task = TASKS.get(task_id)
+                task = TASK_REGISTRY.get(task_id)
                 if task is None:
                     self.send_error_json("任务不存在。", HTTPStatus.NOT_FOUND)
                     return

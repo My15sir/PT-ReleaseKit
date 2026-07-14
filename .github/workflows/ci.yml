@@ -20,6 +20,7 @@ jobs:
           shellcheck -s bash -x \
             bdtool.sh \
             bdtool \
+            bdtool-legacy.sh \
             install.sh \
             ptbd \
             ptbd-gui \
@@ -28,7 +29,165 @@ jobs:
             ptbd-remote-start.sh \
             PT-BDtool.sh \
             PT-BDtool.command \
-            scripts/*.sh
+            scripts/*.sh \
+            docker/entrypoint.sh
+
+  docker-smoke:
+    runs-on: ubuntu-latest
+    env:
+      PTBD_CI_CONTAINER: ptbd-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      PTBD_CI_UID: "1000"
+      PTBD_CI_GID: "1000"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose and build image
+        run: |
+          set -euo pipefail
+          docker compose config --quiet
+          docker build --tag pt-bdtool:ci .
+      - name: Start container and exercise local scan API
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .docker-smoke/media .docker-smoke/output .docker-smoke/config
+          sudo chown -R "$PTBD_CI_UID:$PTBD_CI_GID" \
+            .docker-smoke/media .docker-smoke/output .docker-smoke/config
+          sudo chmod 0755 .docker-smoke/media
+          sudo chmod 0700 .docker-smoke/output .docker-smoke/config
+          docker run --rm \
+            --user "$PTBD_CI_UID:$PTBD_CI_GID" \
+            --entrypoint ffmpeg \
+            --mount "type=bind,src=$PWD/.docker-smoke/media,dst=/fixture" \
+            pt-bdtool:ci \
+            -hide_banner -loglevel error -y \
+            -f lavfi -i testsrc=size=320x180:rate=2 \
+            -t 1 -c:v mpeg4 -pix_fmt yuv420p \
+            /fixture/smoke.mp4
+          test -s .docker-smoke/media/smoke.mp4
+          docker rm --force "$PTBD_CI_CONTAINER" >/dev/null 2>&1 || true
+          docker run --detach \
+            --name "$PTBD_CI_CONTAINER" \
+            --user "$PTBD_CI_UID:$PTBD_CI_GID" \
+            --publish 127.0.0.1::8899 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --tmpfs /tmp:rw,noexec,nosuid,size=512m \
+            --health-interval 2s \
+            --health-timeout 3s \
+            --health-start-period 2s \
+            --health-retries 10 \
+            --mount "type=bind,src=$PWD/.docker-smoke/media,dst=/media,readonly" \
+            --mount "type=bind,src=$PWD/.docker-smoke/output,dst=/output" \
+            --mount "type=bind,src=$PWD/.docker-smoke/config,dst=/config" \
+            pt-bdtool:ci
+          host_port="$(docker port "$PTBD_CI_CONTAINER" 8899/tcp | awk -F: 'NR == 1 {print $NF}')"
+          test -n "$host_port"
+          base_url="http://127.0.0.1:$host_port"
+
+          for _attempt in {1..30}; do
+            if curl --fail --silent --show-error \
+              "$base_url/api/status" \
+              --output .docker-smoke/status.json; then
+              break
+            fi
+            sleep 1
+          done
+          test -s .docker-smoke/status.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path(".docker-smoke/status.json").read_text(encoding="utf-8"))
+          assert payload.get("ok") is True, payload
+          PY
+          sudo test -f .docker-smoke/config/config.json
+          test "$(sudo stat -c '%a' .docker-smoke/config/config.json)" = 600
+
+          health=starting
+          for _attempt in {1..30}; do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$PTBD_CI_CONTAINER")"
+            [[ "$health" == healthy ]] && break
+            sleep 1
+          done
+          [[ "$health" == healthy ]]
+
+          curl --fail --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data '{"config":{"mode":"local","local_root":"/media","save_dir":"/output"}}' \
+            "$base_url/api/scan" \
+            --output .docker-smoke/scan.json
+          task_id="$(python3 -c 'import json; print(json.load(open(".docker-smoke/scan.json", encoding="utf-8"))["task"]["id"])')"
+
+          task_status=queued
+          for _attempt in {1..30}; do
+            curl --fail --silent --show-error \
+              "$base_url/api/tasks/$task_id" \
+              --output .docker-smoke/task.json
+            task_status="$(python3 -c 'import json; print(json.load(open(".docker-smoke/task.json", encoding="utf-8"))["task"]["status"])')"
+            [[ "$task_status" == success ]] && break
+            if [[ "$task_status" == error || "$task_status" == cancelled ]]; then
+              cat .docker-smoke/task.json
+              exit 1
+            fi
+            sleep 1
+          done
+          [[ "$task_status" == success ]]
+          selected_path="$(python3 -c 'import json; payload=json.load(open(".docker-smoke/task.json", encoding="utf-8")); print(payload["task"]["items"][0]["path"])')"
+          [[ "$selected_path" == /media/smoke.mp4 ]]
+
+          process_body="$(SELECTED_PATH="$selected_path" python3 -c 'import json, os; print(json.dumps({"config":{"mode":"local","local_root":"/media","save_dir":"/output"},"paths":[os.environ["SELECTED_PATH"]]}))')"
+          curl --fail --silent --show-error \
+            --header 'Content-Type: application/json' \
+            --data "$process_body" \
+            "$base_url/api/process" \
+            --output .docker-smoke/process.json
+          process_task_id="$(python3 -c 'import json; print(json.load(open(".docker-smoke/process.json", encoding="utf-8"))["task"]["id"])')"
+
+          process_status=queued
+          for _attempt in {1..60}; do
+            curl --fail --silent --show-error \
+              "$base_url/api/tasks/$process_task_id" \
+              --output .docker-smoke/process-task.json
+            process_status="$(python3 -c 'import json; print(json.load(open(".docker-smoke/process-task.json", encoding="utf-8"))["task"]["status"])')"
+            [[ "$process_status" == success ]] && break
+            if [[ "$process_status" == error || "$process_status" == cancelled ]]; then
+              cat .docker-smoke/process-task.json
+              exit 1
+            fi
+            sleep 1
+          done
+          [[ "$process_status" == success ]]
+          archive="$(sudo find .docker-smoke/output -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$archive"
+          sudo test -s "$archive"
+          test "$(sudo stat -c '%a' "$archive")" = 600
+          test "$(sudo stat -c '%u:%g' "$archive")" = "$PTBD_CI_UID:$PTBD_CI_GID"
+          test ! -e .docker-smoke/media/信息
+          sudo env ARCHIVE="$archive" python3 - <<'PY'
+          import os
+          import zipfile
+
+          with zipfile.ZipFile(os.environ["ARCHIVE"]) as package:
+              assert package.testzip() is None
+              names = package.namelist()
+          assert any(name.endswith("mediainfo.txt") for name in names), names
+          assert any(name.endswith("1.png") for name in names), names
+          PY
+      - name: Show container diagnostics and clean up
+        if: always()
+        shell: bash
+        run: |
+          docker inspect "$PTBD_CI_CONTAINER" > .docker-smoke/inspect.json 2>/dev/null || true
+          docker logs "$PTBD_CI_CONTAINER" 2>&1 || true
+          docker rm --force "$PTBD_CI_CONTAINER" >/dev/null 2>&1 || true
+          sudo chown -R "$(id -u):$(id -g)" .docker-smoke 2>/dev/null || true
+      - name: Upload Docker smoke diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-smoke-diagnostics
+          path: .docker-smoke
+          if-no-files-found: ignore
 
   full-regression:
     runs-on: ubuntu-latest
@@ -43,7 +202,7 @@ jobs:
         run: |
           mkdir -p "$HOME/Desktop" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME"
       - name: Install runtime commands
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip python3-tk xdg-user-dirs
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg mediainfo zip unzip python3-numpy python3-pil python3-tk xdg-user-dirs
       - name: Run full-test.sh
         shell: bash
         run: |

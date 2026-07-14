@@ -1,166 +1,183 @@
 # PT-BDtool 开发与发布说明
 
-这份文档是给维护者看的，不是给普通用户看的。  
-普通用户直接看根目录 `README.md` 就够了。
+这份文档面向维护者。普通用户应先阅读根目录 `README.md`，Docker 运维请阅读 `docs/DOCKER.md`。
 
----
+## 1. 架构原则
 
-## 1. 仓库现在为什么轻了一些
+项目采用“Python 模块化核心优先，Shell 保留兼容与远端 fallback”的结构：
 
-源码本身并不算特别多。  
-之前最占体积的是整套 Linux 离线运行包。
+- 新扫描、生成、打包和回传逻辑放入 `ptbd_core/`
+- `bdtool` 是稳定命令入口，负责选择 Python 核心或兼容实现
+- `bdtool-legacy.sh` 保留旧交互菜单和回退能力，不再作为新增业务逻辑的首选位置
+- Web、GUI 和远端控制端复用共享配置模型与运行资产清单
+- Docker 只运行 Web local 模式，部署在媒体所在 VPS
+- Windows/macOS GUI 继续作为桌面远端控制端交付
 
-现在它不再长期跟踪进源码仓库，而是改成：
+不要在 GUI、Web 和 Shell 中分别复制媒体处理逻辑。新功能应先在 Python 核心形成可测试接口，再由各入口调用。
 
-- 默认从 GitHub Release 资产自动拉取
-- 本地缓存到 `third_party/bundle/linux-amd64`
-- 继续给 Windows / macOS 控制端打包使用
-- 继续给远端空白 VPS 回退运行使用
+## 2. 入口与分发
 
-它的作用是：
+### `bdtool`
 
-- 支持离线安装
-- 支持空白 VPS 回退运行
-- 减少目标机手动装依赖
-
-所以现在主分支里看起来会干净很多，`third_party/bundle/linux-amd64` 只是按需生成目录，不是常驻源码。
-
----
-
-## 2. 当前主要入口
-
-### 用户入口
-
-- `PT-BDtool.exe`
-- `PT-BDtool.app`
-- `ptbd-gui.py`
-- `ptbd-web.py`
-
-### 远端主流程
-
-- `ptbd_remote_backend.py`
-- `ptbd-remote.sh`
-- `scripts/prepare-remote-runtime.sh`
-
-### 核心处理
-
-- `bdtool`
-- `lib/ui.sh`
-
-说明：
-
-- `bdtool` 是唯一核心处理实现
-- `bdtool.sh` 仅保留为旧命令兼容转发入口
-
-### 打包与发布
-
-- `scripts/build-controller-app.py`
-- `.github/workflows/controller-build.yml`
-
-### 回归测试
-
-- `scripts/full-test.sh`
-- `.github/workflows/ci.yml`
-
----
-
-## 3. 仓库目录怎么分
-
-仓库现在建议按下面这个理解来维护，不要再把“源码入口”“发布入口”“测试产物”混在一起看。
-
-### 根目录里真正重要的入口
-
-- `PT-BDtool.bat`
-- `PT-BDtool.command`
-- `PT-BDtool.desktop`
-- `PT-BDtool.sh`
-- `ptbd-gui`
-- `ptbd-gui.py`
-- `ptbd-web`
-- `ptbd-web.py`
-- `ptbd`
-- `ptbd-remote.sh`
-- `ptbd-start.sh`
-
-说明：
-
-- `PT-BDtool.sh` 是 Linux 现在统一的双击启动脚本名
-- GitHub Release 里的 Linux 便携包也应该统一用这个名字
-- 不要再把旧名字 `启动PT-BDtool.sh` 加回来
-
-### 文档
-
-- `README.md`
-  - 只写给普通用户
-- `docs/README.en.md`
-  - 英文说明
-- `docs/DEVELOPMENT.md`
-  - 给维护者看
-- `docs/REPO-INDEX.md`
-  - 仓库导航
-
-### GitHub 配置
-
-- `.github/workflows/controller-build.yml`
-  - 构建 Windows / macOS / Linux 便携包并发布到 `portable-latest`
-- `.github/workflows/bundle-release.yml`
-  - 生成 Linux bundle 资产
-- `.github/workflows/ci.yml`
-  - 语法、回归、离线安装检查
-
-### 本地产物
-
-下面这些都应该继续视为本地产物，不要当源码：
-
-- `bdtool-output/`
-- `.tmp/`
-- `.full-test*`
-- `dist/`
-- `build/`
-- `artifact/`
-- `release-assets/`
-
----
-
-## 4. 普通用户交付原则
-
-不要把源码仓库直接发给小白。
-
-正确交付方式是：
-
-- Windows：发 `PT-BDtool.exe` 或 `PT-BDtool-windows-portable.zip`
-- macOS：发 `PT-BDtool.app` 或 `PT-BDtool-macos-portable.zip`
-- Linux：发 `PT-BDtool-linux-portable.tar.gz`
-- 最好直接发 GitHub `portable-latest` Release 页面
-
-也就是：
-
-- 用户下载压缩包
-- 解压
-- 双击
-- 填 VPS 信息
-- 开始处理
-
----
-
-## 5. 本地开发常用命令
-
-### 语法与基础检查
-
-```bash
-python3 -m py_compile ptbd-gui.py ptbd-web.py ptbd_remote_backend.py scripts/build-controller-app.py scripts/remote-upload-server.py
-```
-
-### Web 控制端自检
-
-```bash
-./ptbd-web --host 127.0.0.1 --port 8899
-```
-
-打开：
+默认执行：
 
 ```text
-http://127.0.0.1:8899/
+python3 -m ptbd_core.cli ...
+```
+
+以下情况转发到 `bdtool-legacy.sh`：
+
+- 不带参数
+- 参数为 `start`、`install`、`--lang` 或 `--non-interactive` 等旧菜单入口
+- 环境变量 `PTBD_PYTHON_CORE=0`
+- 找不到 Python 3
+
+这条兼容约定属于用户接口。调整前必须覆盖安装版、便携包、远端 runtime 和回归测试。
+
+### 用户界面
+
+- `ptbd-gui.py`：Windows/macOS/Linux Tk 桌面控制端
+- `ptbd-web.py`：Web 控制端，支持 `remote` 和 `local` 模式
+- `ptbd_remote_backend.py`：桌面控制端的 SSH/远端运行后端
+- `ptbd`、`ptbd-start.sh`、`ptbd-remote.sh`：现有新手与 Shell 流程
+
+桌面 GUI 和 Docker 是并列交付形态，不互相替代：
+
+- GUI 通常运行在用户电脑，通过 SSH 控制媒体 VPS并回传结果
+- Docker 运行在媒体 VPS，直接处理只读挂载到 `/media` 的文件
+
+## 3. Python 核心
+
+`ptbd_core/` 的主要职责：
+
+- `models.py`：媒体类型、运行模式和共享配置数据模型
+- `config.py`：配置默认值、规范化、校验与安全落盘
+- `scanner.py`：视频、音频、音频目录、`BDMV` 和 `ISO` 扫描
+- `media_tools.py`：`ffmpeg`、`ffprobe`、`mediainfo`、`BDInfo` 等工具封装
+- `artifacts.py`：截图、MediaInfo、音频频谱和 BDInfo 产物生成
+- `pipeline.py`：单个媒体的处理流水线与清理
+- `returns.py`：打包、本地、HTTP 和 SCP 回传
+- `bundle_archive.py`：远端 bundle 的安全解包和成员限制
+- `jobs.py`：Web 任务状态、取消回调和有界历史
+- `cli.py`：无界面的命令行适配层
+- `runtime_assets.py`：各交付形态共用的运行资产清单
+- `assets/`：远端探测和依赖安装脚本
+
+模块边界要求：
+
+- 扫描器只负责发现和分类，不生成产物
+- 外部命令调用集中在工具层，调用者处理领域错误而不是拼接重复命令
+- 流水线编排处理步骤，不包含 GUI/Web 状态
+- 密码不得出现在 `repr`、公开配置 API 或普通日志中
+
+## 4. Web 与任务模型
+
+`ptbd-web.py` 使用共享 `AppConfig` 和 `JobRegistry`。任务接口包括：
+
+- `GET /api/status`
+- `GET /api/config`
+- `POST /api/config`
+- `POST /api/scan`
+- `POST /api/process`
+- `POST /api/diagnose`
+- `GET /api/tasks/<id>`
+- `POST /api/tasks/<id>/cancel`
+
+任务预留必须保持原子性，同一时间只允许一个活动扫描、处理或诊断任务。添加新的阻塞子进程时，必须注册取消回调，并在结束路径移除回调。
+
+批量处理必须逐项记录失败并继续。公开任务包含 `failed` 和 `result_summary`，处理状态使用 `success`、`partial`、`error` 或 `cancelled`；不要让 GUI/Web 各自维护不兼容的汇总结构。
+
+配置文件通过同目录临时文件原子替换并以 `0600` 写入。公开配置响应必须隐藏 `remote_password`，只能返回是否已保存密码的状态。
+
+远端后端优先使用 SFTP，子系统不可用时回退 SSH stdin/stdout 管道。打包远端 runtime 时，Shell/Python/文本配置统一转换为 LF，二进制文件保持原样；这两条兼容约定需要回归测试。
+
+扫描根的兼容字符串采用 Shell 引号语义，空格或逗号可分隔多个根；路径本身含空格、逗号或撇号时使用双引号。适配器之间优先传 `*_ROOTS_JSON`，其次传逐行 `*_ROOTS_LINES`，旧字符串仅作最后兼容；显式结构化值无效时必须 fail-closed，不能退回更宽的扫描范围。
+
+## 5. 运行资产清单
+
+安装器、远端 runtime、Docker、离线 bundle 和 PyInstaller 控制端应复用 `ptbd_core/runtime_assets.py`，不要各自维护文件列表。
+
+验证所有 profile：
+
+```bash
+for profile in install remote bundle controller docker; do
+  python3 ptbd_core/runtime_assets.py validate \
+    --profile "$profile" \
+    --source-root "$PWD"
+done
+```
+
+新增运行时文件时：
+
+1. 先更新规范资产清单。
+2. 更新对应复制/打包适配器。
+3. 添加 profile 验证或回归 fixture。
+4. 检查 controller、remote 和 Docker 是否都需要该文件。
+
+## 6. Docker 开发
+
+主要文件：
+
+- `Dockerfile`
+- `compose.yaml`
+- `.dockerignore`
+- `docker/entrypoint.sh`
+- `docker/healthcheck.py`
+
+镜像基于 Debian bookworm slim，内置 Python 和媒体工具，以非 root 用户运行。Compose 默认：
+
+- `/media` 只读
+- `/output` 和 `/config` 可写
+- 删除全部 capabilities
+- 启用 `no-new-privileges`
+- `/tmp` 使用受限 tmpfs
+
+构建与验证：
+
+```bash
+mkdir -p media output config
+chown "$(id -u):$(id -g)" output config
+docker compose config --quiet
+docker build -t pt-bdtool:local .
+docker compose up -d
+docker compose ps
+curl --fail http://127.0.0.1:8899/api/status
+docker compose down
+```
+
+不要在镜像入口中重新实现媒体处理。容器只负责准备目录、初始化 local 模式配置并启动 `ptbd-web.py`。
+
+## 7. 本地开发与测试
+
+### Python 单元测试
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+### Python 语法与字节码
+
+```bash
+python3 -m compileall -q \
+  ptbd_core \
+  ptbd-gui.py \
+  ptbd-web.py \
+  ptbd_remote_backend.py \
+  scripts
+```
+
+### Shell 语法
+
+```bash
+bash -n \
+  bdtool \
+  bdtool-legacy.sh \
+  install.sh \
+  ptbd \
+  ptbd-gui \
+  ptbd-start.sh \
+  ptbd-remote.sh \
+  docker/entrypoint.sh
 ```
 
 ### 全量回归
@@ -169,120 +186,105 @@ http://127.0.0.1:8899/
 ./scripts/full-test.sh
 ```
 
+全量回归包含 Python 单元测试、运行资产 profile、兼容包装器，以及视频、组合音频、`BDMV` 和 `ISO` fixture。修改处理流程时不要只运行 Shell 语法检查。
+
 ### GUI 自检
 
 ```bash
-ptbd-gui --self-check
+./ptbd-gui --self-check
 ```
 
-### 控制端打包
+该检查验证完整 controller 资产，不应改成无条件成功。
+
+## 8. 离线 Bundle 与安装
+
+大型 Linux 离线依赖不长期提交到主分支。按需生成或从 `bundle-latest` Release 获取：
+
+```bash
+python3 scripts/ensure-bundle.py
+```
+
+下载校验顺序为：显式 `PTBD_BUNDLE_SHA256`、Release `.sha256` sidecar、仅限旧版官方 URL 的固定迁移摘要。自定义 `PTBD_BUNDLE_URL` 不得复用官方摘要，必须提供可信 digest/sidecar；默认 fail-closed。`PTBD_BUNDLE_ALLOW_UNVERIFIED=1` 只允许在 sidecar 不可用时跳过校验，不能放行格式错误或不匹配的校验内容。
+
+组合音频频谱额外依赖 NumPy 与 Pillow；基础扫描、视频、单曲频谱不应因缺少这两个模块而判定核心依赖不完整。修改远端探测或安装脚本时，需要同时验证 `single` 与 `combined`。
+
+关键文件：
+
+- `scripts/fetch-deps.sh`
+- `scripts/build-bundle.sh`
+- `scripts/ensure-bundle.py`
+- `.github/workflows/bundle-release.yml`
+
+离线安装验证：
+
+```bash
+bash install.sh --offline --no-launch
+```
+
+`install.sh` 不应调用 `apt` 等宿主包管理器。系统依赖安装只属于明确的远端 bootstrap 或 Docker 镜像构建过程。
+
+## 9. 桌面应用构建
+
+控制端构建脚本：
 
 ```bash
 python3 scripts/ensure-bundle.py
 python3 scripts/build-controller-app.py
 ```
 
-如果本地已经有 `third_party/bundle/linux-amd64`，`ensure-bundle.py` 会直接复用，不会重复下载。
+发布目标：
 
----
+- Windows：`PT-BDtool.exe`
+- macOS：`PT-BDtool.app`
+- Linux：`PT-BDtool-linux-portable.tar.gz`
 
-## 6. Windows / macOS 成品打包
+`.github/workflows/controller-build.yml` 负责构建并更新 `portable-latest`。改动 GUI、共享配置、远端后端或 controller runtime 资产时，需要同步检查工作流的路径触发和打包清单。
 
-### Windows
+## 10. GitHub Actions
 
-在 Windows 本机执行：
+- `.github/workflows/ci.yml`：ShellCheck、Python/全量回归、Docker build/smoke、bundle 与离线安装
+- `.github/workflows/controller-build.yml`：Windows/macOS/Linux 便携控制端
+- `.github/workflows/bundle-release.yml`：Linux 离线 bundle
+
+Docker smoke 应至少验证：
+
+- Compose 配置可解析
+- 镜像可构建
+- 容器以指定非 root UID/GID 启动
+- Docker healthcheck 进入 `healthy`
+- `/api/status` 返回 `ok: true`
+- local 模式空目录扫描任务正常结束
+
+## 11. 发布前检查
 
 ```bash
-python -m pip install --upgrade pip
-python scripts/build-controller-app.py
+python3 -m unittest discover -s tests
+./scripts/full-test.sh
+python3 -m compileall -q ptbd_core ptbd-gui.py ptbd-web.py ptbd_remote_backend.py
+git diff --check
+git status --short
 ```
 
-产物默认在：
-
-```text
-dist/controller-app/windows/PT-BDtool.exe
-```
-
-### macOS
-
-在 macOS 本机执行：
+涉及 Docker 时额外运行：
 
 ```bash
-python3 -m pip install --upgrade pip
-python3 scripts/build-controller-app.py
+docker compose config --quiet
+docker build -t pt-bdtool:release-check .
 ```
 
-产物默认在：
+涉及桌面端时，至少运行 `ptbd-gui --self-check`，并确认 Windows/macOS 打包工作流仍包含新的共享资产。
 
-```text
-dist/controller-app/macos/PT-BDtool.app
-```
+## 12. 生成目录
 
----
+以下目录或文件是构建、运行和测试产物，不属于源码主体：
 
-## 7. GitHub Actions
-
-### 控制端构建
-
-工作流：
-
-- `.github/workflows/controller-build.yml`
-
-作用：
-
-- 自动构建 Windows 控制端
-- 自动构建 macOS 控制端
-- 自动构建 Linux 控制端
-- 自动发布到 `portable-latest` Release
-
-### Linux bundle 资产
-
-工作流：
-
-- `.github/workflows/bundle-release.yml`
-
-作用：
-
-- 生成 `PT-BDtool-linux-amd64.tar.gz`
-- 发布 / 更新 `bundle-latest` Release 资产
-- 供源码仓库按需下载和控制端打包复用
-
-### 常规回归
-
-工作流：
-
-- `.github/workflows/ci.yml`
-
-作用：
-
-- shell 语法检查
-- `scripts/full-test.sh`
-- 离线 bundle 构建
-- 离线安装检查
-
----
-
-## 8. 目前还没解决到 100% 的点
-
-下面这些目前仍然不能承诺 100%：
-
-- 任何空白 VPS 都免配置
-- 任何极老 Linux 都兼容
-- 没有 `root` / `sudo`、没有网络、软件源坏掉的 VPS 还能自动装依赖
-
-当前更现实的目标是：
-
-- 小白只面对成品包，不面对源码
-- Windows / macOS 控制端尽量做到双击可用
-- Debian / Ubuntu / Alpine 尽量自动补依赖
-
----
-
-## 9. 维护建议
-
-如果后面还想继续维护这个思路，优先记住这两件事：
-
-1. `README.md` 继续只写给普通用户看
-2. Linux bundle 通过 Release 资产更新，不要再把 200MB+ 二进制直接塞回主分支
-
-不要再把开发说明塞回 `README.md`，不然小白还是会看懵。
+- `bdtool-output/`
+- `.tmp/`
+- `.full-test*`
+- `.docker-smoke/`
+- `build/`
+- `dist/`
+- `artifact/`
+- `release-assets/`
+- `third_party/bundle/linux-amd64/`
+- `__pycache__/`

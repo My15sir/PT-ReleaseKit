@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# shellcheck disable=SC2317
+# shellcheck disable=SC2317,SC2329
 # This function is only reached via the ERR trap.
 on_err() {
   local line="${1:-unknown}"

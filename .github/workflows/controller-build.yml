@@ -13,16 +13,23 @@ on:
       - PT-BDtool.desktop
       - PT-BDtool.sh
       - bdtool
+      - bdtool-legacy.sh
       - bdtool.sh
       - ptbd-gui
       - ptbd-gui.py
       - ptbd_remote_backend.py
+      - ptbd_core/**
       - docs/README.en.md
       - lib/**
       - scripts/build-controller-app.py
+      - scripts/audio-spectrum.py
       - scripts/ensure-bundle.py
       - scripts/prepare-remote-runtime.sh
       - scripts/remote-upload-server.py
+
+concurrency:
+  group: portable-latest-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -47,10 +54,10 @@ jobs:
             quick_start_name: 打开前先看.txt
             quick_start_title: PT-BDtool Windows 快速开始
             quick_start_body: |
-              1. 双击 PT-BDtool.exe
-              2. 填 VPS 地址、端口、密码、本机保存目录
-              3. 点击“扫描 VPS 候选”
-              4. 双击你要处理的条目
+              1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
+              2. 双击 PT-BDtool.exe，填写 VPS 地址、端口、密码、本机保存目录
+              3. 点击“测连”，再点击“扫描 VPS 候选”
+              4. 勾选要处理的条目，点击“启动所选条目”
               5. 等待结果自动下载回本机
               
               提醒：
@@ -69,16 +76,16 @@ jobs:
             quick_start_name: 打开前先看.txt
             quick_start_title: PT-BDtool macOS 快速开始
             quick_start_body: |
-              1. 双击 PT-BDtool.app
-              2. 如果第一次被系统拦住，请右键应用，点“打开”
-              3. 填 VPS 地址、端口、密码、本机保存目录
+              1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
+              2. 双击 PT-BDtool.app；若被拦住，请右键应用后点“打开”
+              3. 填 VPS 地址、端口、密码、本机保存目录并点击“测连”
               4. 点击“扫描 VPS 候选”
-              5. 双击你要处理的条目
+              5. 勾选要处理的条目，点击“启动所选条目”
               6. 等待结果自动下载回本机
               
               提醒：
               - 不需要安装 Python
-              - 不需要安装 bash / ssh
+              - 不需要另装 Python 或 bash；首次验证主机密钥使用 macOS 自带 ssh
           - os: ubuntu-latest
             label: Linux
             built_path: dist/controller-app/linux/PT-BDtool
@@ -92,10 +99,10 @@ jobs:
             quick_start_title: PT-BDtool Linux 快速开始
             quick_start_body: |
               1. 解压 PT-BDtool-linux-portable.tar.gz
-              2. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击 PT-BDtool.sh
-              3. 填 VPS 地址、端口、密码、本机保存目录
-              4. 点击“扫描 VPS 候选”
-              5. 双击你要处理的条目
+              2. 先在系统终端 SSH 登录 VPS，核对并接受主机密钥
+              3. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击 PT-BDtool.sh
+              4. 填写配置并点“测连”，再点击“扫描 VPS 候选”
+              5. 勾选条目，点击“启动所选条目”
               
               提醒：
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
@@ -263,7 +270,7 @@ jobs:
 
             1. 解压
             2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app` / Linux 优先双击 `PT-BDtool.desktop`
-            3. 填 VPS 地址、端口、密码、本机保存目录，然后点 `扫描 VPS 候选` 并双击条目
+            3. 先用系统 SSH 核对 VPS 主机密钥；填写配置并测连，扫描后勾选条目，再点 `启动所选条目`
 
             VPS 上先放好视频 / 音频 / BDMV / ISO。
 

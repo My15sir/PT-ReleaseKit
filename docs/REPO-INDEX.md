@@ -1,148 +1,115 @@
 # PT-BDtool 仓库导航
 
-这份文档只做一件事：帮你快速看懂这个仓库每块是干什么的。
+普通用户先看根目录 `README.md`。维护者先看 `docs/DEVELOPMENT.md`，Docker 部署看 `docs/DOCKER.md`。
 
-如果你是普通用户：
+## 1. 稳定入口
 
-- 直接看根目录 `README.md`
-- 不要把源码仓库当成最终成品包
+- `bdtool`：Python-first CLI 包装器，根据兼容规则分发
+- `bdtool-legacy.sh`：旧 Shell 菜单与兼容处理实现
+- `bdtool.sh`：旧命令名兼容转发
+- `ptbd`：新手入口
+- `ptbd-start.sh`：本地菜单入口
+- `ptbd-remote.sh`、`ptbd-remote-start.sh`：远端 Shell 流程
+- `install.sh`：离线安装入口
 
-如果你是维护者：
+`bdtool` 的分发规则：处理命令默认进入 `ptbd_core.cli`；无参数、旧菜单参数、`PTBD_PYTHON_CORE=0` 或缺少 Python 3 时进入 `bdtool-legacy.sh`。
 
-- 先看 `docs/DEVELOPMENT.md`
-- 再看这份仓库导航
+## 2. Python 核心
 
----
+- `ptbd_core/cli.py`：命令行适配
+- `ptbd_core/models.py`：共享数据模型
+- `ptbd_core/config.py`：共享配置、校验和落盘
+- `ptbd_core/scanner.py`：媒体扫描和分类
+- `ptbd_core/media_tools.py`：媒体工具调用
+- `ptbd_core/artifacts.py`：截图、报告和频谱产物
+- `ptbd_core/pipeline.py`：处理流程编排
+- `ptbd_core/returns.py`：打包和回传
+- `ptbd_core/bundle_archive.py`：bundle 安全解包与资源限制
+- `ptbd_core/jobs.py`：异步任务状态与取消
+- `ptbd_core/runtime_assets.py`：交付形态的规范运行资产清单
+- `ptbd_core/assets/`：远端探测与依赖安装脚本
 
-## 1. 根目录入口
+## 3. 桌面与 Web 控制端
 
-这些文件是最常碰到的入口：
+- `PT-BDtool.bat`：Windows 源码双击入口
+- `PT-BDtool.command`：macOS 源码双击入口
+- `PT-BDtool.desktop`、`PT-BDtool.sh`：Linux 桌面入口
+- `ptbd-gui`、`ptbd-gui.py`：Windows/macOS/Linux Tk 控制端
+- `ptbd-web`、`ptbd-web.py`：Web 控制端
+- `ptbd_remote_backend.py`：SSH/远端控制后端
 
-- `PT-BDtool.bat`
-  - Windows 双击入口
-- `PT-BDtool.command`
-  - macOS 双击入口
-- `PT-BDtool.desktop`
-  - Linux 桌面入口
-- `PT-BDtool.sh`
-  - Linux 统一双击启动脚本
-- `ptbd-gui`
-  - GUI 包装器
-- `ptbd-gui.py`
-  - GUI 主程序
-- `ptbd-web`
-  - 本机 Web 控制端入口
-- `ptbd-web.py`
-  - Web 控制端主程序
-- `ptbd`
-  - 新手模式入口
-- `ptbd-remote.sh`
-  - 远端一键流程入口
-- `ptbd-start.sh`
-  - 本地菜单入口
-- `bdtool`
-  - 主 CLI / 扫描与生成核心入口
-- `install.sh`
-  - 离线安装入口
+Windows/macOS GUI 继续交付。它们与 Docker 服务不同：桌面端控制远端 VPS；Docker 在媒体 VPS 上直接运行 local 模式。
 
-说明：
+## 4. Docker
 
-- Linux 现在统一使用 `PT-BDtool.sh`
-- 不要再恢复旧文件名 `启动PT-BDtool.sh`
+- `Dockerfile`：非 root 生产镜像
+- `compose.yaml`：媒体、输出和配置挂载
+- `.dockerignore`：镜像构建上下文过滤
+- `docker/entrypoint.sh`：初始化 local 模式配置并启动 Web
+- `docker/healthcheck.py`：检查 `/api/status`
 
----
+默认容器路径：
 
-## 2. 代码分区
+- `/media`：媒体，只读
+- `/output`：生成结果，可写
+- `/config`：配置和运行状态，可写
 
-### 核心处理
+部署说明：`docs/DOCKER.md`。
 
-- `bdtool`
-- `lib/ui.sh`
+## 5. 远端运行与回传
 
-说明：
+- `scripts/prepare-remote-runtime.sh`：准备远端运行目录
+- `scripts/remote-upload-server.py`：HTTP 回传接收端
+- `ptbd_core/assets/remote-probe.sh`：远端环境探测
+- `ptbd_core/assets/remote-install-deps.sh`：远端依赖安装
 
-- `bdtool` 是唯一核心处理实现
-- `bdtool.sh` 仅保留为旧命令兼容转发入口
+远端 runtime 的文件清单来自 `ptbd_core/runtime_assets.py`，不要在适配器中重复维护。
 
-### GUI / 控制端
+远端传输优先使用 SFTP，不可用时自动回退 SSH 管道。上传 runtime 前会把脚本、Python 和文本配置规范化为 LF，以兼容 Linux VPS。
 
-- `ptbd-gui`
-- `ptbd-gui.py`
-- `ptbd-web`
-- `ptbd-web.py`
-- `ptbd_remote_backend.py`
+## 6. 安装、打包与发布
 
-### 远端运行与回传
+- `scripts/fetch-deps.sh`：获取或整理运行依赖
+- `scripts/build-bundle.sh`：构建 Linux 离线 bundle
+- `scripts/ensure-bundle.py`：复用或下载 bundle
+- `scripts/build-controller-app.py`：PyInstaller 桌面控制端构建
+- `.github/workflows/bundle-release.yml`：发布 `bundle-latest`
+- `.github/workflows/controller-build.yml`：发布 `portable-latest`
 
-- `ptbd-remote.sh`
-- `ptbd-remote-start.sh`
-- `scripts/prepare-remote-runtime.sh`
-- `scripts/remote-upload-server.py`
+## 7. 测试与 CI
 
-### 安装与打包
+- `tests/`：Python 核心、配置、任务和 Web 接口单元测试
+- `scripts/full-test.sh`：跨入口全量回归与真实媒体 fixture
+- `.github/workflows/ci.yml`：ShellCheck、全量回归、Docker smoke、bundle 和离线安装
 
-- `install.sh`
-- `scripts/build-bundle.sh`
-- `scripts/build-controller-app.py`
-- `scripts/fetch-deps.sh`
-- `scripts/ensure-bundle.py`
+常用验证：
 
----
+```bash
+python3 -m unittest discover -s tests
+./scripts/full-test.sh
+docker compose config --quiet
+docker build -t pt-bdtool:local .
+```
 
-## 3. 文档
+## 8. 文档
 
-- `README.md`
-  - 面向普通用户
-- `docs/README.en.md`
-  - 英文说明
-- `docs/DEVELOPMENT.md`
-  - 面向维护者
-- `docs/REPO-INDEX.md`
-  - 仓库导航
+- `README.md`：中文用户说明
+- `docs/README.en.md`：英文用户说明
+- `docs/DOCKER.md`：Docker 部署、升级和排障
+- `docs/DEVELOPMENT.md`：维护、测试和发布
+- `docs/REPO-INDEX.md`：当前文件
 
----
-
-## 4. GitHub 相关
-
-### Actions 工作流
-
-- `.github/workflows/controller-build.yml`
-  - 构建并发布 Windows / macOS / Linux 便携包
-- `.github/workflows/bundle-release.yml`
-  - 构建并发布 Linux bundle 资产
-- `.github/workflows/ci.yml`
-  - 语法检查、回归测试、离线安装检查
-
-### Release 标签
-
-- `portable-latest`
-  - 给普通用户下载成品包
-- `bundle-latest`
-  - 给源码仓库和控制端打包复用 Linux bundle
-
----
-
-## 5. 本地产物
-
-下面这些是运行或测试时生成的，不是源码主体：
+## 9. 生成目录
 
 - `bdtool-output/`
 - `.tmp/`
 - `.full-test*`
+- `.docker-smoke/`
 - `build/`
 - `dist/`
 - `artifact/`
 - `release-assets/`
 - `third_party/bundle/linux-amd64/`
+- `__pycache__/`
 
----
-
-## 6. 维护建议
-
-- 普通用户只面向 `portable-latest`
-- 源码仓库不要再混入大体积 bundle 二进制
-- 改 Linux 启动方式时，要同时改：
-  - `README.md`
-  - `docs/README.en.md`
-  - `.github/workflows/controller-build.yml`
-  - 根目录启动文件
+这些是运行、测试或发布产物，不应被当作核心源码提交。

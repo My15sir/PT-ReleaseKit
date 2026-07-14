@@ -3,6 +3,7 @@ import json
 import os
 import platform
 import queue
+import signal
 import shlex
 import shutil
 import subprocess
@@ -16,13 +17,20 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter.scrolledtext import ScrolledText
 
+from ptbd_core.config import default_config as core_default_config
+from ptbd_core.config import default_save_dir as core_default_save_dir
+from ptbd_core.config import load_config as core_load_config
+from ptbd_core.config import normalize_remote_connection
+from ptbd_core.config import normalize_scan_roots
+from ptbd_core.config import save_config as core_save_config
+from ptbd_core.config import split_path_roots
+from ptbd_core.runtime_assets import AssetManifestError, validate_profile
 from ptbd_remote_backend import (
     PTBDRemoteBackend,
     TaskCancelledError,
     backend_available,
     backend_status,
     build_effective_scan_include,
-    normalize_remote_connection,
     preferred_scan_roots_text,
 )
 
@@ -30,6 +38,25 @@ from ptbd_remote_backend import (
 APP_NAME = "PT-BDtool"
 CONTENT_INSET_X = 14
 HEADER_TEXT_INSET_X = 16
+
+
+def askpass_script_payload(password: str, *, windows: bool) -> tuple[str, str]:
+    if windows:
+        escaped = password
+        for old, new in (
+            ("^", "^^"),
+            ("&", "^&"),
+            ("|", "^|"),
+            ("<", "^<"),
+            (">", "^>"),
+            ("(", "^("),
+            (")", "^)"),
+            ("%", "%%"),
+        ):
+            escaped = escaped.replace(old, new)
+        return ".cmd", f"@echo off\r\nsetlocal DisableDelayedExpansion\r\necho({escaped}\r\n"
+    escaped = password.replace("'", "'\\''")
+    return ".sh", f"#!/usr/bin/env bash\nprintf '%s\\n' '{escaped}'\n"
 
 
 class _RoundButtonHandle:
@@ -193,47 +220,18 @@ LOG_PATH = CONFIG_PATH.parent / "PT-BDtool.log"
 
 
 def default_save_dir() -> str:
-    home = Path.home()
-    candidates = [
-        home / "Desktop",
-        home / "桌面",
-        home / "Downloads",
-    ]
-    for candidate in candidates:
-        if candidate.is_dir():
-            return str(candidate)
-    return str(home)
+    return core_default_save_dir()
 
 
-DEFAULT_CONFIG = {
-    "remote_host": "root@your-vps",
-    "remote_port": "22",
-    "remote_password": "",
-    "remote_cmd": "pt",
-    "remote_bootstrap": True,
-    "save_dir": default_save_dir(),
-    "scan_include": "",
-    "scan_exclude": "",
-    "scan_full": False,
-    "auto_cleanup": True,
-}
+DEFAULT_CONFIG = core_default_config().to_dict()
 
 
 def load_config() -> dict:
-    if not CONFIG_PATH.is_file():
-        return DEFAULT_CONFIG.copy()
-    try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return DEFAULT_CONFIG.copy()
-    merged = DEFAULT_CONFIG.copy()
-    merged.update({k: v for k, v in data.items() if k in merged})
-    return merged
+    return core_load_config(CONFIG_PATH, include_secret=True)
 
 
 def save_config(data: dict) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    core_save_config(CONFIG_PATH, data)
 
 
 def append_gui_log_line(text: str) -> None:
@@ -567,6 +565,7 @@ class App:
         self.root.geometry("920x760")
         self.root.minsize(920, 720)
         self.process: subprocess.Popen[str] | None = None
+        self.shell_cancel_event = threading.Event()
         self.reader_threads: list[threading.Thread] = []
         self.backend: PTBDRemoteBackend | None = None
         self.backend_thread: threading.Thread | None = None
@@ -1310,6 +1309,78 @@ class App:
         backend_running = self.backend_thread is not None and self.backend_thread.is_alive()
         return legacy_running or backend_running
 
+    @staticmethod
+    def terminate_shell_process(process: subprocess.Popen[str], *, force: bool = False) -> None:
+        if process.poll() is not None:
+            return
+        if os.name == "nt":
+            taskkill = shutil.which("taskkill")
+            if taskkill:
+                try:
+                    result = subprocess.run(
+                        [taskkill, "/PID", str(process.pid), "/T", "/F"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                    if result.returncode == 0:
+                        return
+                except OSError:
+                    pass
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                return
+            except (OSError, ProcessLookupError):
+                pass
+        try:
+            process.kill() if force else process.terminate()
+        except OSError:
+            pass
+
+    def run_cancellable_capture(
+        self,
+        command: list[str],
+        *,
+        env: dict[str, str],
+        timeout: int = 1800,
+    ) -> subprocess.CompletedProcess[str]:
+        if self.shell_cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        process = subprocess.Popen(
+            command,
+            cwd=str(APP_ROOT),
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            creationflags=creationflags,
+            start_new_session=(os.name != "nt"),
+        )
+        self.process = process
+        if self.shell_cancel_event.is_set():
+            self.terminate_shell_process(process)
+        try:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired as exc:
+                self.terminate_shell_process(process, force=True)
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                raise RuntimeError(f"命令执行超时（{timeout} 秒）。") from exc
+        finally:
+            if self.process is process:
+                self.process = None
+        if self.shell_cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
     def clear_backend_task(self, backend: PTBDRemoteBackend) -> None:
         backend.close()
         if self.backend is backend:
@@ -1335,6 +1406,8 @@ class App:
         if data["remote_bootstrap"]:
             self.append_log("[gui] 空白 VPS 自举已开启：先尝试系统依赖自动安装，不够时才回退上传内置运行包")
         self.status_var.set(f"运行中：准备顺序处理 {len(selected_paths)} 个条目")
+        self.last_success_paths = []
+        self.last_failed_paths = []
 
         def worker() -> None:
             success_paths: list[str] = []
@@ -1381,6 +1454,8 @@ class App:
                 self.log_queue.put(f"[gui] 任务失败：{exc}")
                 self.log_queue.put("[gui] 任务结束，退出码：1")
             finally:
+                self.last_success_paths = list(success_paths)
+                self.last_failed_paths = [path for path, _ in failed]
                 self.clear_backend_task(backend)
 
         self.backend_thread = threading.Thread(target=worker, daemon=True)
@@ -1434,15 +1509,42 @@ class App:
                         messagebox.showerror("测试连接失败", report.get("message") or "连接失败")
 
                 self.root.after(0, finish_ui)
+            except TaskCancelledError:
+                self.log_queue.put("[gui] 测连已取消")
+                self.root.after(0, lambda: self.status_var.set("测连已取消"))
             except Exception as exc:
-                self.log_queue.put(f"[gui] 测连异常：{exc}")
-                self.root.after(0, lambda: self.status_var.set(f"测连失败：{exc}"))
-                self.root.after(0, lambda: messagebox.showerror("测试连接失败", str(exc)))
+                message = str(exc)
+                self.log_queue.put(f"[gui] 测连异常：{message}")
+                self.root.after(0, lambda message=message: self.status_var.set(f"测连失败：{message}"))
+                self.root.after(0, lambda message=message: messagebox.showerror("测试连接失败", message))
             finally:
                 self.clear_backend_task(backend)
 
         self.backend_thread = threading.Thread(target=worker, daemon=True)
         self.backend_thread.start()
+
+    def build_remote_shell_env(self, data: dict, save_dir: Path) -> dict[str, str]:
+        include_values = split_path_roots(build_effective_scan_include(data))
+        exclude_values = split_path_roots(data["scan_exclude"])
+        env = os.environ.copy()
+        env.update(
+            {
+                "PTBD_REMOTE_HOST": data["remote_host"],
+                "PTBD_REMOTE_PORT": data["remote_port"],
+                "PTBD_REMOTE_PASSWORD": data["remote_password"],
+                "PTBD_REMOTE_PT_CMD": data["remote_cmd"],
+                "PTBD_REMOTE_BOOTSTRAP": "1" if data["remote_bootstrap"] else "0",
+                "PTBD_LOCAL_SAVE_DIR": str(save_dir),
+                "PTBD_SCAN_INCLUDE_ROOTS": normalize_scan_roots(include_values),
+                "PTBD_SCAN_INCLUDE_ROOTS_JSON": json.dumps(include_values, ensure_ascii=False),
+                "PTBD_SCAN_INCLUDE_ROOTS_LINES": "\n".join(include_values),
+                "PTBD_SCAN_EXCLUDE_ROOTS": normalize_scan_roots(exclude_values),
+                "PTBD_SCAN_EXCLUDE_ROOTS_JSON": json.dumps(exclude_values, ensure_ascii=False),
+                "PTBD_SCAN_EXCLUDE_ROOTS_LINES": "\n".join(exclude_values),
+                "PTBD_AUTO_CLEANUP": "1" if data["auto_cleanup"] else "0",
+            }
+        )
+        return env
 
     def retry_failed_paths(self) -> None:
         if self.task_running():
@@ -1463,7 +1565,16 @@ class App:
         if backend_available():
             self.start_remote_with_backend_batch(data, save_dir, paths)
             return
-        messagebox.showerror("无法重试", "当前环境缺少内置后端，无法自动重试。请改用打包版或安装 paramiko。")
+        bash_bin = find_bash()
+        remote_script = shell_script_path()
+        if not bash_bin or not shutil.which("ssh") or not remote_script.is_file():
+            messagebox.showerror(
+                "无法重试",
+                "Shell 回退后端不可用。请安装 bash/ssh，或改用包含 Paramiko 的打包版。",
+            )
+            return
+        env = self.build_remote_shell_env(data, save_dir)
+        self.start_remote_with_shell_batch(bash_bin, remote_script, env, save_dir, paths)
 
     def start_remote(self) -> None:
         if self.task_running():
@@ -1511,20 +1622,7 @@ class App:
             messagebox.showerror("缺少脚本", f"找不到远端入口：{remote_script}")
             return
 
-        env = os.environ.copy()
-        env.update(
-            {
-                "PTBD_REMOTE_HOST": data["remote_host"],
-                "PTBD_REMOTE_PORT": data["remote_port"],
-                "PTBD_REMOTE_PASSWORD": data["remote_password"],
-                "PTBD_REMOTE_PT_CMD": data["remote_cmd"],
-                "PTBD_REMOTE_BOOTSTRAP": "1" if data["remote_bootstrap"] else "0",
-                "PTBD_LOCAL_SAVE_DIR": str(save_dir),
-                "PTBD_SCAN_INCLUDE_ROOTS": build_effective_scan_include(data),
-                "PTBD_SCAN_EXCLUDE_ROOTS": data["scan_exclude"],
-                "PTBD_AUTO_CLEANUP": "1" if data["auto_cleanup"] else "0",
-            }
-        )
+        env = self.build_remote_shell_env(data, save_dir)
         if not selected_paths:
             self.status_var.set("运行中：未选中候选，将回退到远端菜单模式")
             selected_paths = [""]
@@ -1538,75 +1636,104 @@ class App:
         save_dir: Path,
         selected_paths: list[str],
     ) -> None:
+        self.shell_cancel_event.clear()
         self.append_log("")
         self.append_log(f"[gui] 启动命令：{bash_bin} {remote_script}")
         self.append_log(f"[gui] 本机保存目录：{save_dir}")
         real_paths = [path for path in selected_paths if path]
         if real_paths:
             self.append_log(f"[gui] 已选 {len(real_paths)} 个候选，旧版 shell 模式将顺序处理")
+        self.last_success_paths = []
+        self.last_failed_paths = []
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
         def worker() -> None:
+            success_items: list[str] = []
+            failed: list[tuple[str, str]] = []
             try:
                 for index, selected_path in enumerate(selected_paths, start=1):
+                    if self.shell_cancel_event.is_set():
+                        self.log_queue.put("[gui] shell 任务已取消")
+                        self.log_queue.put("[gui] 任务结束，退出码：130")
+                        return
                     step_env = env.copy()
                     if selected_path:
                         step_env["PTBD_REMOTE_TARGET_PATH"] = selected_path
                         self.log_queue.put(f"[gui] shell 模式开始处理 {index}/{len(selected_paths)}：{selected_path}")
                     else:
                         step_env.pop("PTBD_REMOTE_TARGET_PATH", None)
-                    proc = subprocess.Popen(
-                        [bash_bin, str(remote_script)],
-                        cwd=str(APP_ROOT),
-                        env=step_env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        stdin=subprocess.DEVNULL,
-                        text=True,
-                        bufsize=1,
-                        creationflags=creationflags,
-                    )
-                    self.process = proc
-                    assert proc.stdout is not None
-                    for line in proc.stdout:
-                        self.log_queue.put(line.rstrip("\n"))
-                    rc = proc.wait()
-                    if rc != 0:
-                        self.log_queue.put(f"[gui] 任务结束，退出码：{rc}")
-                        return
+                    item_label = selected_path or "(旧版交互菜单)"
+                    try:
+                        proc = subprocess.Popen(
+                            [bash_bin, str(remote_script)],
+                            cwd=str(APP_ROOT),
+                            env=step_env,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            bufsize=1,
+                            creationflags=creationflags,
+                            start_new_session=(os.name != "nt"),
+                        )
+                        self.process = proc
+                        if self.shell_cancel_event.is_set():
+                            self.terminate_shell_process(proc)
+                        assert proc.stdout is not None
+                        for line in proc.stdout:
+                            self.log_queue.put(line.rstrip("\r\n"))
+                        rc = proc.wait()
+                        if self.shell_cancel_event.is_set():
+                            self.log_queue.put("[gui] shell 任务已取消")
+                            self.log_queue.put("[gui] 任务结束，退出码：130")
+                            return
+                        if rc != 0:
+                            failed.append((selected_path, f"退出码 {rc}"))
+                            self.log_queue.put(
+                                f"[gui] 失败 {index}/{len(selected_paths)}：{item_label} -> 退出码 {rc}"
+                            )
+                            continue
+                        success_items.append(item_label)
+                        self.log_queue.put(f"[gui] 成功 {index}/{len(selected_paths)}：{item_label}")
+                    except Exception as exc:
+                        failed.append((selected_path, str(exc)))
+                        self.log_queue.put(
+                            f"[gui] 失败 {index}/{len(selected_paths)}：{item_label} -> {exc}"
+                        )
+                        continue
+                    finally:
+                        self.process = None
+                self.last_success_paths = list(success_items)
+                self.last_failed_paths = [path for path, _ in failed if path]
+                self.log_queue.put(
+                    f"[gui] 批量完成：成功 {len(success_items)} / 失败 {len(failed)} / 共 {len(selected_paths)}"
+                )
+                if failed:
+                    self.log_queue.put("[gui] 失败条目（可点“重试失败”）：")
+                    for path, error in failed:
+                        self.log_queue.put(f"  - {path or '(旧版交互菜单)'} | {error}")
                 self.log_queue.put(f"[gui] 如果成功，结果应该已经回到：{save_dir}")
-                self.log_queue.put("[gui] 任务结束，退出码：0")
+                if failed and not success_items:
+                    self.log_queue.put("[gui] 任务结束，退出码：1")
+                elif failed:
+                    self.log_queue.put("[gui] 任务结束，退出码：2")
+                else:
+                    self.log_queue.put("[gui] 任务结束，退出码：0")
             finally:
+                self.last_success_paths = list(success_items)
+                self.last_failed_paths = [path for path, _ in failed if path]
                 self.process = None
 
         self.backend_thread = threading.Thread(target=worker, daemon=True)
         self.backend_thread.start()
 
     def create_askpass_script(self, password: str) -> str:
-        suffix = ".cmd" if os.name == "nt" else ".sh"
+        suffix, payload = askpass_script_payload(password, windows=os.name == "nt")
         with tempfile.NamedTemporaryFile("w", delete=False, suffix=suffix, encoding="utf-8") as handle:
             script_path = handle.name
-            if os.name == "nt":
-                escaped = password
-                for old, new in (
-                    ("^", "^^"),
-                    ("&", "^&"),
-                    ("|", "^|"),
-                    ("<", "^<"),
-                    (">", "^>"),
-                    ("(", "^("),
-                    (")", "^)"),
-                    ("%", "%%"),
-                    ("!", "^^!"),
-                ):
-                    escaped = escaped.replace(old, new)
-                handle.write("@echo off\n")
-                handle.write("setlocal DisableDelayedExpansion\n")
-                handle.write(f"echo {escaped}\n")
-            else:
-                handle.write("#!/usr/bin/env bash\n")
-                escaped = password.replace("'", "'\\''")
-                handle.write(f"printf '%s\\n' '{escaped}'\n")
+            handle.write(payload)
         if os.name != "nt":
             os.chmod(script_path, 0o700)
         return script_path
@@ -1637,15 +1764,10 @@ class App:
                 "PTBD_REMOTE_PASSWORD": data["remote_password"],
             }
         )
-        result = subprocess.run(
+        result = self.run_cancellable_capture(
             [bash_bin, str(helper_script), "--host", data["remote_host"], "--port", data["remote_port"]],
-            cwd=str(APP_ROOT),
             env=helper_env,
-            text=True,
-            capture_output=True,
             timeout=1800,
-            check=False,
-            stdin=subprocess.DEVNULL,
         )
         if result.stderr.strip():
             for line in result.stderr.strip().splitlines():
@@ -1661,12 +1783,28 @@ class App:
         ssh_bin = shutil.which("ssh")
         if not ssh_bin:
             raise RuntimeError("本机缺少 ssh。")
+        include_values = split_path_roots(build_effective_scan_include(data))
+        exclude_values = split_path_roots(data["scan_exclude"])
         remote_script = " ".join(
             [
-            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(build_effective_scan_include(data))};"
-            if build_effective_scan_include(data)
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS={shlex.quote(normalize_scan_roots(include_values))};"
+            if include_values
             else "",
-            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(data['scan_exclude'])};" if data["scan_exclude"] else "",
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS_JSON={shlex.quote(json.dumps(include_values, ensure_ascii=False))};"
+            if include_values
+            else "",
+            f"export BDTOOL_SCAN_INCLUDE_ROOTS_LINES={shlex.quote(chr(10).join(include_values))};"
+            if include_values
+            else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS={shlex.quote(normalize_scan_roots(exclude_values))};"
+            if exclude_values
+            else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS_JSON={shlex.quote(json.dumps(exclude_values, ensure_ascii=False))};"
+            if exclude_values
+            else "",
+            f"export BDTOOL_SCAN_EXCLUDE_ROOTS_LINES={shlex.quote(chr(10).join(exclude_values))};"
+            if exclude_values
+            else "",
             f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
             ]
         ).strip()
@@ -1675,7 +1813,7 @@ class App:
             "-p",
             data["remote_port"],
             "-o",
-            "StrictHostKeyChecking=accept-new",
+            "StrictHostKeyChecking=yes",
             data["remote_host"],
             f"bash -lc {shlex.quote(remote_script)}",
         ]
@@ -1725,16 +1863,7 @@ class App:
                     self.log_queue.put(f"[gui] 远端运行包就绪：{remote_cmd}")
                 cmd = self.build_scan_command(data, remote_cmd)
                 env, askpass_path = self.build_ssh_env(data)
-                result = subprocess.run(
-                    cmd,
-                    cwd=str(APP_ROOT),
-                    env=env,
-                    text=True,
-                    capture_output=True,
-                    timeout=1800,
-                    check=False,
-                    stdin=subprocess.DEVNULL,
-                )
+                result = self.run_cancellable_capture(cmd, env=env, timeout=1800)
                 if result.returncode != 0:
                     if result.stdout.strip():
                         self.log_queue.put("[gui] scan-json stdout:")
@@ -1755,6 +1884,9 @@ class App:
                 self.scan_items = payload.get("items", [])
                 self.log_queue.put(f"[gui] scan-json 返回 {len(self.scan_items)} 个候选")
                 self.root.after(0, lambda: self.refresh_scan_items(auto_start=auto_start))
+            except TaskCancelledError:
+                self.log_queue.put("[gui] 扫描已取消")
+                self.root.after(0, lambda: self.status_var.set("扫描已取消"))
             except Exception as exc:
                 self.log_queue.put(f"[gui] 获取候选失败：{exc}")
                 self.root.after(0, lambda: self.status_var.set("获取候选失败：请看下方日志或打开日志文件"))
@@ -1765,7 +1897,9 @@ class App:
                     except OSError:
                         pass
 
-        threading.Thread(target=worker, daemon=True).start()
+        self.shell_cancel_event.clear()
+        self.backend_thread = threading.Thread(target=worker, daemon=True)
+        self.backend_thread.start()
 
     def clear_scan_filters(self) -> None:
         self.filter_type_var.set("全部类型")
@@ -2113,9 +2247,11 @@ class App:
             self.append_log("[gui] 已请求停止当前独立后端任务")
             self.status_var.set("已请求停止，请稍等。")
             return
-        if self.process and self.process.poll() is None:
+        if self.backend_thread and self.backend_thread.is_alive():
+            self.shell_cancel_event.set()
             try:
-                self.process.terminate()
+                if self.process and self.process.poll() is None:
+                    self.terminate_shell_process(self.process)
                 self.append_log("[gui] 已请求停止当前任务")
                 self.status_var.set("已请求停止，请稍等。")
             except Exception as exc:
@@ -2179,6 +2315,12 @@ def cli_main() -> int:
         print(f"ssh={ssh_bin}")
         print(f"remote_script={shell_script_path()}")
         print(f"bootstrap_script={bootstrap_script_path()}")
+        try:
+            assets = validate_profile(APP_ROOT, "controller")
+        except AssetManifestError as exc:
+            print(f"runtime_assets=FAIL: {exc}")
+            return 1
+        print(f"runtime_assets=PASS ({len(assets)} files)")
         return 0
 
     root = tk.Tk()

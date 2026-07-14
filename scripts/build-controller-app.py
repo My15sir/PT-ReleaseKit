@@ -6,12 +6,19 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import venv
 from pathlib import Path
 
 
 APP_NAME = "PT-BDtool"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from ptbd_core.runtime_assets import validate_profile
+
+
 VENV_DIR = PROJECT_ROOT / "build" / "controller-build-venv"
 BUILD_ROOT = PROJECT_ROOT / "build" / "controller-app"
 DIST_ROOT = PROJECT_ROOT / "dist" / "controller-app"
@@ -24,6 +31,7 @@ BUILD_REQUIREMENTS = [
 def run(command: list[str], *, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(command))
     subprocess.run(command, check=True, env=env)
+
 
 def venv_python_path(venv_dir: Path) -> Path:
     if os.name == "nt":
@@ -59,19 +67,10 @@ def format_add_data(source: Path, dest_dir: str) -> str:
 
 
 def iter_data_entries() -> list[tuple[Path, str]]:
-    entries: list[tuple[Path, str]] = [
-        (PROJECT_ROOT / "bdtool", "."),
-        (PROJECT_ROOT / "bdtool.sh", "."),
-        (PROJECT_ROOT / "ptbd-remote.sh", "."),
-        (PROJECT_ROOT / "scripts" / "ensure-bundle.py", "scripts"),
-        (PROJECT_ROOT / "scripts" / "prepare-remote-runtime.sh", "scripts"),
-        (PROJECT_ROOT / "scripts" / "remote-upload-server.py", "scripts"),
+    return [
+        (entry.source, Path(entry.relative_path).parent.as_posix())
+        for entry in validate_profile(PROJECT_ROOT, "controller")
     ]
-    for base_dir in (PROJECT_ROOT / "lib",):
-        for file_path in sorted(path for path in base_dir.rglob("*") if path.is_file()):
-            relative_parent = file_path.relative_to(PROJECT_ROOT).parent.as_posix()
-            entries.append((file_path, relative_parent))
-    return entries
 
 
 def platform_name() -> str:

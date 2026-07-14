@@ -17,6 +17,11 @@ SCP_TEST_HOME="$ROOT_DIR/.full-test-scp-home"
 SCP_TEST_ROOT="$ROOT_DIR/.full-test-return-scp"
 SCP_TEST_REMOTE_DIR="$SCP_TEST_ROOT/local-target"
 SCP_TEST_BIN="$SCP_TEST_ROOT/mock-bin"
+PYCORE_ROOT="$ROOT_DIR/.full-test-python-core"
+PYCORE_AUDIO_DIR="$PYCORE_ROOT/audio/Album"
+PYCORE_BDMV_ROOT="$PYCORE_ROOT/disc/Movie"
+PYCORE_ISO_DIR="$PYCORE_ROOT/iso/Disc"
+PYCORE_DOWNLOAD_DIR="$PYCORE_ROOT/packages"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$TMPDIR_ROOT" "$TEST_DOWNLOAD_DIR"
@@ -60,13 +65,19 @@ fi
 
 # Minimal sample for dry-mode execution path validation.
 : > "$NOEMPTY_SAMPLE"
-rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT"
+rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT" "$PYCORE_ROOT"
 rm -rf "$FULLSCAN_SSH_ROOT" "$SSH_TEST_HOME" "$FULLSCAN_SCP_ROOT" "$SCP_TEST_ROOT" "$SCP_TEST_HOME"
 mkdir -p "$PATHRULE_SRC_DIR" "$FULLSCAN_SRC_DIR" "$FULLSCAN_SSH_SRC_DIR" "$FULLSCAN_SCP_SRC_DIR" "$SCP_TEST_BIN" "$SCP_TEST_REMOTE_DIR"
+mkdir -p "$PYCORE_AUDIO_DIR" "$PYCORE_BDMV_ROOT/BDMV/STREAM" "$PYCORE_BDMV_ROOT/BDMV/PLAYLIST" "$PYCORE_ISO_DIR" "$PYCORE_DOWNLOAD_DIR"
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$PATHRULE_SAMPLE" -y
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SAMPLE" -y
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SSH_SAMPLE" -y
 ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v libx264 -pix_fmt yuv420p "$FULLSCAN_SCP_SAMPLE" -y
+ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=440:duration=1 "$PYCORE_AUDIO_DIR/01.flac" -y
+ffmpeg -hide_banner -loglevel error -f lavfi -i sine=frequency=880:duration=1 "$PYCORE_AUDIO_DIR/02.flac" -y
+ffmpeg -hide_banner -loglevel error -f lavfi -i testsrc=duration=1:size=320x240:rate=24 -c:v mpeg2video -f mpegts "$PYCORE_BDMV_ROOT/BDMV/STREAM/00000.m2ts" -y
+: > "$PYCORE_BDMV_ROOT/BDMV/PLAYLIST/00000.mpls"
+printf 'invalid iso fixture\n' > "$PYCORE_ISO_DIR/disc.iso"
 
 cat > "$SCP_TEST_BIN/ssh" <<'SH'
 #!/usr/bin/env bash
@@ -139,6 +150,10 @@ with tempfile.TemporaryDirectory(prefix="ptbd-runtime-render-") as temp_dir:
     bdtool_sh_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
     bdtool_sh_path.chmod(0o755)
 
+    legacy_path = runtime_dir / "bdtool-legacy.sh"
+    legacy_path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    legacy_path.chmod(0o755)
+
     backend = PTBDRemoteBackend(temp_path, {}, logger=None)
     script = backend.render_prepare_runtime_script(
         remote_runtime_dir=str(runtime_dir),
@@ -164,7 +179,7 @@ from pathlib import Path
 
 pattern = re.compile(r"printf '([^']+)' \| base64 -d")
 
-for rel in ("bdtool",):
+for rel in ("bdtool-legacy.sh",):
     path = Path(sys.argv[1]) / rel
     text = path.read_text(encoding="utf-8")
     match = pattern.search(text)
@@ -307,8 +322,11 @@ run_step() {
   cp -f "$TMP_RESULTS_TSV" "$RESULTS_TSV"
 }
 
-run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-web" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh"
+run_step "syntax-shell-scripts" success bash -n "$ROOT_DIR/bdtool" "$ROOT_DIR/bdtool-legacy.sh" "$ROOT_DIR/bdtool.sh" "$ROOT_DIR/scripts/full-test.sh" "$ROOT_DIR/install.sh" "$ROOT_DIR/ptbd" "$ROOT_DIR/ptbd-gui" "$ROOT_DIR/ptbd-web" "$ROOT_DIR/ptbd-remote.sh" "$ROOT_DIR/ptbd-remote-start.sh" "$ROOT_DIR/ptbd-start.sh" "$ROOT_DIR/PT-BDtool.sh" "$ROOT_DIR/PT-BDtool.command" "$ROOT_DIR/scripts/build-bundle.sh" "$ROOT_DIR/scripts/fetch-deps.sh" "$ROOT_DIR/scripts/prepare-remote-runtime.sh" "$ROOT_DIR/scripts/update-deps.sh" "$ROOT_DIR/lib/ui.sh" "$ROOT_DIR/docker/entrypoint.sh"
 run_step "syntax-python-scripts" success python3 -m py_compile "$ROOT_DIR/ptbd-gui.py" "$ROOT_DIR/ptbd-web.py" "$ROOT_DIR/ptbd_remote_backend.py" "$ROOT_DIR/scripts/audio-spectrum.py" "$ROOT_DIR/scripts/build-controller-app.py" "$ROOT_DIR/scripts/ensure-bundle.py" "$ROOT_DIR/scripts/remote-upload-server.py"
+run_step "syntax-python-core" success python3 -m compileall -q "$ROOT_DIR/ptbd_core" "$ROOT_DIR/tests" "$ROOT_DIR/docker/healthcheck.py"
+run_step "python-core-tests" success python3 -m unittest discover -s "$ROOT_DIR/tests"
+run_step "runtime-asset-contracts" success bash -c "for profile in remote controller install bundle docker; do python3 '$ROOT_DIR/ptbd_core/runtime_assets.py' validate --profile \"\$profile\" --source-root '$ROOT_DIR' >/dev/null || exit 1; done"
 run_step "placeholder-png-valid" success python3 "$PLACEHOLDER_PNG_TEST" "$ROOT_DIR"
 run_step "remote-runtime-render" success python3 "$RUNTIME_RENDER_TEST" "$ROOT_DIR"
 run_step "workflow-ci-markers" success bash -c "grep -q 'name: Validate Project' '$ROOT_DIR/.github/workflows/ci.yml' && grep -q 'name: Release Portable Apps' '$ROOT_DIR/.github/workflows/controller-build.yml' && grep -q 'name: Release Linux Bundle' '$ROOT_DIR/.github/workflows/bundle-release.yml' && grep -q 'upload-artifact' '$ROOT_DIR/.github/workflows/controller-build.yml'"
@@ -327,6 +345,9 @@ run_step "prepare-remote-runtime-help" success bash "$ROOT_DIR/scripts/prepare-r
 run_step "scan-dry-invalid-input" fail "$CLI_BIN" "$ROOT_DIR/bdtool.sh" --mode dry --out "$ROOT_DIR/bdtool-output/test-run"
 run_step "bdtool-dry-noempty" success "$MENU_BIN" "$NOEMPTY_SAMPLE" --mode dry --out "$NOEMPTY_OUT"
 run_step "default-out-pathrule-video" success "$CLI_BIN" "$PATHRULE_SAMPLE" --log-level debug
+run_step "python-core-combined-audio" success env BDTOOL_DOWNLOAD_DIR="$PYCORE_DOWNLOAD_DIR" BDTOOL_AUTO_CLEANUP=0 BDTOOL_AUDIO_SPECTRUM_BACKEND=ffmpeg "$ROOT_DIR/bdtool" generate-path --path "$PYCORE_AUDIO_DIR" --audio-spectrum combined
+run_step "python-core-bdmv" success env BDTOOL_DOWNLOAD_DIR="$PYCORE_DOWNLOAD_DIR" BDTOOL_AUTO_CLEANUP=0 "$ROOT_DIR/bdtool" generate-path --path "$PYCORE_BDMV_ROOT"
+run_step "python-core-iso" success env BDTOOL_DOWNLOAD_DIR="$PYCORE_DOWNLOAD_DIR" BDTOOL_AUTO_CLEANUP=0 "$ROOT_DIR/bdtool" generate-path --path "$PYCORE_ISO_DIR/disc.iso"
 run_step "fullscan-confirm-enters-flow" success env TMPDIR="$TMPDIR_ROOT" BDTOOL_DOWNLOAD_DIR="$TEST_DOWNLOAD_DIR" BDTOOL_AUTO_CLEANUP=0 BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_ROOT" bash -c "printf '1\n1\n1\n1\n0\n0\n3\n' | '$MENU_BIN'"
 run_step "fullscan-ssh-fallback-download" success env -u BDTOOL_DOWNLOAD_DIR HOME="$SSH_TEST_HOME" TMPDIR="$TMPDIR_ROOT" SSH_CONNECTION="127.0.0.1 10022 127.0.0.1 22" BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_SSH_ROOT" bash -c "printf '1\n1\n1\n1\n0\n3\n' | '$MENU_BIN'"
 run_step "fullscan-scp-return" success env HOME="$SCP_TEST_HOME" PATH="$SCP_TEST_BIN:$PATH" TMPDIR="$TMPDIR_ROOT" SSH_CONNECTION="127.0.0.1 10022 127.0.0.1 22" BDTOOL_RETURN_MODE="scp" BDTOOL_RETURN_SCP_HOST="127.0.0.1" BDTOOL_RETURN_SCP_USER="receiver" BDTOOL_RETURN_SCP_REMOTE_DIR="$SCP_TEST_REMOTE_DIR" BDTOOL_SCAN_FULL_ROOT="$FULLSCAN_SCP_ROOT" bash -c "printf '1\n1\n1\n1\n0\n3\n' | '$MENU_BIN'"
@@ -343,6 +364,21 @@ fi
 
 if ! wait_for_match "assert-pathrule-shot" "find \"$PATHRULE_ROOT/信息/srcdir\" -type f -name '1.png' 2>/dev/null | grep -q ."; then
   write_log "FULL TEST RESULT: FAIL (default output artifact missing screenshot)"
+  exit 1
+fi
+
+if ! wait_for_match "assert-python-core-audio" "test -s \"$PYCORE_ROOT/audio/信息/Album/mediainfo.txt\" && test -s \"$PYCORE_ROOT/audio/信息/Album/频谱图.png\" && test -s \"$PYCORE_DOWNLOAD_DIR/Album.zip\""; then
+  write_log "FULL TEST RESULT: FAIL (Python combined audio artifacts missing)"
+  exit 1
+fi
+
+if ! wait_for_match "assert-python-core-bdmv" "test -s \"$PYCORE_ROOT/disc/信息/Movie/BDInfo.txt\" && test -s \"$PYCORE_ROOT/disc/信息/Movie/1.png\" && test -s \"$PYCORE_DOWNLOAD_DIR/Movie.zip\""; then
+  write_log "FULL TEST RESULT: FAIL (Python BDMV artifacts missing)"
+  exit 1
+fi
+
+if ! wait_for_match "assert-python-core-iso" "test -s \"$PYCORE_ROOT/iso/信息/Disc/BDInfo.txt\" && test -s \"$PYCORE_ROOT/iso/信息/Disc/1.png\" && test -s \"$PYCORE_DOWNLOAD_DIR/Disc.zip\""; then
+  write_log "FULL TEST RESULT: FAIL (Python ISO artifacts missing)"
   exit 1
 fi
 
@@ -375,4 +411,4 @@ fi
 
 write_log "FULL TEST RESULT: PASS"
 rm -f "$NOEMPTY_SAMPLE"
-rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT" "$FULLSCAN_SSH_ROOT" "$SSH_TEST_HOME" "$FULLSCAN_SCP_ROOT" "$SCP_TEST_ROOT" "$SCP_TEST_HOME"
+rm -rf "$PATHRULE_ROOT" "$FULLSCAN_ROOT" "$FULLSCAN_SSH_ROOT" "$SSH_TEST_HOME" "$FULLSCAN_SCP_ROOT" "$SCP_TEST_ROOT" "$SCP_TEST_HOME" "$PYCORE_ROOT"

@@ -5,18 +5,38 @@ import argparse
 import os
 import shutil
 import sys
-import tarfile
 import tempfile
 import urllib.request
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from ptbd_core.bundle_archive import (
+    OFFICIAL_BOOTSTRAP_SHA256,
+    OFFICIAL_BUNDLE_URL,
+    OFFICIAL_CHECKSUM_URL,
+    BundleArchiveError,
+    BundleChecksumSidecarDigestError,
+    BundleChecksumSidecarEncodingError,
+    BundleChecksumUnavailableError,
+    ExplicitBundleChecksumError,
+    bundle_member_relative_path,
+    resolve_bundle_checksum,
+    verify_bundle_checksum,
+)
+from ptbd_core.bundle_archive import extract_bundle_archive as safe_extract_bundle_archive
+
 BUNDLE_ROOT = PROJECT_ROOT / "third_party" / "bundle" / "linux-amd64"
 DEFAULT_URL = os.environ.get(
     "PTBD_BUNDLE_URL",
-    "https://github.com/My15sir/PT-BDtool/releases/download/bundle-latest/PT-BDtool-linux-amd64.tar.gz",
+    OFFICIAL_BUNDLE_URL,
 )
+DEFAULT_SHA256 = os.environ.get("PTBD_BUNDLE_SHA256", "").strip()
+DEFAULT_CHECKSUM_URL = os.environ.get("PTBD_BUNDLE_CHECKSUM_URL", f"{DEFAULT_URL}.sha256")
+ALLOW_UNVERIFIED = os.environ.get("PTBD_BUNDLE_ALLOW_UNVERIFIED", "0") == "1"
 REQUIRED_RELATIVE_PATHS = (
     Path("bin/ffmpeg"),
     Path("bin/ffprobe"),
@@ -24,7 +44,6 @@ REQUIRED_RELATIVE_PATHS = (
     Path("bin/BDInfo"),
     Path("lib"),
 )
-MARKER_PARTS = ("third_party", "bundle", "linux-amd64")
 
 
 def log(message: str, *, quiet: bool) -> None:
@@ -36,55 +55,57 @@ def bundle_ready(bundle_root: Path) -> bool:
     return all((bundle_root / relative_path).exists() for relative_path in REQUIRED_RELATIVE_PATHS)
 
 
-def bundle_member_relative_path(member_name: str) -> Path | None:
-    parts = PurePosixPath(member_name).parts
-    for index in range(len(parts) - len(MARKER_PARTS) + 1):
-        if parts[index : index + len(MARKER_PARTS)] == MARKER_PARTS:
-            remainder = parts[index + len(MARKER_PARTS) :]
-            if not remainder:
-                return None
-            return Path(*remainder)
-    return None
-
-
 def download_bundle_archive(url: str, archive_path: Path, *, quiet: bool) -> None:
     log(f"download: {url}", quiet=quiet)
-    with urllib.request.urlopen(url, timeout=120) as response, archive_path.open("wb") as handle:
-        shutil.copyfileobj(response, handle)
+    try:
+        with urllib.request.urlopen(url, timeout=120) as response, archive_path.open("wb") as handle:
+            shutil.copyfileobj(response, handle)
+    except (OSError, ValueError) as exc:
+        raise BundleArchiveError(f"bundle download failed: {exc}") from exc
+
+
+def expected_bundle_checksum(*, quiet: bool) -> str | None:
+    def read_checksum_sidecar(url: str) -> bytes:
+        log(f"download checksum: {url}", quiet=quiet)
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read()
+
+    try:
+        resolution = resolve_bundle_checksum(
+            bundle_url=DEFAULT_URL,
+            checksum_url=DEFAULT_CHECKSUM_URL,
+            explicit_checksum=DEFAULT_SHA256,
+            allow_unverified=ALLOW_UNVERIFIED,
+            read_checksum_sidecar=read_checksum_sidecar,
+        )
+    except ExplicitBundleChecksumError as exc:
+        raise BundleArchiveError(f"invalid PTBD_BUNDLE_SHA256: {exc}") from (exc.__cause__ or exc)
+    except BundleChecksumUnavailableError as exc:
+        raise BundleArchiveError(
+            "bundle checksum unavailable; set PTBD_BUNDLE_SHA256, provide a .sha256 sidecar, "
+            "or explicitly set PTBD_BUNDLE_ALLOW_UNVERIFIED=1"
+        ) from (exc.__cause__ or exc)
+    except BundleChecksumSidecarEncodingError as exc:
+        raise BundleArchiveError("bundle checksum sidecar is not ASCII") from (exc.__cause__ or exc)
+    except BundleChecksumSidecarDigestError as exc:
+        raise BundleArchiveError(f"invalid bundle checksum sidecar: {exc}") from (exc.__cause__ or exc)
+
+    if resolution.source == "official-bootstrap":
+        log(
+            "checksum sidecar unavailable; using pinned checksum for the legacy official asset",
+            quiet=quiet,
+        )
+    elif resolution.source == "unverified":
+        log(
+            "WARNING: checksum unavailable; explicit unverified mode enabled: "
+            f"{resolution.unavailable_error}",
+            quiet=quiet,
+        )
+    return resolution.checksum
 
 
 def extract_bundle_archive(archive_path: Path, bundle_root: Path, *, quiet: bool) -> None:
-    with tempfile.TemporaryDirectory(prefix="ptbd-bundle-stage-") as temp_dir:
-        stage_root = Path(temp_dir) / "linux-amd64"
-        with tarfile.open(archive_path, "r:gz") as archive:
-            extracted = 0
-            for member in archive.getmembers():
-                relative_path = bundle_member_relative_path(member.name)
-                if relative_path is None:
-                    continue
-                target_path = stage_root / relative_path
-                if member.isdir():
-                    target_path.mkdir(parents=True, exist_ok=True)
-                    extracted += 1
-                    continue
-                if not member.isfile():
-                    continue
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                source_handle = archive.extractfile(member)
-                if source_handle is None:
-                    raise SystemExit(f"archive member unreadable: {member.name}")
-                with source_handle, target_path.open("wb") as output_handle:
-                    shutil.copyfileobj(source_handle, output_handle)
-                try:
-                    os.chmod(target_path, member.mode)
-                except OSError:
-                    pass
-                extracted += 1
-        if extracted == 0:
-            raise SystemExit("archive does not contain third_party/bundle/linux-amd64")
-        bundle_root.parent.mkdir(parents=True, exist_ok=True)
-        shutil.rmtree(bundle_root, ignore_errors=True)
-        shutil.move(str(stage_root), str(bundle_root))
+    safe_extract_bundle_archive(archive_path, bundle_root)
     log(f"bundle ready: {bundle_root}", quiet=quiet)
 
 
@@ -96,6 +117,9 @@ def ensure_bundle(*, force: bool, quiet: bool) -> int:
     with tempfile.TemporaryDirectory(prefix="ptbd-bundle-download-") as temp_dir:
         archive_path = Path(temp_dir) / "PT-BDtool-linux-amd64.tar.gz"
         download_bundle_archive(DEFAULT_URL, archive_path, quiet=quiet)
+        expected = expected_bundle_checksum(quiet=quiet)
+        if expected is not None:
+            verify_bundle_checksum(archive_path, expected)
         extract_bundle_archive(archive_path, BUNDLE_ROOT, quiet=quiet)
 
     if not bundle_ready(BUNDLE_ROOT):

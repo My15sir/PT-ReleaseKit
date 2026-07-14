@@ -5,6 +5,7 @@ PTBD_REMOTE_HOST="${PTBD_REMOTE_HOST:-}"
 PTBD_REMOTE_PORT="${PTBD_REMOTE_PORT:-22}"
 PTBD_REMOTE_PASSWORD="${PTBD_REMOTE_PASSWORD:-}"
 PTBD_REMOTE_CACHE_ROOT="${PTBD_REMOTE_CACHE_ROOT:-}"
+PTBD_AUDIO_SPECTRUM_MODE="${PTBD_AUDIO_SPECTRUM_MODE:-single}"
 
 ASKPASS_SCRIPT=""
 SSH_AUTH_PREFIX=()
@@ -60,6 +61,7 @@ Environment variables:
   PTBD_REMOTE_PORT
   PTBD_REMOTE_PASSWORD
   PTBD_REMOTE_CACHE_ROOT
+  PTBD_AUDIO_SPECTRUM_MODE  single or combined (default: single)
 EOF
 }
 
@@ -127,7 +129,7 @@ EOF
 run_ssh() {
   "${SSH_AUTH_PREFIX[@]}" ssh \
     -p "$PTBD_REMOTE_PORT" \
-    -o StrictHostKeyChecking=accept-new \
+    -o StrictHostKeyChecking=yes \
     -o ServerAliveInterval=15 \
     -o ServerAliveCountMax=3 \
     "$PTBD_REMOTE_HOST" \
@@ -146,7 +148,7 @@ run_remote_sh() {
 run_scp() {
   "${SSH_AUTH_PREFIX[@]}" scp \
     -P "$PTBD_REMOTE_PORT" \
-    -o StrictHostKeyChecking=accept-new \
+    -o StrictHostKeyChecking=yes \
     "$@"
 }
 
@@ -172,11 +174,12 @@ ensure_local_bundle() {
 require_local_files() {
   local archive_mode="$1"
   local path=""
-  local -a required=(
-    "$APP_ROOT/bdtool"
-    "$APP_ROOT/bdtool.sh"
-    "$APP_ROOT/lib/ui.sh"
-  )
+  if ! python3 "$APP_ROOT/ptbd_core/runtime_assets.py" validate \
+    --profile remote --source-root "$APP_ROOT" >/dev/null; then
+    err "local runtime asset manifest is incomplete"
+    exit 1
+  fi
+  local -a required=()
   if [[ "$archive_mode" == "bundle" ]]; then
     ensure_local_bundle || true
     required+=(
@@ -207,11 +210,12 @@ archive_path = Path(sys.argv[2]).resolve()
 archive_mode = sys.argv[3]
 bundle_root = app_root / "third_party" / "bundle" / "linux-amd64"
 
+sys.path.insert(0, str(app_root))
+from ptbd_core.runtime_assets import validate_profile
+
 members = [
-    (app_root / "bdtool", "bdtool"),
-    (app_root / "bdtool.sh", "bdtool.sh"),
-    (app_root / "lib" / "ui.sh", "lib/ui.sh"),
-    (app_root / "scripts" / "audio-spectrum.py", "scripts/audio-spectrum.py"),
+    (entry.source, entry.relative_path)
+    for entry in validate_profile(app_root, "remote")
 ]
 
 if archive_mode == "bundle":
@@ -267,54 +271,13 @@ PY
 }
 
 probe_remote_system() {
+  local script_file="$APP_ROOT/ptbd_core/assets/remote-probe.sh"
   local script=""
-  script=$(cat <<'EOF'
-set -eu
-
-if [ -r /etc/os-release ]; then
-  . /etc/os-release
-fi
-
-has_cmd() {
-  if command -v "$1" >/dev/null 2>&1; then
-    printf '1'
-  else
-    printf '0'
-  fi
-}
-
-has_py_mod() {
-  if python3 - "$1" <<'PY' >/dev/null 2>&1
-import importlib.util
-import sys
-raise SystemExit(0 if importlib.util.find_spec(sys.argv[1]) else 1)
-PY
-  then
-    printf '1'
-  else
-    printf '0'
-  fi
-}
-
-printf 'REMOTE_OS=%s\n' "$(uname -s 2>/dev/null || echo unknown)"
-printf 'REMOTE_ARCH=%s\n' "$(uname -m 2>/dev/null || echo unknown)"
-printf 'REMOTE_HOME=%s\n' "${HOME:-}"
-printf 'REMOTE_ID=%s\n' "${ID:-}"
-printf 'REMOTE_ID_LIKE=%s\n' "${ID_LIKE:-}"
-printf 'REMOTE_VERSION_ID=%s\n' "${VERSION_ID:-}"
-printf 'REMOTE_HAS_TAR=%s\n' "$(has_cmd tar)"
-printf 'REMOTE_HAS_BASH=%s\n' "$(has_cmd bash)"
-printf 'REMOTE_HAS_PYTHON3=%s\n' "$(has_cmd python3)"
-printf 'REMOTE_HAS_CURL=%s\n' "$(has_cmd curl)"
-printf 'REMOTE_HAS_FFMPEG=%s\n' "$(has_cmd ffmpeg)"
-printf 'REMOTE_HAS_FFPROBE=%s\n' "$(has_cmd ffprobe)"
-printf 'REMOTE_HAS_MEDIAINFO=%s\n' "$(has_cmd mediainfo)"
-printf 'REMOTE_HAS_NUMPY=%s\n' "$(has_py_mod numpy)"
-printf 'REMOTE_HAS_PIL=%s\n' "$(has_py_mod PIL)"
-printf 'REMOTE_HAS_BDINFO=%s\n' "$(has_cmd BDInfo)"
-printf 'REMOTE_HAS_BD_INFO=%s\n' "$(has_cmd bd_info)"
-EOF
-)
+  [[ -f "$script_file" ]] || {
+    err "missing remote probe asset: $script_file"
+    exit 1
+  }
+  script="$(cat "$script_file")"
   run_remote_sh "$script"
 }
 
@@ -375,161 +338,27 @@ remote_core_deps_ready() {
   [[ "${REMOTE_HAS_FFMPEG:-0}" == "1" ]] || return 1
   [[ "${REMOTE_HAS_FFPROBE:-0}" == "1" ]] || return 1
   [[ "${REMOTE_HAS_MEDIAINFO:-0}" == "1" ]] || return 1
-  [[ "${REMOTE_HAS_NUMPY:-0}" == "1" ]] || return 1
-  [[ "${REMOTE_HAS_PIL:-0}" == "1" ]] || return 1
+  if [[ "$PTBD_AUDIO_SPECTRUM_MODE" == "combined" ]]; then
+    [[ "${REMOTE_HAS_NUMPY:-0}" == "1" ]] || return 1
+    [[ "${REMOTE_HAS_PIL:-0}" == "1" ]] || return 1
+  fi
   return 0
 }
 
 ensure_remote_system_deps() {
+  local script_file="$APP_ROOT/ptbd_core/assets/remote-install-deps.sh"
   local script=""
   local output=""
   local rc=0
 
-  script=$(cat <<'EOF'
-set -eu
-
-if [ -r /etc/os-release ]; then
-  . /etc/os-release
-fi
-
-id="${ID:-}"
-id_like="${ID_LIKE:-}"
-
-has_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-word_match() {
-  case " $1 " in
-    *" $2 "*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-is_debian_like() {
-  word_match "$id $id_like" debian || word_match "$id $id_like" ubuntu
-}
-
-is_alpine_like() {
-  word_match "$id $id_like" alpine
-}
-
-as_root() {
-  if [ "$(id -u)" -eq 0 ]; then
-    "$@"
-    return $?
-  fi
-  if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-    sudo -n "$@"
-    return $?
-  fi
-  return 97
-}
-
-enable_ubuntu_universe() {
-  if [ "$id" != "ubuntu" ]; then
-    return 0
-  fi
-  if apt-cache show mediainfo >/dev/null 2>&1 && apt-cache show ffmpeg >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "[remote] Ubuntu universe repo looks unavailable; trying to enable it" >&2
-  if ! command -v add-apt-repository >/dev/null 2>&1; then
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common >/dev/null
-  fi
-  if command -v add-apt-repository >/dev/null 2>&1; then
-    as_root add-apt-repository -y universe >/dev/null 2>&1 || true
-  fi
-}
-
-enable_alpine_community() {
-  if grep -Eq '^[[:space:]]*[^#].*/community/?[[:space:]]*$' /etc/apk/repositories 2>/dev/null; then
-    return 0
-  fi
-  echo "[remote] Alpine community repo looks unavailable; trying to enable it" >&2
-  as_root sh -eu <<'EOS'
-tmp_file="$(mktemp)"
-cleanup() {
-  rm -f "$tmp_file"
-}
-trap cleanup EXIT
-
-if grep -Eq '^[[:space:]]*#.*\/community/?[[:space:]]*$' /etc/apk/repositories 2>/dev/null; then
-  awk '
-    /^[[:space:]]*#/ && /\/community\/?[[:space:]]*$/ { sub(/^[[:space:]]*#[[:space:]]*/, "", $0) }
-    { print }
-  ' /etc/apk/repositories > "$tmp_file"
-else
-  awk '
-    { print }
-    /^[[:space:]]*[^#].*\/main\/?[[:space:]]*$/ {
-      line=$0
-      sub(/\/main\/?[[:space:]]*$/, "/community", line)
-      print line
-    }
-  ' /etc/apk/repositories > "$tmp_file"
-fi
-
-cp "$tmp_file" /etc/apk/repositories
-EOS
-}
-
-missing_required=""
-for cmd in tar bash python3 curl ffmpeg ffprobe mediainfo; do
-  if ! has_cmd "$cmd"; then
-    missing_required="$missing_required $cmd"
-  fi
-done
-
-need_optional_bd="0"
-if ! has_cmd BDInfo && ! has_cmd bd_info; then
-  need_optional_bd="1"
-fi
-
-if [ -z "${missing_required# }" ] && [ "$need_optional_bd" = "0" ]; then
-  echo "status=ready"
-  exit 0
-fi
-
-if is_debian_like; then
-  if ! as_root true >/dev/null 2>&1; then
-    echo "status=missing-required-no-privilege"
-    exit 0
-  fi
-  echo "[remote] Debian/Ubuntu detected; installing system packages for PT-BDtool" >&2
-  as_root apt-get update >/dev/null
-  if ! as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 python3-numpy python3-pil tar ffmpeg mediainfo zip >/dev/null 2>&1; then
-    enable_ubuntu_universe
-    as_root apt-get update >/dev/null
-    as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y bash curl python3 python3-numpy python3-pil tar ffmpeg mediainfo zip >/dev/null
-  fi
-  as_root env DEBIAN_FRONTEND=noninteractive apt-get install -y libbluray-bin >/dev/null 2>&1 || true
-  echo "status=installed"
-  exit 0
-fi
-
-if is_alpine_like; then
-  if ! as_root true >/dev/null 2>&1; then
-    echo "status=missing-required-no-privilege"
-    exit 0
-  fi
-  echo "[remote] Alpine detected; installing system packages for PT-BDtool" >&2
-  if ! as_root apk add --no-cache bash curl python3 py3-numpy py3-pillow tar ffmpeg mediainfo zip >/dev/null 2>&1; then
-    enable_alpine_community
-    as_root apk update >/dev/null
-    as_root apk add --no-cache bash curl python3 py3-numpy py3-pillow tar ffmpeg mediainfo zip >/dev/null
-  fi
-  as_root apk add --no-cache libbluray >/dev/null 2>&1 || true
-  echo "status=installed"
-  exit 0
-fi
-
-echo "status=unsupported"
-EOF
-)
+  [[ -f "$script_file" ]] || {
+    err "missing remote dependency asset: $script_file"
+    exit 1
+  }
+  script="$(cat "$script_file")"
 
   set +e
-  output="$(run_remote_sh "$script")"
+  output="$(run_remote_sh "PTBD_AUDIO_SPECTRUM_MODE=$(quote_sh "$PTBD_AUDIO_SPECTRUM_MODE"); export PTBD_AUDIO_SPECTRUM_MODE; $script")"
   rc=$?
   set -e
 
@@ -540,7 +369,6 @@ EOF
     log "remote dependency install result: $output"
   fi
 }
-
 SCRIPT_PATH="$(resolve_script_path "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 APP_ROOT="$(find_app_root "$SCRIPT_DIR" || true)"
@@ -558,6 +386,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$PTBD_REMOTE_HOST" ]] || { err "missing --host"; usage; exit 2; }
+case "$PTBD_AUDIO_SPECTRUM_MODE" in
+  single|combined) ;;
+  *) err "invalid PTBD_AUDIO_SPECTRUM_MODE: $PTBD_AUDIO_SPECTRUM_MODE"; exit 2 ;;
+esac
 command -v ssh >/dev/null 2>&1 || { err "missing ssh"; exit 1; }
 command -v scp >/dev/null 2>&1 || { err "missing scp"; exit 1; }
 command -v python3 >/dev/null 2>&1 || { err "missing python3"; exit 1; }
@@ -580,6 +412,13 @@ if remote_os_supported_for_auto_install; then
   ensure_remote_system_deps
   REMOTE_INFO="$(probe_remote_system)"
   parse_remote_info "$REMOTE_INFO"
+fi
+
+if [[ "$PTBD_AUDIO_SPECTRUM_MODE" == "combined" ]] \
+  && { [[ "${REMOTE_HAS_NUMPY:-0}" != "1" ]] || [[ "${REMOTE_HAS_PIL:-0}" != "1" ]]; }; then
+  err "combined audio spectrum requires remote Python numpy and Pillow"
+  err "automatic installation did not provide them; install both modules or use single mode"
+  exit 1
 fi
 
 ARCHIVE_MODE="minimal"
@@ -636,7 +475,7 @@ if [ -f "\$archive_path" ]; then
 fi
 
 mkdir -p "\$work_dir/bin" "\$(dirname "\$runtime_dir")"
-chmod +x "\$work_dir/bdtool" "\$work_dir/bdtool.sh"
+chmod +x "\$work_dir/bdtool" "\$work_dir/bdtool-legacy.sh" "\$work_dir/bdtool.sh"
 
 rm -f "\$work_dir/bin/BDInfo"
 if [ "\$archive_mode" = "minimal" ] && ! command -v BDInfo >/dev/null 2>&1 && command -v bd_info >/dev/null 2>&1; then
