@@ -1,6 +1,8 @@
-# PT-BDtool 开发与发布说明
+# PT ReleaseKit 开发与发布说明
 
 这份文档面向维护者。普通用户应先阅读根目录 `README.md`，Docker 运维请阅读 `docs/DOCKER.md`。
+
+品牌展示统一使用 **PT ReleaseKit**，仓库 slug 使用 `PT-ReleaseKit`。以下名称属于升级兼容接口，未经迁移设计不得直接重命名：`bdtool`、`ptbd-*`、`PTBD_*` 环境变量、`pt-bdtool:*` Docker 镜像标签、`/opt/PT-BDtool`、现有配置目录、`PT-BDtool-*` 下载文件名和 `bundle-latest` / `portable-latest` 标签。
 
 ## 1. 架构原则
 

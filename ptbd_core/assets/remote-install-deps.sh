@@ -131,7 +131,7 @@ if is_debian_like; then
     echo "status=missing-required-no-privilege"
     exit 0
   fi
-  echo "[remote] Debian/Ubuntu detected; installing system packages for PT-BDtool" >&2
+  echo "[remote] Debian/Ubuntu detected; installing system packages for PT ReleaseKit" >&2
   as_root apt-get update >/dev/null
   if [ "$need_spectrum_packages" = "1" ]; then
     install_packages="bash curl python3 tar ffmpeg mediainfo zip python3-numpy python3-pil"
@@ -156,7 +156,7 @@ if is_alpine_like; then
     echo "status=missing-required-no-privilege"
     exit 0
   fi
-  echo "[remote] Alpine detected; installing system packages for PT-BDtool" >&2
+  echo "[remote] Alpine detected; installing system packages for PT ReleaseKit" >&2
   if [ "$need_spectrum_packages" = "1" ]; then
     install_packages="bash curl python3 tar ffmpeg mediainfo zip py3-numpy py3-pillow"
   else

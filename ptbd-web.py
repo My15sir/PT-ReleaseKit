@@ -40,7 +40,7 @@ from ptbd_remote_backend import (
 )
 
 
-APP_NAME = "PT-BDtool Web"
+APP_NAME = "PT ReleaseKit Web"
 CONFIG_PATH = Path(os.environ.get("PTBD_WEB_CONFIG", Path.home() / ".config/ptbd-web/config.json"))
 DEFAULT_PORT = 8899
 SAFE_BASE_PATH = re.compile(r"^/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*$")
@@ -818,7 +818,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PT-BDtool Web</title>
+  <title>PT ReleaseKit Web</title>
   <style>
     :root {
       color-scheme: light;
@@ -1514,7 +1514,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="brand-lockup">
         <span class="brand-mark" aria-hidden="true">PT</span>
         <div>
-          <h1>PT-BDtool 材料工作台</h1>
+          <h1>PT ReleaseKit 材料工作台</h1>
           <p class="lede">扫描媒体目录，生成 MediaInfo、BDInfo、截图和音乐频谱图，并把结果写入指定目录。</p>
         </div>
       </div>
@@ -2714,7 +2714,7 @@ class WebHandler(BaseHTTPRequestHandler):
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="PT-BDtool local web controller")
+    parser = argparse.ArgumentParser(description="PT ReleaseKit local web controller")
     parser.add_argument("--host", default=os.environ.get("PTBD_WEB_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PTBD_WEB_PORT", str(DEFAULT_PORT))))
     parser.add_argument("--base-path", default=os.environ.get("PTBD_WEB_BASE_PATH", ""), help="URL prefix when served behind a reverse proxy, e.g. /ptbd")
@@ -2742,7 +2742,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nPT-BDtool Web stopped")
+        print("\nPT ReleaseKit Web stopped")
     finally:
         server.server_close()
     return 0

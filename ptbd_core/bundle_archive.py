@@ -14,7 +14,7 @@ from typing import Callable
 
 
 OFFICIAL_BUNDLE_URL = (
-    "https://github.com/My15sir/PT-BDtool/releases/download/"
+    "https://github.com/My15sir/PT-ReleaseKit/releases/download/"
     "bundle-latest/PT-BDtool-linux-amd64.tar.gz"
 )
 OFFICIAL_CHECKSUM_URL = f"{OFFICIAL_BUNDLE_URL}.sha256"

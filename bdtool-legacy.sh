@@ -65,11 +65,11 @@ for candidate in "${PTBDTOOL_ROOT:-}" "${PTBD_INSTALL_ROOT:-}" "$SCRIPT_DIR" "/o
   fi
 done
 if [[ -z "$ROOT_DIR" || ! -f "$ROOT_DIR/lib/ui.sh" ]]; then
-  echo "[ERROR] PT-BDtool runtime not found: lib/ui.sh" >&2
+  echo "[ERROR] PT ReleaseKit runtime not found: lib/ui.sh" >&2
   echo "[ERROR] Current entry path: $SCRIPT_PATH" >&2
   echo "[HINT] You may be running an old copied wrapper under /usr/local/bin." >&2
-  echo "[HINT] Reinstall from PT-BDtool project root:" >&2
-  echo "  cd /path/to/PT-BDtool" >&2
+  echo "[HINT] Reinstall from the PT ReleaseKit project root:" >&2
+  echo "  cd /path/to/PT-ReleaseKit" >&2
   echo "  bash install.sh --offline" >&2
   echo "[HINT] Then verify:" >&2
   echo "  command -v bdtool && ls -l \"\$(command -v bdtool)\"" >&2
@@ -595,7 +595,7 @@ make_audio_spectrum_sox() {
     duration_args=(-S 0 -d "$(format_spectrum_duration "$seconds")")
   fi
   if [[ -n "$title" ]]; then
-    title_args=(-t "$title" -c "PT-BDtool")
+    title_args=(-t "$title" -c "PT ReleaseKit")
   fi
   "$sox_bin" "$audio" -n remix 1 spectrogram \
     -x "$width" -y "$height" -z 120 -w Kaiser \

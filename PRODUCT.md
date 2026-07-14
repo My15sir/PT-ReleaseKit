@@ -10,7 +10,7 @@ PT users who keep media files on a VPS and need to prepare release materials bef
 
 ## Product Purpose
 
-PT-BDtool reduces the manual work around PT release preparation. It connects to a remote Linux host, scans likely media locations, generates screenshots, MediaInfo, audio spectrograms, and BDInfo reports where applicable, packages the output, returns it to the local computer, and optionally cleans temporary remote files.
+PT ReleaseKit reduces the manual work around PT release preparation. It connects to a remote Linux host, scans likely media locations, generates screenshots, MediaInfo, audio spectrograms, and BDInfo reports where applicable, packages the output, returns it to the local computer, and optionally cleans temporary remote files.
 
 Success means a non-specialist user can fill in VPS connection details, choose a detected item, start processing, and understand what happened from visible logs without touching shell commands.
 

@@ -46,7 +46,7 @@ LEGACY_BIN="$APP_ROOT/bdtool-legacy.sh"
 
 run_legacy() {
   [[ -x "$LEGACY_BIN" ]] || {
-    echo "[ERROR] PT-BDtool legacy fallback not found: $LEGACY_BIN" >&2
+    echo "[ERROR] PT ReleaseKit legacy fallback not found: $LEGACY_BIN" >&2
     exit 127
   }
   exec "$LEGACY_BIN" "$@"

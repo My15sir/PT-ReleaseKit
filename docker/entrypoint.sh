@@ -20,7 +20,7 @@ ensure_writable_dir() {
   target="$1"
   if ! mkdir -p "$target" 2>/dev/null || [ ! -w "$target" ]; then
     printf '%s\n' \
-      "PT-BDtool cannot write $target as uid=$(id -u) gid=$(id -g)." \
+      "PT ReleaseKit cannot write $target as uid=$(id -u) gid=$(id -g)." \
       "Create the host config/output directories and assign them to PTBD_UID:PTBD_GID before starting Compose." >&2
     exit 1
   fi
@@ -31,7 +31,7 @@ ensure_writable_dir "$PTBD_CONTAINER_SAVE_DIR"
 ensure_writable_dir "$BDTOOL_DATA_DIR"
 
 if [ -e "$PTBD_WEB_CONFIG" ] && [ ! -w "$PTBD_WEB_CONFIG" ]; then
-  printf 'PT-BDtool cannot update config file %s as uid=%s gid=%s.\n' \
+  printf 'PT ReleaseKit cannot update config file %s as uid=%s gid=%s.\n' \
     "$PTBD_WEB_CONFIG" "$(id -u)" "$(id -g)" >&2
   exit 1
 fi

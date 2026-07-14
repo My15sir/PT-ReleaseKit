@@ -11,6 +11,7 @@ import venv
 from pathlib import Path
 
 
+# Keep artifact filenames stable for existing download and launcher links.
 APP_NAME = "PT-BDtool"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -142,7 +143,7 @@ def build_artifact(python_bin: Path) -> Path:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build standalone PT-BDtool controller app")
+    parser = argparse.ArgumentParser(description="Build standalone PT ReleaseKit controller app")
     parser.add_argument("--skip-deps", action="store_true", help="Skip pip install inside build venv")
     args = parser.parse_args()
 

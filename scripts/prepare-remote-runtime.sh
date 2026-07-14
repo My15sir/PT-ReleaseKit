@@ -46,7 +46,7 @@ Usage:
 What it does:
   - Detect the remote Linux distro and current dependency state
   - Auto-install runtime packages on Debian / Ubuntu / Alpine when possible
-  - Upload either a thin PT-BDtool runtime or a bundled linux-amd64 fallback
+  - Upload either a thin PT ReleaseKit runtime or a bundled linux-amd64 fallback
   - Print the remote launcher path to stdout
 
 Options:

@@ -52,10 +52,10 @@ BT_SCRIPT_DIR="$(cd -P "$(dirname "$BT_SCRIPT_PATH")" && pwd)"
 BDTOOL_ROOT="$(bt_find_app_root "$BT_SCRIPT_DIR" || true)"
 
 if [[ -z "$BDTOOL_ROOT" || ! -x "$BDTOOL_ROOT/bdtool" ]]; then
-  echo "[ERROR] PT-BDtool runtime not found: bdtool" >&2
+  echo "[ERROR] PT ReleaseKit runtime not found: bdtool" >&2
   echo "[ERROR] Current entry path: $BT_SCRIPT_PATH" >&2
-  echo "[HINT] Reinstall from PT-BDtool project root:" >&2
-  echo "  cd /path/to/PT-BDtool && bash install.sh --offline" >&2
+  echo "[HINT] Reinstall from the PT ReleaseKit project root:" >&2
+  echo "  cd /path/to/PT-ReleaseKit && bash install.sh --offline" >&2
   exit 127
 fi
 

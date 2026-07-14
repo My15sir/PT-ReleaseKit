@@ -23,11 +23,11 @@ resolve_script_path() {
 show_error() {
   local message="$1"
   if command -v zenity >/dev/null 2>&1; then
-    zenity --error --title="PT-BDtool" --text="$message" >/dev/null 2>&1 || true
+    zenity --error --title="PT ReleaseKit" --text="$message" >/dev/null 2>&1 || true
   elif command -v kdialog >/dev/null 2>&1; then
     kdialog --error "$message" >/dev/null 2>&1 || true
   elif command -v osascript >/dev/null 2>&1; then
-    osascript -e "display alert \"PT-BDtool\" message \"${message//\"/\\\"}\" as critical" >/dev/null 2>&1 || true
+    osascript -e "display alert \"PT ReleaseKit\" message \"${message//\"/\\\"}\" as critical" >/dev/null 2>&1 || true
   fi
   printf '[ERROR] %s\n' "$message" >&2
 }
@@ -67,5 +67,5 @@ if [[ -x "$CLI_LAUNCHER" ]]; then
   exec "$CLI_LAUNCHER" "$@"
 fi
 
-show_error "找不到 PT-BDtool 启动文件。请确认你是在完整的 PT-BDtool 目录里运行。"
+show_error "找不到 PT ReleaseKit 启动文件。请确认你是在完整的项目目录里运行。"
 exit 1

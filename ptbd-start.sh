@@ -91,14 +91,14 @@ run_beginner_entry() {
     return $?
   fi
 
-  echo "[ERROR] Cannot find PT-BDtool entrypoint." >&2
+  echo "[ERROR] Cannot find PT ReleaseKit entrypoint." >&2
   echo "[HINT] Reinstall from project root: bash install.sh --offline" >&2
   echo "Tried: \`ptbd\`, \`${APP_ROOT:-$SCRIPT_DIR}/ptbd\`, \`bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool\`, \`${APP_ROOT:-$SCRIPT_DIR}/bdtool.sh\`" >&2
   return 1
 }
 
 echo "================================"
-echo "Starting PT-BDtool workflow..."
+echo "Starting PT ReleaseKit workflow..."
 echo "================================"
 
 run_beginner_entry "$@"

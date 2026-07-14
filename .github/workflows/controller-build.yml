@@ -52,7 +52,7 @@ jobs:
             package_layout: single-file
             smoke_path: dist/controller-app/windows/PT-BDtool.exe
             quick_start_name: 打开前先看.txt
-            quick_start_title: PT-BDtool Windows 快速开始
+            quick_start_title: PT ReleaseKit Windows 快速开始
             quick_start_body: |
               1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
               2. 双击 PT-BDtool.exe，填写 VPS 地址、端口、密码、本机保存目录
@@ -74,7 +74,7 @@ jobs:
             package_layout: app-bundle
             smoke_path: dist/controller-app/macos/PT-BDtool.app/Contents/MacOS/PT-BDtool
             quick_start_name: 打开前先看.txt
-            quick_start_title: PT-BDtool macOS 快速开始
+            quick_start_title: PT ReleaseKit macOS 快速开始
             quick_start_body: |
               1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
               2. 双击 PT-BDtool.app；若被拦住，请右键应用后点“打开”
@@ -96,7 +96,7 @@ jobs:
             package_layout: flatten-dir
             smoke_path: dist/controller-app/linux/PT-BDtool/PT-BDtool
             quick_start_name: 打开前先看.txt
-            quick_start_title: PT-BDtool Linux 快速开始
+            quick_start_title: PT ReleaseKit Linux 快速开始
             quick_start_body: |
               1. 解压 PT-BDtool-linux-portable.tar.gz
               2. 先在系统终端 SSH 登录 VPS，核对并接受主机密钥
@@ -200,8 +200,8 @@ jobs:
                   "[Desktop Entry]\n"
                   "Version=1.0\n"
                   "Type=Application\n"
-                  "Name=PT-BDtool\n"
-                  "Comment=Portable PT-BDtool Linux launcher\n"
+                  "Name=PT ReleaseKit\n"
+                  "Comment=PT media release material generator\n"
                   "Exec=bash -lc 'SCRIPT_DIR=\"$(cd -P \"$(dirname \"$1\")\" && pwd)\"; export PTBD_PORTABLE_CONFIG=1; if [[ -x \"$SCRIPT_DIR/PT-BDtool.sh\" ]]; then exec \"$SCRIPT_DIR/PT-BDtool.sh\"; fi; exec \"$SCRIPT_DIR/PT-BDtool\"' dummy %k\n"
                   "Terminal=false\n"
                   "StartupNotify=true\n"
@@ -260,7 +260,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: portable-latest
-          name: PT-BDtool Portable Downloads
+          name: PT ReleaseKit Portable Downloads
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
@@ -268,6 +268,8 @@ jobs:
           artifacts: release-dist/*
           body: |
             ## 下载
+
+            PT ReleaseKit 原名 PT-BDtool。为兼容现有用户，压缩包和可执行文件暂时保留旧文件名。
 
             不要下载源码，按系统下载一个压缩包就行。
 

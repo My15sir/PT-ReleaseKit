@@ -80,7 +80,7 @@ Usage:
 What it does:
   1. Start a local receive server on this machine
   2. Create a reverse SSH tunnel to the VPS
-  3. Open remote PT-BDtool menu
+  3. Open remote PT ReleaseKit menu
   4. After you select an item, remote generation / return / cleanup run automatically
   5. Or process a specific remote path directly when --path is provided
 
@@ -294,7 +294,7 @@ run_setup() {
   current_save_dir="$(resolve_save_dir)"
   [[ -n "$PTBD_LOCAL_SAVE_DIR" ]] || PTBD_LOCAL_SAVE_DIR="$current_save_dir"
 
-  echo "PT-BDtool 远端一步到位配置向导"
+  echo "PT ReleaseKit 远端一步到位配置向导"
   echo "配置文件：$PTBD_REMOTE_CONFIG_FILE"
   echo "说明：会先检测 Debian / Ubuntu / Alpine 依赖并尽量自动安装；只有系统依赖不够时，才回退上传内置运行包。"
 

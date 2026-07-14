@@ -252,7 +252,7 @@ def host_key_help(remote_host: str, hostname: str, port: int) -> str:
     return (
         "请先通过可信渠道核对服务器 SSH 主机密钥指纹，然后在系统终端执行：\n"
         f"  ssh -p {port} {remote_host}\n"
-        "确认终端显示的指纹无误并接受后，再重试 PT-BDtool。也可将经核验的公钥写入：\n"
+        "确认终端显示的指纹无误并接受后，再重试 PT ReleaseKit。也可将经核验的公钥写入：\n"
         f"  {known_hosts}\n"
         f"采集候选公钥可使用：ssh-keyscan -p {port} {hostname}\n"
         "不要在未核对指纹时直接信任 ssh-keyscan 的输出。"

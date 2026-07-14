@@ -1,4 +1,4 @@
-# PT-BDtool Docker 部署
+# PT ReleaseKit Docker 部署
 
 Docker 模式用于在**媒体文件所在的 VPS**直接处理文件。容器运行 Web 控制端的 local 模式，扫描宿主机只读挂载的媒体目录，并把生成结果写入宿主机输出目录。
 
@@ -24,7 +24,7 @@ docker compose version
 
 ```text
 /srv/media              原始媒体
-/srv/ptbd/output        PT-BDtool 生成结果
+/srv/ptbd/output        PT ReleaseKit 生成结果
 /srv/ptbd/config        配置与运行状态
 ```
 
@@ -328,4 +328,4 @@ docker compose up -d --force-recreate
 docker compose down
 ```
 
-这不会删除 bind mount 指向的宿主目录。确认不再需要后，再由管理员单独处理 `PTBD_OUTPUT_DIR` 和 `PTBD_CONFIG_DIR`；原始媒体目录不属于 PT-BDtool 的卸载范围。
+这不会删除 bind mount 指向的宿主目录。确认不再需要后，再由管理员单独处理 `PTBD_OUTPUT_DIR` 和 `PTBD_CONFIG_DIR`；原始媒体目录不属于 PT ReleaseKit 的卸载范围。

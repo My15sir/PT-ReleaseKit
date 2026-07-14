@@ -71,7 +71,7 @@ What it does:
   - After setup, runs the saved mode directly
 
 Modes:
-  local   Open the normal PT-BDtool menu on this machine
+  local   Open the normal PT ReleaseKit menu on this machine
   remote  Open the VPS workflow and auto-return results to this machine
 EOF
 }
@@ -158,7 +158,7 @@ run_setup() {
   default_save_dir="$(resolve_default_save_dir)"
   local mode=""
 
-  echo "PT-BDtool 新手模式首次配置"
+  echo "PT ReleaseKit 新手模式首次配置"
   echo "这个向导会帮你保存以后要用的模式。"
   echo
   echo "1) 本机处理（本机扫描，本机出结果）"

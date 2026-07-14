@@ -35,6 +35,8 @@ from ptbd_remote_backend import (
 )
 
 
+PRODUCT_NAME = "PT ReleaseKit"
+# Keep config and log locations stable across the product rename.
 APP_NAME = "PT-BDtool"
 WORKFLOW_STEPS = ("连接", "扫描", "选择", "生成")
 UI_COLORS = {
@@ -523,7 +525,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title("PT-BDtool 远程材料工作台")
+        self.root.title(f"{PRODUCT_NAME} 远程材料工作台")
         self.root.geometry("1040x760")
         self.root.minsize(820, 710)
         self.process: subprocess.Popen[str] | None = None
@@ -581,7 +583,7 @@ class App:
         title_group.grid(row=0, column=0, sticky="w")
         tk.Label(
             title_group,
-            text="PT-BDtool",
+            text=PRODUCT_NAME,
             bg=colors["header"],
             fg="#ffffff",
             font=(ui_font_families()[0], 16, "bold"),
@@ -2367,6 +2369,8 @@ def run_ui_smoke_check() -> int:
         "start_button": app.start_button,
     }
     failures: list[str] = []
+    if PRODUCT_NAME not in root.title():
+        failures.append("window title does not use the current product name")
 
     def check_workbench(label: str) -> None:
         root.update_idletasks()

@@ -7,8 +7,8 @@ case "$SCRIPT_SOURCE" in
   ""|"-"|/dev/fd/*|/proc/self/fd/*|/dev/stdin)
     cat >&2 <<'EOF'
 [ERROR] install.sh is running from a file descriptor/stdin path and cannot resolve offline bundle files.
-[ERROR] Please run install.sh from a local PT-BDtool directory or extracted release bundle.
-[HINT]  git clone https://github.com/My15sir/PT-BDtool.git && cd PT-BDtool && bash install.sh --offline
+[ERROR] Please run install.sh from a local PT ReleaseKit directory or extracted release bundle.
+[HINT]  git clone https://github.com/My15sir/PT-ReleaseKit.git && cd PT-ReleaseKit && bash install.sh --offline
 EOF
     exit 2
     ;;
@@ -27,15 +27,15 @@ print_bootstrap_commands() {
   cat >&2 <<'EOF'
 [HINT] Copy-paste (normal user):
   cd ~
-  git clone https://github.com/My15sir/PT-BDtool.git
-  cd PT-BDtool
+  git clone https://github.com/My15sir/PT-ReleaseKit.git
+  cd PT-ReleaseKit
   python3 scripts/ensure-bundle.py
   bash install.sh --offline
 
 [HINT] Copy-paste (root/sudo):
   cd /opt
-  sudo git clone https://github.com/My15sir/PT-BDtool.git
-  cd PT-BDtool
+  sudo git clone https://github.com/My15sir/PT-ReleaseKit.git
+  cd PT-ReleaseKit
   sudo python3 scripts/ensure-bundle.py
   sudo bash install.sh --offline
 
@@ -87,7 +87,7 @@ preflight_install_context() {
   fi
 
   if [[ "$missing" -ne 0 ]]; then
-    err "install.sh must run from a complete local PT-BDtool repository or extracted offline bundle."
+    err "install.sh must run from a complete local PT ReleaseKit repository or extracted offline bundle."
     print_bootstrap_commands
     exit 1
   fi
@@ -637,8 +637,8 @@ install_desktop_launcher() {
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=PT-BDtool
-Comment=Beginner-friendly PT-BDtool GUI launcher
+Name=PT ReleaseKit
+Comment=PT media release material generator
 Exec=$install_root/PT-BDtool.sh
 Terminal=false
 StartupNotify=true

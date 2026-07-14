@@ -1,6 +1,8 @@
-# PT-BDtool 仓库导航
+# PT ReleaseKit 仓库导航
 
 普通用户先看根目录 `README.md`。维护者先看 `docs/DEVELOPMENT.md`，Docker 部署看 `docs/DOCKER.md`。
+
+仓库已更名为 PT ReleaseKit。下列仍含 `PT-BDtool` 的文件名是有意保留的兼容入口，不代表文档或界面仍使用旧品牌。
 
 ## 1. 稳定入口
 

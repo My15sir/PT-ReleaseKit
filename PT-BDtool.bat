@@ -42,7 +42,7 @@ pause
 exit /b 1
 
 :missing_gui
-echo [ERROR] Cannot find ptbd-gui.py in this PT-BDtool folder.
-echo [HINT] Please run this file from a complete PT-BDtool directory.
+echo [ERROR] Cannot find ptbd-gui.py in this PT ReleaseKit folder.
+echo [HINT] Please run this file from a complete PT ReleaseKit directory.
 pause
 exit /b 1

@@ -1,6 +1,8 @@
-# PT-BDtool
+# PT ReleaseKit
 
-PT-BDtool scans videos, audio files, `BDMV` directories, and `ISO` images. It creates screenshots, MediaInfo, audio spectra or BDInfo reports, then packages the generated files.
+PT ReleaseKit (formerly PT-BDtool) scans videos, audio files, `BDMV` directories, and `ISO` images. It creates screenshots, MediaInfo, audio spectra or BDInfo reports, then packages the generated files.
+
+> Rename compatibility: the GitHub repository now uses `PT-ReleaseKit`. Existing `bdtool` and `ptbd-*` commands, `pt-bdtool:*` Docker image tags, configuration paths, and `PT-BDtool-*` download filenames remain stable, so current installations and automation do not need migration.
 
 The project now uses a **Python-first modular core**, keeps a Shell compatibility layer, retains the Windows/macOS desktop GUI, and adds a Docker deployment for local processing on the media VPS.
 
@@ -17,7 +19,7 @@ The project now uses a **Python-first modular core**, keeps a Shell compatibilit
 
 The desktop applications remain supported. They are intended for users who control a media VPS from a personal computer and want the scan, processing, download, and cleanup flow in one interface.
 
-Download a package from the [`portable-latest`](https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest) release:
+Download a package from the [`portable-latest`](https://github.com/My15sir/PT-ReleaseKit/releases/tag/portable-latest) release:
 
 - Windows: extract `PT-BDtool-windows-portable.zip` and run `PT-BDtool.exe`
 - macOS: extract `PT-BDtool-macos-portable.zip` and run `PT-BDtool.app`

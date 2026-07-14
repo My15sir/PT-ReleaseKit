@@ -1,8 +1,8 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=PT-BDtool
-Comment=Beginner-friendly PT-BDtool GUI launcher
+Name=PT ReleaseKit
+Comment=PT media release material generator
 Exec=bash -lc 'SCRIPT_DIR="$(cd -P "$(dirname "$1")" && pwd)"; exec "$SCRIPT_DIR/PT-BDtool.sh"' dummy %k
 Terminal=false
 StartupNotify=true

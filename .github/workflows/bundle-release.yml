@@ -67,14 +67,14 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: bundle-latest
-          name: PT-BDtool Linux Bundle Asset
+          name: PT ReleaseKit Linux Bundle Asset
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
           artifacts: dist/PT-BDtool-linux-amd64.tar.gz,dist/PT-BDtool-linux-amd64.tar.gz.sha256
           artifactErrorsFailBuild: true
           body: |
-            自动更新的 Linux 离线运行包。
+            PT ReleaseKit 自动更新的 Linux 离线运行包；归档文件名为兼容旧安装继续保留。
             归档同时发布 SHA256 sidecar，控制端下载时会强制校验。
             主要给控制端打包和源码仓库按需下载使用。
             普通用户请优先使用 `portable-latest` 里的成品包。

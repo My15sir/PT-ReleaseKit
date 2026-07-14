@@ -1,6 +1,8 @@
-# PT-BDtool
+# PT ReleaseKit
 
-PT-BDtool 用于扫描视频、音频、`BDMV` 和 `ISO`，生成截图、MediaInfo、频谱图或 BDInfo，并把结果打包。
+PT ReleaseKit（原 PT-BDtool）用于扫描视频、音频、`BDMV` 和 `ISO`，生成截图、MediaInfo、频谱图或 BDInfo，并把结果打包。
+
+> 更名兼容说明：GitHub 仓库现使用 `PT-ReleaseKit`。现有 `bdtool`、`ptbd-*` 命令、`pt-bdtool:*` Docker 镜像标签、配置目录以及 `PT-BDtool-*` 下载文件名继续保留，已有安装和自动化脚本无需迁移。
 
 当前架构是 **Python 模块化核心优先 + Shell 兼容层 + Windows/macOS 桌面 GUI + Docker VPS 本机处理**。Docker 是新增部署方式，不会替代现有桌面控制端。
 
@@ -17,7 +19,7 @@ PT-BDtool 用于扫描视频、音频、`BDMV` 和 `ISO`，生成截图、MediaI
 
 桌面端继续保留，适合从个人电脑连接媒体 VPS，执行扫描、生成、回传和清理。
 
-从 [`portable-latest`](https://github.com/My15sir/PT-BDtool/releases/tag/portable-latest) 下载：
+从 [`portable-latest`](https://github.com/My15sir/PT-ReleaseKit/releases/tag/portable-latest) 下载：
 
 - Windows：`PT-BDtool-windows-portable.zip`，解压后运行 `PT-BDtool.exe`
 - macOS：`PT-BDtool-macos-portable.zip`，解压后运行 `PT-BDtool.app`
