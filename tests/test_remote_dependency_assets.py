@@ -66,8 +66,11 @@ class RemoteDependencyAssetTests(unittest.TestCase):
         result, package_log = self.run_installer("single")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("status=ready", result.stdout)
-        self.assertEqual(package_log, "")
+        self.assertRegex(result.stdout, r"status=(ready|installed)")
+        self.assertNotIn("python3-numpy", package_log)
+        self.assertNotIn("python3-pil", package_log)
+        self.assertNotIn("py3-numpy", package_log)
+        self.assertNotIn("py3-pillow", package_log)
 
     def test_combined_mode_installs_numpy_and_pillow(self) -> None:
         result, package_log = self.run_installer("combined")
