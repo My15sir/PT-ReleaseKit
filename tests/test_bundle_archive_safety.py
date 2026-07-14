@@ -74,6 +74,14 @@ class BundleArchiveSafetyTests(unittest.TestCase):
             self.assertEqual(adapter.OFFICIAL_BUNDLE_URL, archive_safety.OFFICIAL_BUNDLE_URL)
             self.assertEqual(adapter.OFFICIAL_CHECKSUM_URL, archive_safety.OFFICIAL_CHECKSUM_URL)
             self.assertEqual(
+                adapter.LEGACY_OFFICIAL_BUNDLE_URL,
+                archive_safety.LEGACY_OFFICIAL_BUNDLE_URL,
+            )
+            self.assertEqual(
+                adapter.LEGACY_OFFICIAL_CHECKSUM_URL,
+                archive_safety.LEGACY_OFFICIAL_CHECKSUM_URL,
+            )
+            self.assertEqual(
                 adapter.OFFICIAL_BOOTSTRAP_SHA256,
                 archive_safety.OFFICIAL_BOOTSTRAP_SHA256,
             )

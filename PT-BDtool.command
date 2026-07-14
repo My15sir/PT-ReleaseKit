@@ -30,11 +30,17 @@ show_error() {
 
 SCRIPT_PATH="$(resolve_script_path "$0")"
 SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
-APP_BUNDLE="$SCRIPT_DIR/PT-BDtool.app"
+APP_BUNDLE="$SCRIPT_DIR/PT-ReleaseKit.app"
+LEGACY_APP_BUNDLE="$SCRIPT_DIR/PT-BDtool.app"
 LAUNCHER="$SCRIPT_DIR/ptbd-gui"
 
 if [[ -d "$APP_BUNDLE" ]]; then
   open "$APP_BUNDLE" >/dev/null 2>&1 || true
+  exit 0
+fi
+
+if [[ -d "$LEGACY_APP_BUNDLE" ]]; then
+  open "$LEGACY_APP_BUNDLE" >/dev/null 2>&1 || true
   exit 0
 fi
 

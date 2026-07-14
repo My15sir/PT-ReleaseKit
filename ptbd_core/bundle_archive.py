@@ -15,11 +15,16 @@ from typing import Callable
 
 OFFICIAL_BUNDLE_URL = (
     "https://github.com/My15sir/PT-ReleaseKit/releases/download/"
-    "bundle-latest/PT-BDtool-linux-amd64.tar.gz"
+    "bundle-latest/PT-ReleaseKit-linux-amd64.tar.gz"
 )
 OFFICIAL_CHECKSUM_URL = f"{OFFICIAL_BUNDLE_URL}.sha256"
-# The current bundle-latest asset predates checksum sidecars. This pin authenticates
-# only that legacy official asset; it must never authenticate a custom URL.
+LEGACY_OFFICIAL_BUNDLE_URL = (
+    "https://github.com/My15sir/PT-ReleaseKit/releases/download/"
+    "bundle-latest/PT-BDtool-linux-amd64.tar.gz"
+)
+LEGACY_OFFICIAL_CHECKSUM_URL = f"{LEGACY_OFFICIAL_BUNDLE_URL}.sha256"
+# This pin authenticates only the legacy filename during migration. The renamed
+# asset must always provide its own sidecar or an explicit configured digest.
 OFFICIAL_BOOTSTRAP_SHA256 = "ef648fd25c474618616c4f88088835dfb1c38bd86994c751d41c780cb02b85cc"
 BUNDLE_MARKER_PARTS = ("third_party", "bundle", "linux-amd64")
 MAX_BUNDLE_MEMBERS = 10_000
@@ -80,7 +85,10 @@ def resolve_bundle_checksum(
     try:
         checksum_payload = read_checksum_sidecar(checksum_url)
     except unavailable_errors as exc:
-        if bundle_url == OFFICIAL_BUNDLE_URL and checksum_url == OFFICIAL_CHECKSUM_URL:
+        if (
+            bundle_url == LEGACY_OFFICIAL_BUNDLE_URL
+            and checksum_url == LEGACY_OFFICIAL_CHECKSUM_URL
+        ):
             return BundleChecksumResolution(
                 OFFICIAL_BOOTSTRAP_SHA256,
                 "official-bootstrap",
@@ -243,6 +251,8 @@ __all__ = [
     "MAX_BUNDLE_FILE_SIZE",
     "MAX_BUNDLE_MEMBERS",
     "MAX_BUNDLE_TOTAL_SIZE",
+    "LEGACY_OFFICIAL_BUNDLE_URL",
+    "LEGACY_OFFICIAL_CHECKSUM_URL",
     "OFFICIAL_BOOTSTRAP_SHA256",
     "OFFICIAL_BUNDLE_URL",
     "OFFICIAL_CHECKSUM_URL",

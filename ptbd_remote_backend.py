@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import codecs
 import hashlib
 import io
 import json
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.request
 import uuid
@@ -18,6 +20,8 @@ from pathlib import Path, PurePosixPath
 from typing import Callable
 
 from ptbd_core.bundle_archive import (
+    LEGACY_OFFICIAL_BUNDLE_URL,
+    LEGACY_OFFICIAL_CHECKSUM_URL,
     OFFICIAL_BOOTSTRAP_SHA256,
     OFFICIAL_BUNDLE_URL,
     OFFICIAL_CHECKSUM_URL,
@@ -49,6 +53,10 @@ else:  # pragma: no cover
 
 
 LogFunc = Callable[[str], None]
+ProgressFunc = Callable[[dict], None]
+SCAN_PROGRESS_PREFIX = "PTBD_SCAN_PROGRESS\t"
+DEFAULT_SCAN_OVERALL_TIMEOUT = 1800.0
+DEFAULT_SCAN_IDLE_TIMEOUT = 120.0
 BUNDLE_DOWNLOAD_URL = os.environ.get(
     "PTBD_BUNDLE_URL",
     OFFICIAL_BUNDLE_URL,
@@ -637,6 +645,158 @@ class PTBDRemoteBackend:
             raise RemoteCommandError(output or f"远端命令失败，退出码：{exit_code}")
         return CommandResult(exit_code=exit_code, output=output)
 
+    def run_scan_script(
+        self,
+        script: str,
+        *,
+        env: dict[str, str] | None = None,
+        progress_callback: ProgressFunc | None = None,
+        overall_timeout: float = DEFAULT_SCAN_OVERALL_TIMEOUT,
+        idle_timeout: float = DEFAULT_SCAN_IDLE_TIMEOUT,
+    ) -> CommandResult:
+        """Run scan-json while keeping its result and progress streams separate."""
+        self.ensure_not_cancelled()
+        self.connect()
+        self.ensure_not_cancelled()
+        command = self.build_shell_command(script, use_bash=True, env=env)
+        channel = None
+        stdout_chunks: list[str] = []
+        stderr_lines: list[str] = []
+        stdout_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        stderr_decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        stderr_buffer = ""
+        started_at = time.monotonic()
+        last_activity = started_at
+        overall_deadline = started_at + overall_timeout if overall_timeout > 0 else None
+
+        def timeout_error(now: float) -> RemoteCommandError | None:
+            if overall_deadline is not None and now >= overall_deadline:
+                return RemoteCommandError(f"远端扫描超过总时限（{int(overall_timeout)} 秒），已终止。")
+            if idle_timeout > 0 and now - last_activity >= idle_timeout:
+                return RemoteCommandError(f"远端扫描超过 {int(idle_timeout)} 秒没有任何进度，已终止。")
+            return None
+
+        def exec_command_with_timeout(active_channel, active_command: str) -> None:
+            finished = threading.Event()
+            outcome: dict[str, BaseException] = {}
+
+            def execute() -> None:
+                try:
+                    active_channel.exec_command(active_command)
+                except BaseException as exc:
+                    outcome["error"] = exc
+                finally:
+                    finished.set()
+
+            threading.Thread(target=execute, name="ptbd-scan-exec", daemon=True).start()
+            while not finished.wait(0.05):
+                self.ensure_not_cancelled()
+                error = timeout_error(time.monotonic())
+                if error is not None:
+                    raise error
+            if "error" in outcome:
+                raise outcome["error"]
+
+        def handle_stderr(text: str, *, final: bool = False) -> None:
+            nonlocal stderr_buffer
+            stderr_buffer += text
+            lines = stderr_buffer.splitlines(keepends=True)
+            stderr_buffer = ""
+            for line in lines:
+                if not line.endswith(("\n", "\r")) and not final:
+                    stderr_buffer = line
+                    continue
+                value = line.rstrip("\r\n")
+                if not value:
+                    continue
+                if value.startswith(SCAN_PROGRESS_PREFIX):
+                    try:
+                        progress = json.loads(value[len(SCAN_PROGRESS_PREFIX) :])
+                    except (json.JSONDecodeError, TypeError):
+                        self.log(f"[gui] 忽略无效扫描进度：{value[:240]}")
+                    else:
+                        if isinstance(progress, dict) and progress_callback is not None:
+                            progress_callback(progress)
+                    continue
+                stderr_lines.append(value)
+                self.log(value)
+
+        try:
+            client = self.client
+            if client is None:
+                raise RemoteCommandError("SSH 连接已断开。")
+            transport = client.get_transport()
+            if transport is None:
+                raise RemoteCommandError("SSH 连接已断开。")
+            now = time.monotonic()
+            deadlines = [now + 30.0]
+            if overall_deadline is not None:
+                deadlines.append(overall_deadline)
+            if idle_timeout > 0:
+                deadlines.append(last_activity + idle_timeout)
+            open_timeout = max(0.1, min(deadlines) - now)
+            channel = transport.open_session(timeout=open_timeout)
+            channel.set_combine_stderr(False)
+            self._active_channel = channel
+            self.ensure_not_cancelled()
+            exec_command_with_timeout(channel, command)
+            last_activity = time.monotonic()
+
+            while True:
+                self.ensure_not_cancelled()
+                now = time.monotonic()
+                error = timeout_error(now)
+                if error is not None:
+                    raise error
+
+                received = False
+                while channel.recv_ready():
+                    chunk = channel.recv(65536)
+                    if not chunk:
+                        break
+                    stdout_chunks.append(stdout_decoder.decode(chunk))
+                    received = True
+                while channel.recv_stderr_ready():
+                    chunk = channel.recv_stderr(65536)
+                    if not chunk:
+                        break
+                    handle_stderr(stderr_decoder.decode(chunk))
+                    received = True
+                if received:
+                    last_activity = time.monotonic()
+
+                if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
+                    break
+                time.sleep(0.05)
+
+            stdout_chunks.append(stdout_decoder.decode(b"", final=True))
+            handle_stderr(stderr_decoder.decode(b"", final=True), final=True)
+            handle_stderr("", final=True)
+            exit_code = channel.recv_exit_status()
+            self.ensure_not_cancelled()
+        except TaskCancelledError:
+            raise
+        except RemoteCommandError:
+            raise
+        except Exception as exc:
+            if self._cancelled:
+                raise TaskCancelledError("任务已取消。") from exc
+            raise RemoteCommandError(str(exc)) from exc
+        finally:
+            if channel is not None:
+                try:
+                    channel.close()
+                except Exception:
+                    pass
+                if self._active_channel is channel:
+                    self._active_channel = None
+
+        output = "".join(stdout_chunks).strip()
+        if exit_code != 0:
+            detail = "\n".join(stderr_lines).strip() or output
+            raise RemoteCommandError(detail or f"远端扫描失败，退出码：{exit_code}")
+        return CommandResult(exit_code=exit_code, output=output)
+
     def diagnose_connection(self) -> dict:
         """Probe SSH + remote deps without starting a full scan/generate job."""
         explicit_scan_roots = split_path_list(self.config.get("scan_include"))
@@ -814,7 +974,7 @@ class PTBDRemoteBackend:
             )
 
         if resolution.source == "official-bootstrap":
-            self.log("[gui] bundle checksum sidecar 不可用，使用官方旧资产固定摘要")
+            self.log("[gui] bundle checksum sidecar 不可用，使用官方资产固定摘要")
         elif resolution.source == "unverified":
             self.log(f"[gui] 警告：已显式允许未校验 bundle：{resolution.unavailable_error}")
         return resolution.checksum
@@ -823,7 +983,7 @@ class PTBDRemoteBackend:
         bundle_root = self.app_root / "third_party" / "bundle" / "linux-amd64"
         self.log(f"[gui] 本地 linux bundle 缺失，尝试下载：{BUNDLE_DOWNLOAD_URL}")
         with tempfile.TemporaryDirectory(prefix="ptbd-bundle-download-") as temp_dir:
-            archive_path = Path(temp_dir) / "PT-BDtool-linux-amd64.tar.gz"
+            archive_path = Path(temp_dir) / "PT-ReleaseKit-linux-amd64.tar.gz"
             try:
                 with urllib.request.urlopen(BUNDLE_DOWNLOAD_URL, timeout=120) as response, archive_path.open(
                     "wb"
@@ -1138,10 +1298,47 @@ rm -f "$archive_path"
     def scan_command_suffix(self) -> str:
         # Always call scan-json --full so include-root logic in bdtool is used;
         # preferred mode is enforced via BDTOOL_SCAN_INCLUDE_ROOTS.
-        return "scan-json --full --lang zh"
+        return "scan-json --full --lang zh --progress-json"
 
-    def scan_items(self) -> list[dict]:
-        remote_cmd = self.resolve_remote_command()
+    def scan_items(
+        self,
+        progress_callback: ProgressFunc | None = None,
+        *,
+        overall_timeout: float = DEFAULT_SCAN_OVERALL_TIMEOUT,
+        idle_timeout: float = DEFAULT_SCAN_IDLE_TIMEOUT,
+    ) -> list[dict]:
+        scan_started_at = time.monotonic()
+        scan_deadline = scan_started_at + overall_timeout if overall_timeout > 0 else None
+
+        def resolve_command() -> str:
+            if scan_deadline is None:
+                return self.resolve_remote_command()
+            finished = threading.Event()
+            outcome: dict[str, object] = {}
+
+            def resolve() -> None:
+                try:
+                    outcome["result"] = self.resolve_remote_command()
+                except BaseException as exc:
+                    outcome["error"] = exc
+                finally:
+                    finished.set()
+
+            threading.Thread(target=resolve, name="ptbd-scan-prepare", daemon=True).start()
+            while not finished.wait(0.1):
+                self.ensure_not_cancelled()
+                if time.monotonic() >= scan_deadline:
+                    self.cancel()
+                    finished.wait(1)
+                    raise RemoteCommandError(
+                        f"远端扫描准备超过总时限（{int(overall_timeout)} 秒），已终止。"
+                    )
+            error = outcome.get("error")
+            if isinstance(error, BaseException):
+                raise error
+            return str(outcome["result"])
+
+        remote_cmd = resolve_command()
         scan_include = build_effective_scan_include(self.config)
         explicit_scan_roots = split_path_list(self.config.get("scan_include"))
         if explicit_scan_roots:
@@ -1151,12 +1348,19 @@ rm -f "$archive_path"
         else:
             mode = "优先目录"
         self.log(f"[gui] 扫描模式：{mode}；根目录：{scan_include or '(系统默认全盘候选根)'}")
-        result = self.run_script(
+        remaining_timeout = overall_timeout
+        if scan_deadline is not None:
+            remaining_timeout = scan_deadline - time.monotonic()
+            if remaining_timeout <= 0:
+                self.cancel()
+                raise RemoteCommandError(f"远端扫描超过总时限（{int(overall_timeout)} 秒），已终止。")
+        result = self.run_scan_script(
             f"exec {quote_sh(remote_cmd)} {self.scan_command_suffix()}",
-            use_bash=True,
             env=self.build_scan_env(),
+            progress_callback=progress_callback,
+            overall_timeout=remaining_timeout,
+            idle_timeout=idle_timeout,
         )
-        import json
 
         if not result.output.strip():
             raise RemoteCommandError("scan-json 没有返回任何内容。")

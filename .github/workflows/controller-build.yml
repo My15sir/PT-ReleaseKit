@@ -8,6 +8,10 @@ on:
     paths:
       - .github/workflows/controller-build.yml
       - README.md
+      - PT-ReleaseKit.bat
+      - PT-ReleaseKit.command
+      - PT-ReleaseKit.desktop
+      - PT-ReleaseKit.sh
       - PT-BDtool.bat
       - PT-BDtool.command
       - PT-BDtool.desktop
@@ -44,18 +48,18 @@ jobs:
         include:
           - os: windows-latest
             label: Windows
-            built_path: dist/controller-app/windows/PT-BDtool.exe
-            upload_dir: artifact/PT-BDtool-windows-portable
-            artifact_name: PT-BDtool-windows-portable
-            release_archive: release-assets/PT-BDtool-windows-portable.zip
+            built_path: dist/controller-app/windows/PT-ReleaseKit.exe
+            upload_dir: artifact/PT-ReleaseKit-windows-portable
+            artifact_name: PT-ReleaseKit-windows-portable
+            release_archive: release-assets/PT-ReleaseKit-windows-portable.zip
             archive_format: zip
             package_layout: single-file
-            smoke_path: dist/controller-app/windows/PT-BDtool.exe
+            smoke_path: dist/controller-app/windows/PT-ReleaseKit.exe
             quick_start_name: 打开前先看.txt
             quick_start_title: PT ReleaseKit Windows 快速开始
             quick_start_body: |
               1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
-              2. 双击 PT-BDtool.exe，填写 VPS 地址、端口、密码、本机保存目录
+              2. 双击 PT-ReleaseKit.exe，填写 VPS 地址、端口、密码、本机保存目录
               3. 点击“测试连接”，再点击“扫描 VPS”
               4. 勾选要处理的条目，点击“生成所选”
               5. 等待结果自动下载回本机
@@ -66,18 +70,18 @@ jobs:
               - 不需要安装 Git for Windows
           - os: macos-14
             label: macOS
-            built_path: dist/controller-app/macos/PT-BDtool.app
-            upload_dir: artifact/PT-BDtool-macos-portable
-            artifact_name: PT-BDtool-macos-portable
-            release_archive: release-assets/PT-BDtool-macos-portable.zip
+            built_path: dist/controller-app/macos/PT-ReleaseKit.app
+            upload_dir: artifact/PT-ReleaseKit-macos-portable
+            artifact_name: PT-ReleaseKit-macos-portable
+            release_archive: release-assets/PT-ReleaseKit-macos-portable.zip
             archive_format: zip
             package_layout: app-bundle
-            smoke_path: dist/controller-app/macos/PT-BDtool.app/Contents/MacOS/PT-BDtool
+            smoke_path: dist/controller-app/macos/PT-ReleaseKit.app/Contents/MacOS/PT-ReleaseKit
             quick_start_name: 打开前先看.txt
             quick_start_title: PT ReleaseKit macOS 快速开始
             quick_start_body: |
               1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
-              2. 双击 PT-BDtool.app；若被拦住，请右键应用后点“打开”
+              2. 双击 PT-ReleaseKit.app；若被拦住，请右键应用后点“打开”
               3. 填 VPS 地址、端口、密码、本机保存目录并点击“测试连接”
               4. 返回工作台，点击“扫描 VPS”
               5. 勾选要处理的条目，点击“生成所选”
@@ -88,25 +92,25 @@ jobs:
               - 不需要另装 Python 或 bash；首次验证主机密钥使用 macOS 自带 ssh
           - os: ubuntu-latest
             label: Linux
-            built_path: dist/controller-app/linux/PT-BDtool
-            upload_dir: artifact/PT-BDtool-linux-portable
-            artifact_name: PT-BDtool-linux-portable
-            release_archive: release-assets/PT-BDtool-linux-portable.tar.gz
+            built_path: dist/controller-app/linux/PT-ReleaseKit
+            upload_dir: artifact/PT-ReleaseKit-linux-portable
+            artifact_name: PT-ReleaseKit-linux-portable
+            release_archive: release-assets/PT-ReleaseKit-linux-portable.tar.gz
             archive_format: gztar
             package_layout: flatten-dir
-            smoke_path: dist/controller-app/linux/PT-BDtool/PT-BDtool
+            smoke_path: dist/controller-app/linux/PT-ReleaseKit/PT-ReleaseKit
             quick_start_name: 打开前先看.txt
             quick_start_title: PT ReleaseKit Linux 快速开始
             quick_start_body: |
-              1. 解压 PT-BDtool-linux-portable.tar.gz
+              1. 解压 PT-ReleaseKit-linux-portable.tar.gz
               2. 先在系统终端 SSH 登录 VPS，核对并接受主机密钥
-              3. 优先双击 PT-BDtool.desktop；如果桌面环境不认，再双击 PT-BDtool.sh
+              3. 优先双击 PT-ReleaseKit.desktop；如果桌面环境不认，再双击 PT-ReleaseKit.sh
               4. 填写配置并点“测试连接”，再点击“扫描 VPS”
               5. 勾选条目，点击“生成所选”
               
               提醒：
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
-              - 如果系统提示没执行权限，先运行：chmod +x PT-BDtool.desktop PT-BDtool.sh PT-BDtool
+              - 如果系统提示没执行权限，先运行：chmod +x PT-ReleaseKit.desktop PT-ReleaseKit.sh PT-ReleaseKit
               - Linux 便携版配置优先保存在程序同目录
               - 只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
@@ -167,13 +171,22 @@ jobs:
               for item in built_path.iterdir():
                   target = upload_dir / item.name
                   if item.is_dir():
-                      shutil.copytree(item, target)
+                      shutil.copytree(item, target, symlinks=True)
                   else:
                       shutil.copy2(item, target)
           elif built_path.is_dir():
-              shutil.copytree(built_path, upload_dir / built_path.name)
+              shutil.copytree(built_path, upload_dir / built_path.name, symlinks=True)
           else:
               shutil.copy2(built_path, upload_dir / built_path.name)
+
+          for runtime_name in (
+              "PT-ReleaseKit.log",
+              "PT-ReleaseKit-config.json",
+              "PT-BDtool.log",
+              "PT-BDtool-config.json",
+          ):
+              for runtime_file in upload_dir.rglob(runtime_name):
+                  runtime_file.unlink()
 
           quick_start_path.write_text(
               quick_start_title + "\n\n" + quick_start_body + "\n",
@@ -181,12 +194,12 @@ jobs:
           )
 
           if package_layout == "flatten-dir":
-              launcher = upload_dir / "PT-BDtool.sh"
+              launcher = upload_dir / "PT-ReleaseKit.sh"
               launcher.write_text(
                   "#!/usr/bin/env bash\n"
                   "set -euo pipefail\n"
                   "SCRIPT_DIR=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" && pwd)\"\n"
-                  "APP_BIN=\"$SCRIPT_DIR/PT-BDtool\"\n"
+                  "APP_BIN=\"$SCRIPT_DIR/PT-ReleaseKit\"\n"
                   "if [[ ! -x \"$APP_BIN\" ]]; then\n"
                   "  chmod +x \"$APP_BIN\" 2>/dev/null || true\n"
                   "fi\n"
@@ -195,14 +208,14 @@ jobs:
                   encoding="utf-8",
               )
               launcher.chmod(0o755)
-              desktop_file = upload_dir / "PT-BDtool.desktop"
+              desktop_file = upload_dir / "PT-ReleaseKit.desktop"
               desktop_file.write_text(
                   "[Desktop Entry]\n"
                   "Version=1.0\n"
                   "Type=Application\n"
                   "Name=PT ReleaseKit\n"
                   "Comment=PT media release material generator\n"
-                  "Exec=bash -lc 'SCRIPT_DIR=\"$(cd -P \"$(dirname \"$1\")\" && pwd)\"; export PTBD_PORTABLE_CONFIG=1; if [[ -x \"$SCRIPT_DIR/PT-BDtool.sh\" ]]; then exec \"$SCRIPT_DIR/PT-BDtool.sh\"; fi; exec \"$SCRIPT_DIR/PT-BDtool\"' dummy %k\n"
+                  "Exec=bash -lc 'SCRIPT_DIR=\"$(cd -P \"$(dirname \"$1\")\" && pwd)\"; export PTBD_PORTABLE_CONFIG=1; if [[ -x \"$SCRIPT_DIR/PT-ReleaseKit.sh\" ]]; then exec \"$SCRIPT_DIR/PT-ReleaseKit.sh\"; fi; exec \"$SCRIPT_DIR/PT-ReleaseKit\"' dummy %k\n"
                   "Terminal=false\n"
                   "StartupNotify=true\n"
                   "Categories=Utility;AudioVideo;\n"
@@ -215,6 +228,14 @@ jobs:
       - name: Pack portable archive
         shell: bash
         run: |
+          if [[ "${{ matrix.label }}" == "macOS" ]]; then
+            rm -f "${{ matrix.release_archive }}"
+            mkdir -p "$(dirname "${{ matrix.release_archive }}")"
+            ditto -c -k --sequesterRsrc --keepParent \
+              "${{ matrix.upload_dir }}" \
+              "${{ matrix.release_archive }}"
+            exit 0
+          fi
           python - <<'PY'
           import shutil
           from pathlib import Path
@@ -232,6 +253,31 @@ jobs:
           print(f"created: {archive_path}")
           PY
 
+      - name: Verify packaged archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${{ matrix.release_archive }}"
+          verify_dir="artifact/verify-${{ matrix.label }}"
+          rm -rf "$verify_dir"
+          mkdir -p "$verify_dir"
+          if [[ "${{ matrix.label }}" == "macOS" ]]; then
+            ditto -x -k "$archive" "$verify_dir"
+            app_path="$(find "$verify_dir" -type d -name 'PT-ReleaseKit.app' -print -quit)"
+            test -n "$app_path"
+            codesign --verify --deep --strict "$app_path"
+            "$app_path/Contents/MacOS/PT-ReleaseKit" --self-check
+          elif [[ "${{ matrix.label }}" == "Windows" ]]; then
+            python -m zipfile -e "$archive" "$verify_dir"
+            "$verify_dir/PT-ReleaseKit.exe" --self-check
+          else
+            tar -xzf "$archive" -C "$verify_dir"
+            test -x "$verify_dir/PT-ReleaseKit"
+            test -x "$verify_dir/PT-ReleaseKit.sh"
+            test -x "$verify_dir/PT-ReleaseKit.desktop"
+            "$verify_dir/PT-ReleaseKit" --self-check
+          fi
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -244,6 +290,35 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-controller]
     steps:
+      - name: Wait for verified Linux bundle dependency
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            rm -rf bundle-gate
+            mkdir -p bundle-gate
+            bundle_sha="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/git/ref/tags/bundle-latest" \
+              --jq '.object.sha' 2>/dev/null || true)"
+            if [[ "$bundle_sha" == "$GITHUB_SHA" ]] \
+              && gh release download bundle-latest \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'PT-ReleaseKit-linux-amd64.tar.gz*' \
+              --dir bundle-gate \
+              --clobber >/dev/null 2>&1 \
+              && test -f bundle-gate/PT-ReleaseKit-linux-amd64.tar.gz \
+              && test -f bundle-gate/PT-ReleaseKit-linux-amd64.tar.gz.sha256 \
+              && (cd bundle-gate && sha256sum --check PT-ReleaseKit-linux-amd64.tar.gz.sha256); then
+              exit 0
+            fi
+            echo "bundle-latest 尚未发布新名称资产，等待中（$attempt/60）"
+            sleep 15
+          done
+          echo "bundle-latest 未在时限内提供可校验的新名称资产" >&2
+          exit 1
+
       - name: Download packaged archives
         uses: actions/download-artifact@v4
         with:
@@ -269,18 +344,16 @@ jobs:
           body: |
             ## 下载
 
-            PT ReleaseKit 原名 PT-BDtool。为兼容现有用户，压缩包和可执行文件暂时保留旧文件名。
-
             不要下载源码，按系统下载一个压缩包就行。
 
-            - Windows：`PT-BDtool-windows-portable.zip`
-            - macOS：`PT-BDtool-macos-portable.zip`
-            - Linux：`PT-BDtool-linux-portable.tar.gz`
+            - Windows：`PT-ReleaseKit-windows-portable.zip`
+            - macOS：`PT-ReleaseKit-macos-portable.zip`
+            - Linux：`PT-ReleaseKit-linux-portable.tar.gz`
 
             ## 3 步上手
 
             1. 解压
-            2. Windows 双击 `PT-BDtool.exe` / macOS 双击 `PT-BDtool.app` / Linux 优先双击 `PT-BDtool.desktop`
+            2. Windows 双击 `PT-ReleaseKit.exe` / macOS 双击 `PT-ReleaseKit.app` / Linux 优先双击 `PT-ReleaseKit.desktop`
             3. 先用系统 SSH 核对 VPS 主机密钥；填写配置并测试连接，扫描后勾选条目，再点 `生成所选`
 
             VPS 上先放好视频 / 音频 / BDMV / ISO。
@@ -297,8 +370,8 @@ jobs:
             如果系统拦住：
             - Windows：`更多信息 -> 仍要运行`
             - macOS：右键应用后点一次 `打开`
-            - Linux：如果桌面文件不生效，就改双击 `PT-BDtool.sh`
-            - Linux：如果提示无执行权限，先运行 `chmod +x PT-BDtool.desktop PT-BDtool.sh PT-BDtool`
+            - Linux：如果桌面文件不生效，就改双击 `PT-ReleaseKit.sh`
+            - Linux：如果提示无执行权限，先运行 `chmod +x PT-ReleaseKit.desktop PT-ReleaseKit.sh PT-ReleaseKit`
             - Linux：只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
             说明：

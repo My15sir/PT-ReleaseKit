@@ -7,7 +7,12 @@ on:
       - main
     paths:
       - .github/workflows/bundle-release.yml
+      - .github/workflows/controller-build.yml
       - README.md
+      - PT-ReleaseKit.bat
+      - PT-ReleaseKit.command
+      - PT-ReleaseKit.desktop
+      - PT-ReleaseKit.sh
       - PT-BDtool.bat
       - PT-BDtool.command
       - PT-BDtool.desktop
@@ -22,11 +27,13 @@ on:
       - ptbd-web.py
       - ptbd_remote_backend.py
       - ptbd_core/**
+      - docs/README.en.md
       - ptbd-remote.sh
       - ptbd-remote-start.sh
       - ptbd-start.sh
       - lib/**
       - scripts/build-bundle.sh
+      - scripts/build-controller-app.py
       - scripts/audio-spectrum.py
       - scripts/deps.env
       - scripts/ensure-bundle.py
@@ -61,7 +68,17 @@ jobs:
         env:
           PTBD_BUNDLE_FORCE_FETCH: "1"
           PTBD_FETCH_MODE: system
-        run: bash scripts/build-bundle.sh
+        run: |
+          set -euo pipefail
+          bash scripts/build-bundle.sh
+          (cd dist && sha256sum --check PT-ReleaseKit-linux-amd64.tar.gz.sha256)
+          tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
+            | grep -qx 'PT-ReleaseKit-linux-amd64/PT-ReleaseKit.sh'
+          tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
+            | grep -qx 'PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py'
+          tar -xOzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
+            PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py \
+            | grep -q 'progress_callback'
 
       - name: Publish Linux bundle release
         uses: ncipollo/release-action@v1
@@ -71,10 +88,10 @@ jobs:
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
-          artifacts: dist/PT-BDtool-linux-amd64.tar.gz,dist/PT-BDtool-linux-amd64.tar.gz.sha256
+          artifacts: dist/PT-ReleaseKit-linux-amd64.tar.gz,dist/PT-ReleaseKit-linux-amd64.tar.gz.sha256
           artifactErrorsFailBuild: true
           body: |
-            PT ReleaseKit 自动更新的 Linux 离线运行包；归档文件名为兼容旧安装继续保留。
+            PT ReleaseKit 自动更新的 Linux 离线运行包：`PT-ReleaseKit-linux-amd64.tar.gz`。
             归档同时发布 SHA256 sidecar，控制端下载时会强制校验。
             主要给控制端打包和源码仓库按需下载使用。
             普通用户请优先使用 `portable-latest` 里的成品包。

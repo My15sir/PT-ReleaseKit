@@ -15,6 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from ptbd_core.bundle_archive import (
+    LEGACY_OFFICIAL_BUNDLE_URL,
+    LEGACY_OFFICIAL_CHECKSUM_URL,
     OFFICIAL_BOOTSTRAP_SHA256,
     OFFICIAL_BUNDLE_URL,
     OFFICIAL_CHECKSUM_URL,
@@ -115,7 +117,7 @@ def ensure_bundle(*, force: bool, quiet: bool) -> int:
         return 0
 
     with tempfile.TemporaryDirectory(prefix="ptbd-bundle-download-") as temp_dir:
-        archive_path = Path(temp_dir) / "PT-BDtool-linux-amd64.tar.gz"
+        archive_path = Path(temp_dir) / "PT-ReleaseKit-linux-amd64.tar.gz"
         download_bundle_archive(DEFAULT_URL, archive_path, quiet=quiet)
         expected = expected_bundle_checksum(quiet=quiet)
         if expected is not None:

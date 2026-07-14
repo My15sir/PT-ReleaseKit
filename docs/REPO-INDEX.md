@@ -2,7 +2,7 @@
 
 普通用户先看根目录 `README.md`。维护者先看 `docs/DEVELOPMENT.md`，Docker 部署看 `docs/DOCKER.md`。
 
-仓库已更名为 PT ReleaseKit。下列仍含 `PT-BDtool` 的文件名是有意保留的兼容入口，不代表文档或界面仍使用旧品牌。
+仓库已更名为 PT ReleaseKit。新发行资产、打包程序和桌面启动器使用 `PT-ReleaseKit` 文件名；仍含 `PT-BDtool` 的文件名是有意保留的兼容入口，不代表文档或界面仍使用旧品牌。
 
 ## 1. 稳定入口
 
@@ -33,9 +33,10 @@
 
 ## 3. 桌面与 Web 控制端
 
-- `PT-BDtool.bat`：Windows 源码双击入口
-- `PT-BDtool.command`：macOS 源码双击入口
-- `PT-BDtool.desktop`、`PT-BDtool.sh`：Linux 桌面入口
+- `PT-ReleaseKit.bat`：Windows 源码双击入口
+- `PT-ReleaseKit.command`：macOS 源码双击入口
+- `PT-ReleaseKit.desktop`、`PT-ReleaseKit.sh`：Linux 桌面入口
+- `PT-BDtool.*`：旧名称兼容启动器
 - `ptbd-gui`、`ptbd-gui.py`：Windows/macOS/Linux Tk 控制端
 - `ptbd-web`、`ptbd-web.py`：Web 控制端
 - `ptbd_remote_backend.py`：SSH/远端控制后端

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import re
 import signal
 import shlex
@@ -12,11 +13,12 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from ptbd_core.config import default_config as core_default_config
@@ -44,6 +46,10 @@ APP_NAME = "PT ReleaseKit Web"
 CONFIG_PATH = Path(os.environ.get("PTBD_WEB_CONFIG", Path.home() / ".config/ptbd-web/config.json"))
 DEFAULT_PORT = 8899
 SAFE_BASE_PATH = re.compile(r"^/[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*$")
+SCAN_PROGRESS_PREFIX = "PTBD_SCAN_PROGRESS\t"
+SCAN_OVERALL_TIMEOUT = float(os.environ.get("PTBD_SCAN_OVERALL_TIMEOUT", "3600"))
+SCAN_IDLE_TIMEOUT = float(os.environ.get("PTBD_SCAN_IDLE_TIMEOUT", "120"))
+SCAN_CANCEL_GRACE_SECONDS = float(os.environ.get("PTBD_SCAN_CANCEL_GRACE_SECONDS", "3"))
 
 
 def resolve_script_path(path: str) -> Path:
@@ -240,6 +246,159 @@ def run_capture_process(
     return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
 
 
+def _handle_scan_stderr_line(
+    line: str,
+    *,
+    task: WebTask,
+    progress_callback: Callable[[dict[str, Any]], None],
+    stderr_lines: list[str],
+) -> None:
+    stripped = line.rstrip("\r\n")
+    if not stripped.startswith(SCAN_PROGRESS_PREFIX):
+        stderr_lines.append(line)
+        if stripped:
+            task.log(stripped)
+        return
+    try:
+        payload = json.loads(stripped[len(SCAN_PROGRESS_PREFIX) :])
+    except (json.JSONDecodeError, TypeError) as exc:
+        task.log(f"忽略无法解析的扫描进度：{exc}")
+        stderr_lines.append(line)
+        return
+    if not isinstance(payload, dict):
+        task.log("忽略格式错误的扫描进度：payload 不是 object")
+        stderr_lines.append(line)
+        return
+    progress_callback(payload)
+
+
+def run_scan_process(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    task: WebTask,
+    progress_callback: Callable[[dict[str, Any]], None],
+    overall_timeout: float = SCAN_OVERALL_TIMEOUT,
+    idle_timeout: float = SCAN_IDLE_TIMEOUT,
+    cancel_grace_seconds: float = SCAN_CANCEL_GRACE_SECONDS,
+) -> subprocess.CompletedProcess[str]:
+    """Run scan-json while consuming stdout and progress stderr independently."""
+    process = subprocess.Popen(
+        cmd,
+        cwd=str(APP_ROOT),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL,
+        start_new_session=(os.name != "nt"),
+    )
+
+    def cancel_process() -> None:
+        terminate_process_tree(process)
+
+    task.add_cancel_callback(cancel_process)
+    stream_events: queue.Queue[tuple[str, bytes | None]] = queue.Queue()
+
+    def read_stream(name: str, stream: Any) -> None:
+        try:
+            while True:
+                chunk = stream.readline()
+                if not chunk:
+                    break
+                stream_events.put((name, chunk))
+        finally:
+            stream_events.put((name, None))
+
+    stdout_thread = threading.Thread(
+        target=read_stream,
+        args=("stdout", process.stdout),
+        name=f"ptbd-scan-stdout-{process.pid}",
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=read_stream,
+        args=("stderr", process.stderr),
+        name=f"ptbd-scan-stderr-{process.pid}",
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    ended_streams: set[str] = set()
+    started_at = time.monotonic()
+    last_activity_at = started_at
+    cancel_requested_at: float | None = None
+    timeout_message: str | None = None
+    try:
+        while len(ended_streams) < 2:
+            now = time.monotonic()
+            if task.cancel_event.is_set():
+                if cancel_requested_at is None:
+                    cancel_requested_at = now
+                    terminate_process_tree(process)
+                elif now - cancel_requested_at >= max(0, cancel_grace_seconds):
+                    terminate_process_tree(process, force=True)
+            if overall_timeout > 0 and now - started_at >= overall_timeout:
+                timeout_message = f"扫描超过总时限 {overall_timeout:g} 秒，已终止"
+                terminate_process_tree(process, force=True)
+                break
+            if idle_timeout > 0 and now - last_activity_at >= idle_timeout:
+                timeout_message = f"扫描连续 {idle_timeout:g} 秒无输出，已终止"
+                terminate_process_tree(process, force=True)
+                break
+            next_deadline = min(
+                started_at + overall_timeout if overall_timeout > 0 else now + 0.2,
+                last_activity_at + idle_timeout if idle_timeout > 0 else now + 0.2,
+            )
+            try:
+                name, raw = stream_events.get(timeout=max(0.01, min(0.2, next_deadline - now)))
+            except queue.Empty:
+                continue
+            if raw is None:
+                ended_streams.add(name)
+                continue
+            last_activity_at = time.monotonic()
+            line = raw.decode("utf-8", errors="replace")
+            if name == "stdout":
+                stdout_lines.append(line)
+            else:
+                _handle_scan_stderr_line(
+                    line,
+                    task=task,
+                    progress_callback=progress_callback,
+                    stderr_lines=stderr_lines,
+                )
+
+        try:
+            return_code = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            terminate_process_tree(process, force=True)
+            return_code = process.wait(timeout=5)
+    finally:
+        task.remove_cancel_callback(cancel_process)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+
+    if task.cancel_event.is_set():
+        raise TaskCancelledError("任务已取消。")
+    if timeout_message is not None:
+        raise RuntimeError(timeout_message)
+    return subprocess.CompletedProcess(
+        cmd,
+        return_code,
+        "".join(stdout_lines),
+        "".join(stderr_lines),
+    )
+
+
 def normalize_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for offset, item in enumerate(items, start=1):
@@ -341,7 +500,7 @@ def build_scan_command(config: dict[str, Any], remote_cmd: str) -> list[str]:
             f"export BDTOOL_SCAN_EXCLUDE_ROOTS_LINES={shlex.quote(chr(10).join(exclude_values))};"
             if exclude_values
             else "",
-            f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
+            f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh --progress-json",
         )
         if part
     )
@@ -365,13 +524,14 @@ def shell_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
     env, askpass_path = build_ssh_env(config)
     try:
         task.log("通过 ssh 执行 scan-json")
-        result = run_capture_process(cmd, env=env, task=task)
+        result = run_scan_process(
+            cmd,
+            env=env,
+            task=task,
+            progress_callback=task.set_progress,
+        )
     finally:
         cleanup_askpass(askpass_path)
-    if result.stderr.strip():
-        task.log("scan-json stderr:")
-        for line in result.stderr.strip().splitlines():
-            task.log(line)
     if result.returncode != 0:
         if result.stdout.strip():
             task.log("scan-json stdout:")
@@ -477,17 +637,23 @@ def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
         task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}；额外目录：{env['BDTOOL_SCAN_INCLUDE_ROOTS']}")
     else:
         task.log(f"本地扫描根目录：{env['BDTOOL_SCAN_FULL_ROOT']}")
-    result = run_capture_process(
-        [sys.executable, "-m", "ptbd_core.cli", "scan-json", "--full", "--lang", "zh"],
+    result = run_scan_process(
+        [
+            sys.executable,
+            "-m",
+            "ptbd_core.cli",
+            "scan-json",
+            "--full",
+            "--lang",
+            "zh",
+            "--progress-json",
+        ],
         env=env,
         task=task,
+        progress_callback=task.set_progress,
     )
     stdout = result.stdout or ""
     stderr = result.stderr or ""
-    if stderr.strip():
-        task.log("scan-json stderr:")
-        for line in stderr.strip().splitlines():
-            task.log(line)
     if result.returncode != 0:
         if stdout.strip():
             task.log("scan-json stdout:")
@@ -504,6 +670,20 @@ def run_scan_task(task: WebTask, config: dict[str, Any]) -> None:
     task.start()
     backend: PTBDRemoteBackend | None = None
     try:
+        task.set_progress(
+            {
+                "phase": "preparing",
+                "root_index": 0,
+                "root_total": 0,
+                "directories_scanned": 0,
+                "files_scanned": 0,
+                "candidates_found": 0,
+                "processed_candidates": 0,
+                "total_candidates": 0,
+                "current_path": "",
+                "operation": "starting",
+            }
+        )
         if config.get("mode") == "local":
             task.log("启动方式：本机模式，直接扫描当前服务器文件系统")
             items = local_scan_items(config, task)
@@ -511,7 +691,13 @@ def run_scan_task(task: WebTask, config: dict[str, Any]) -> None:
             task.log(f"启动方式：内置 Python 后端，{backend_status()}")
             backend = PTBDRemoteBackend(APP_ROOT, config, logger=task.log)
             task.add_cancel_callback(backend.cancel)
-            items = normalize_items(backend.scan_items())
+            items = normalize_items(
+                backend.scan_items(
+                    progress_callback=task.set_progress,
+                    overall_timeout=SCAN_OVERALL_TIMEOUT,
+                    idle_timeout=SCAN_IDLE_TIMEOUT,
+                )
+            )
         else:
             task.log(f"启动方式：shell 回退后端，{backend_status()}")
             items = shell_scan_items(config, task)
@@ -818,6 +1004,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b272d'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='sans-serif' font-size='30' font-weight='700' fill='white'%3EPT%3C/text%3E%3C/svg%3E">
   <title>PT ReleaseKit Web</title>
   <style>
     :root {
@@ -1433,6 +1620,57 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--ink);
     }
 
+    .scan-progress {
+      display: grid;
+      gap: 9px;
+      padding: 12px 16px 13px;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+    }
+
+    .scan-progress-head,
+    .scan-progress-counts {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .scan-progress-head strong {
+      font-size: 0.9rem;
+    }
+
+    .scan-progress-head span,
+    .scan-progress-counts {
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .scan-progress progress {
+      width: 100%;
+      height: 9px;
+      accent-color: var(--primary);
+    }
+
+    .scan-progress[data-state="success"] progress {
+      accent-color: var(--success);
+    }
+
+    .scan-progress[data-state="error"] progress,
+    .scan-progress[data-state="cancelled"] progress {
+      accent-color: var(--danger);
+    }
+
+    .scan-progress-path {
+      min-width: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .logbox {
       min-height: 240px;
       max-height: 420px;
@@ -1621,6 +1859,15 @@ INDEX_HTML = r"""<!doctype html>
                 </div>
               </div>
             </div>
+            <div id="scanProgress" class="scan-progress" role="status" aria-live="polite" data-state="running" hidden>
+              <div class="scan-progress-head">
+                <strong id="scanProgressTitle">准备扫描</strong>
+                <span id="scanProgressStage">等待扫描进程启动</span>
+              </div>
+              <progress id="scanProgressBar" aria-label="扫描进度"></progress>
+              <div class="scan-progress-counts" id="scanProgressCounts">目录 0 · 文件 0 · 候选 0</div>
+              <div class="scan-progress-path" id="scanProgressPath" title="" hidden></div>
+            </div>
             <div class="panel-body">
               <div class="list-tools">
                 <div class="bulk-actions">
@@ -1741,6 +1988,12 @@ INDEX_HTML = r"""<!doctype html>
     const saveSettingsBtn = form.querySelector('button[type="submit"]');
     const workspaceHelp = document.querySelector("#workspaceHelp");
     const scanIncludeLabel = document.querySelector("#scanIncludeLabel");
+    const scanProgress = document.querySelector("#scanProgress");
+    const scanProgressTitle = document.querySelector("#scanProgressTitle");
+    const scanProgressStage = document.querySelector("#scanProgressStage");
+    const scanProgressBar = document.querySelector("#scanProgressBar");
+    const scanProgressCounts = document.querySelector("#scanProgressCounts");
+    const scanProgressPath = document.querySelector("#scanProgressPath");
 
     let candidates = [];
     let rawCandidateCount = 0;
@@ -1751,6 +2004,7 @@ INDEX_HTML = r"""<!doctype html>
     let pageSize = Number(pageSizeSelect.value || 50);
     let showSelectedOnly = false;
     let activeTaskId = null;
+    let activeTaskKind = null;
     let pollTimer = null;
     let pollGeneration = 0;
     let pollFailures = 0;
@@ -1807,6 +2061,7 @@ INDEX_HTML = r"""<!doctype html>
       selectedPaths.clear();
       lastFailedPaths = [];
       scanFingerprint = null;
+      scanProgress.hidden = true;
       currentPage = 1;
       showSelectedOnly = false;
       selectedOnlyToggle.checked = false;
@@ -1838,6 +2093,85 @@ INDEX_HTML = r"""<!doctype html>
         if (value === current) step.setAttribute("aria-current", "step");
         else step.removeAttribute("aria-current");
       }
+    }
+
+    function renderScanProgress(task) {
+      if (!task || task.kind !== "scan") return;
+      const progress = task.progress && typeof task.progress === "object" ? task.progress : {};
+      const status = String(task.status || "queued");
+      const phase = String(progress.phase || "walking");
+      const running = status === "queued" || status === "running";
+      const directories = Math.max(0, Number(progress.directories_scanned) || 0);
+      const files = Math.max(0, Number(progress.files_scanned) || 0);
+      const candidatesFound = Math.max(0, Number(progress.candidates_found) || 0);
+      const processed = Math.max(0, Number(progress.processed_candidates) || 0);
+      const total = Math.max(0, Number(progress.total_candidates) || 0);
+      const rootIndex = Math.max(0, Number(progress.root_index) || 0);
+      const rootTotal = Math.max(0, Number(progress.root_total) || 0);
+      const operation = String(progress.operation || "");
+      const operationNames = {
+        starting: "启动扫描器",
+        walk: "遍历目录",
+        classify: "识别资源类型",
+        ffprobe: "探测媒体流",
+        complete: "完成",
+      };
+
+      scanProgress.hidden = false;
+      scanProgress.dataset.state = running ? "running" : status;
+      scanProgress.dataset.phase = phase;
+      if (status === "success") {
+        scanProgressTitle.textContent = "扫描完成";
+        scanProgressStage.textContent = task.message || `发现 ${candidatesFound} 个候选`;
+        scanProgressBar.max = 1;
+        scanProgressBar.value = 1;
+      } else if (status === "error") {
+        scanProgressTitle.textContent = "扫描失败";
+        scanProgressStage.textContent = task.message || "请查看任务日志";
+        scanProgressBar.max = 1;
+        scanProgressBar.value = total ? Math.min(1, processed / total) : 0;
+      } else if (status === "cancelled") {
+        scanProgressTitle.textContent = "扫描已取消";
+        scanProgressStage.textContent = task.message || "扫描进程已停止";
+        scanProgressBar.max = 1;
+        scanProgressBar.value = total ? Math.min(1, processed / total) : 0;
+      } else if (status === "queued") {
+        scanProgressTitle.textContent = "准备扫描";
+        scanProgressStage.textContent = "等待扫描进程启动";
+        scanProgressBar.removeAttribute("value");
+      } else if (phase === "preparing") {
+        scanProgressTitle.textContent = "正在准备扫描环境";
+        scanProgressStage.textContent = operationNames[operation] || "启动扫描器";
+        scanProgressBar.removeAttribute("value");
+      } else if (phase === "resolving") {
+        scanProgressTitle.textContent = operation === "ffprobe" ? "正在分析媒体" : "正在解析候选";
+        scanProgressStage.textContent = total
+          ? `${processed} / ${total}${operationNames[operation] ? " · " + operationNames[operation] : ""}`
+          : "正在准备候选列表";
+        scanProgressBar.max = Math.max(1, total);
+        scanProgressBar.value = Math.min(total, processed);
+      } else if (phase === "complete") {
+        scanProgressTitle.textContent = "正在完成扫描";
+        scanProgressStage.textContent = "整理候选列表";
+        scanProgressBar.max = 1;
+        scanProgressBar.value = 1;
+      } else {
+        scanProgressTitle.textContent = "正在遍历目录";
+        const rootText = rootTotal ? `根目录 ${Math.min(rootIndex, rootTotal)} / ${rootTotal}` : "统计文件中";
+        scanProgressStage.textContent = operationNames[operation]
+          ? `${rootText} · ${operationNames[operation]}`
+          : rootText;
+        scanProgressBar.removeAttribute("value");
+      }
+
+      const resolutionText = phase === "resolving" || total
+        ? ` · 已解析 ${processed} / ${total}`
+        : "";
+      scanProgressCounts.textContent = `目录 ${directories} · 文件 ${files} · 候选 ${candidatesFound}${resolutionText}`;
+      const currentPath = String(progress.current_path || "");
+      scanProgressPath.hidden = !currentPath;
+      scanProgressPath.textContent = currentPath;
+      scanProgressPath.title = currentPath;
     }
 
     function updateActionStates() {
@@ -2223,7 +2557,9 @@ INDEX_HTML = r"""<!doctype html>
 
     function setTask(payload) {
       const task = payload.task || payload;
+      renderScanProgress(task);
       activeTaskId = task.id;
+      activeTaskKind = task.kind;
       pollGeneration += 1;
       pollFailures = 0;
       const generation = pollGeneration;
@@ -2242,6 +2578,7 @@ INDEX_HTML = r"""<!doctype html>
         if (activeTaskId !== taskId || pollGeneration !== generation) return;
         pollFailures = 0;
         const task = payload.task;
+        renderScanProgress(task);
         const kindName = {scan: "扫描", process: "生成", diagnose: "测试连接"}[task.kind] || task.kind;
         const statusName = {
           queued: "排队中",
@@ -2298,6 +2635,7 @@ INDEX_HTML = r"""<!doctype html>
         }
         pollTimer = null;
         activeTaskId = null;
+        activeTaskKind = null;
         if (task.kind === "process") setWorkflowPhase(4);
         else if (task.kind === "scan" && task.status !== "success") {
           pendingScanFingerprint = null;
@@ -2322,6 +2660,15 @@ INDEX_HTML = r"""<!doctype html>
               pollGeneration += 1;
               pollTimer = null;
               activeTaskId = null;
+              if (activeTaskKind === "scan") {
+                renderScanProgress({
+                  kind: "scan",
+                  status: "error",
+                  message: "任务记录已不存在，服务可能已重启",
+                  progress: {},
+                });
+              }
+              activeTaskKind = null;
               pendingScanFingerprint = null;
               setTaskRunning(false);
               runtimeStatus.dataset.tone = "error";
@@ -2344,12 +2691,24 @@ INDEX_HTML = r"""<!doctype html>
 
     async function startScan() {
       setWorkflowPhase(2);
-      const config = await saveConfig();
-      invalidateScanResults("正在按当前处理位置重新扫描资源。");
-      pendingScanFingerprint = scanSourceFingerprint(config);
-      const payload = await api("/api/scan", {method: "POST", body: JSON.stringify({})});
-      logBox.textContent = "扫描任务已提交。";
-      setTask(payload);
+      try {
+        const config = await saveConfig();
+        invalidateScanResults("正在按当前处理位置重新扫描资源。");
+        renderScanProgress({kind: "scan", status: "queued", progress: {}});
+        pendingScanFingerprint = scanSourceFingerprint(config);
+        const payload = await api("/api/scan", {method: "POST", body: JSON.stringify({})});
+        logBox.textContent = "扫描任务已提交。";
+        setTask(payload);
+      } catch (error) {
+        pendingScanFingerprint = null;
+        renderScanProgress({
+          kind: "scan",
+          status: "error",
+          message: `扫描启动失败：${error.message}`,
+          progress: {},
+        });
+        throw error;
+      }
     }
 
     async function startDiagnose() {

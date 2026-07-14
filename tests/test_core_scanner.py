@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from ptbd_core.models import MediaType
 from ptbd_core.scanner import resolve_candidate, scan, scan_json
@@ -134,6 +135,103 @@ class ScannerTests(unittest.TestCase):
         self.assertIsNone(resolve_candidate(album))
         self.touch(album / "three.flac")
         self.assertEqual(resolve_candidate(album), (MediaType.AUDIO_DIR, album))
+
+    def test_scan_reports_walk_resolve_and_complete_progress(self) -> None:
+        transport_stream = self.touch(self.root / "capture.ts")
+        self.touch(self.root / "nested" / "movie.mkv")
+        events: list[dict] = []
+
+        def probe(path: Path) -> bool:
+            self.assertEqual(path, transport_stream)
+            self.assertEqual(events[-1]["phase"], "resolving")
+            self.assertEqual(events[-1]["operation"], "ffprobe")
+            self.assertEqual(events[-1]["current_path"], str(transport_stream))
+            return True
+
+        items = scan(
+            self.root,
+            full=False,
+            ts_probe=probe,
+            progress_callback=events.append,
+        )
+
+        phases = [event["phase"] for event in events]
+        self.assertEqual(phases[0], "walking")
+        self.assertIn("resolving", phases)
+        self.assertEqual(phases[-1], "complete")
+        self.assertGreaterEqual(events[-1]["directories_scanned"], 2)
+        self.assertGreaterEqual(events[-1]["files_scanned"], 2)
+        self.assertEqual(events[-1]["processed_candidates"], events[-1]["total_candidates"])
+        self.assertEqual(len(items), 2)
+
+    def test_nested_include_roots_are_scanned_once(self) -> None:
+        nested = self.root / "nested"
+        self.touch(nested / "movie.mkv")
+
+        with mock.patch(
+            "ptbd_core.scanner._iter_tree_candidates",
+            wraps=__import__("ptbd_core.scanner", fromlist=["_iter_tree_candidates"])._iter_tree_candidates,
+        ) as walk:
+            items = scan(self.root, full=True, include_roots=[self.root, nested])
+
+        self.assertEqual([item.path for item in items], [str(nested / "movie.mkv")])
+        self.assertEqual(walk.call_count, 1)
+
+    def test_dotdot_include_root_is_normalized_before_collapsing(self) -> None:
+        nested = self.root / "nested"
+        nested.mkdir()
+        parent_movie = self.touch(self.root / "parent.mkv")
+        nested_movie = self.touch(nested / "nested.mkv")
+
+        items = scan(
+            self.root,
+            full=True,
+            include_roots=[nested / "..", nested],
+        )
+
+        self.assertEqual(
+            {item.path for item in items},
+            {str(parent_movie), str(nested_movie)},
+        )
+
+    def test_dotdot_exclude_root_cannot_bypass_pruning(self) -> None:
+        private_movie = self.touch(self.root / "private" / "movie.mkv")
+        visible_movie = self.touch(self.root / "visible" / "movie.mkv")
+
+        items = scan(
+            self.root,
+            full=False,
+            exclude_roots=[self.root / "public" / ".." / "private"],
+        )
+
+        self.assertEqual([item.path for item in items], [str(visible_movie)])
+        self.assertNotIn(str(private_movie), [item.path for item in items])
+
+    def test_fast_directory_walk_throttles_progress_transport(self) -> None:
+        for index in range(130):
+            (self.root / f"directory-{index:03d}").mkdir()
+        events: list[dict] = []
+
+        with mock.patch("ptbd_core.scanner.time.monotonic", return_value=1.0):
+            scan(self.root, full=False, progress_callback=events.append)
+
+        walking_events = [event for event in events if event["phase"] == "walking"]
+        self.assertLess(len(walking_events), 10)
+        self.assertEqual(events[-1]["phase"], "complete")
+        self.assertEqual(events[-1]["directories_scanned"], 131)
+
+    def test_fast_candidate_resolution_throttles_progress_transport(self) -> None:
+        for index in range(200):
+            self.touch(self.root / f"movie-{index:03d}.mkv")
+        events: list[dict] = []
+
+        with mock.patch("ptbd_core.scanner.time.monotonic", return_value=1.0):
+            scan(self.root, full=False, progress_callback=events.append)
+
+        resolving_events = [event for event in events if event["phase"] == "resolving"]
+        self.assertLess(len(resolving_events), 12)
+        self.assertEqual(resolving_events[-1]["processed_candidates"], 200)
+        self.assertEqual(resolving_events[-1]["total_candidates"], 200)
 
 
 if __name__ == "__main__":

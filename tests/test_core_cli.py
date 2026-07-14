@@ -42,6 +42,29 @@ class CoreCliTests(unittest.TestCase):
             [{"index": 1, "type": "VIDEO", "type_label": "视频", "path": str(movie)}],
         )
 
+    def test_scan_json_progress_is_streamed_to_stderr_without_polluting_stdout(self) -> None:
+        movie = self.root / "movie.mkv"
+        movie.touch()
+        stdout = StringIO()
+        stderr = StringIO()
+
+        with redirect_stdout(stdout), redirect_stderr(stderr):
+            result = cli.command_scan_json(
+                ["--dir", str(self.root), "--lang", "zh", "--progress-json"]
+            )
+
+        payload = json.loads(stdout.getvalue())
+        progress_lines = [
+            line
+            for line in stderr.getvalue().splitlines()
+            if line.startswith("PTBD_SCAN_PROGRESS\t")
+        ]
+        progress = [json.loads(line.split("\t", 1)[1]) for line in progress_lines]
+        self.assertEqual(result, 0)
+        self.assertEqual(payload["items"][0]["path"], str(movie))
+        self.assertEqual(progress[0]["phase"], "walking")
+        self.assertEqual(progress[-1]["phase"], "complete")
+
     def test_structured_scan_roots_preserve_paths_with_spaces(self) -> None:
         main_root = self.root / "My Movies"
         extra_root = self.root / "More Media"

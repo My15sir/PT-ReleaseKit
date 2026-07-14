@@ -11,8 +11,8 @@ import venv
 from pathlib import Path
 
 
-# Keep artifact filenames stable for existing download and launcher links.
-APP_NAME = "PT-BDtool"
+# Public brand uses a space; packaged filenames use the filesystem-safe slug.
+APP_NAME = "PT-ReleaseKit"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -123,7 +123,7 @@ def build_artifact(python_bin: Path) -> Path:
     else:
         command.append("--onedir")
     if system == "Darwin":
-        command.extend(["--osx-bundle-identifier", "com.my15sir.ptbdtool"])
+        command.extend(["--osx-bundle-identifier", "com.my15sir.ptreleasekit"])
 
     for source, dest_dir in iter_data_entries():
         command.extend(["--add-data", format_add_data(source, dest_dir)])

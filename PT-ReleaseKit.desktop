@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PT ReleaseKit
+Comment=PT media release material generator
+Exec=bash -lc 'SCRIPT_DIR="$(cd -P "$(dirname "$1")" && pwd)"; exec "$SCRIPT_DIR/PT-ReleaseKit.sh"' dummy %k
+Terminal=false
+StartupNotify=true
+Categories=Utility;

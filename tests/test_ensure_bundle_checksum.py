@@ -74,7 +74,7 @@ class EnsureBundleChecksumTests(unittest.TestCase):
         ):
             self.assertEqual(ensure_bundle.expected_bundle_checksum(quiet=True), digest)
 
-    def test_missing_official_sidecar_uses_only_the_pinned_legacy_digest(self) -> None:
+    def test_missing_renamed_official_sidecar_fails_closed(self) -> None:
         missing = urllib.error.HTTPError(
             ensure_bundle.OFFICIAL_CHECKSUM_URL,
             404,
@@ -89,6 +89,32 @@ class EnsureBundleChecksumTests(unittest.TestCase):
                 ensure_bundle,
                 "DEFAULT_CHECKSUM_URL",
                 ensure_bundle.OFFICIAL_CHECKSUM_URL,
+            ),
+            mock.patch.object(ensure_bundle.urllib.request, "urlopen", side_effect=missing),
+        ):
+            with self.assertRaisesRegex(BundleArchiveError, "bundle checksum unavailable") as raised:
+                ensure_bundle.expected_bundle_checksum(quiet=True)
+        self.assertIs(raised.exception.__cause__, missing)
+
+    def test_missing_legacy_official_sidecar_uses_pinned_digest(self) -> None:
+        missing = urllib.error.HTTPError(
+            ensure_bundle.LEGACY_OFFICIAL_CHECKSUM_URL,
+            404,
+            "Not Found",
+            hdrs=None,
+            fp=None,
+        )
+        with (
+            mock.patch.object(ensure_bundle, "DEFAULT_SHA256", ""),
+            mock.patch.object(
+                ensure_bundle,
+                "DEFAULT_URL",
+                ensure_bundle.LEGACY_OFFICIAL_BUNDLE_URL,
+            ),
+            mock.patch.object(
+                ensure_bundle,
+                "DEFAULT_CHECKSUM_URL",
+                ensure_bundle.LEGACY_OFFICIAL_CHECKSUM_URL,
             ),
             mock.patch.object(ensure_bundle.urllib.request, "urlopen", side_effect=missing),
         ):

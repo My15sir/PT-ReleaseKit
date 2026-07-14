@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import tarfile
+import threading
+import time
 import unittest
 import urllib.error
 from pathlib import Path
@@ -48,10 +51,14 @@ class FakeTransferChannel:
         self.sent = bytearray()
         self.command = ""
         self.timeout = None
+        self.combine_stderr = None
         self.closed = False
 
     def settimeout(self, timeout: int) -> None:
         self.timeout = timeout
+
+    def set_combine_stderr(self, combine: bool) -> None:
+        self.combine_stderr = combine
 
     def exec_command(self, command: str) -> None:
         self.command = command
@@ -86,13 +93,41 @@ class FakeTransferChannel:
         self.closed = True
 
 
+class FakeScanChannel(FakeTransferChannel):
+    def __init__(self, stdout: bytes = b"", stderr: bytes = b"", *, completes: bool = True) -> None:
+        super().__init__()
+        self.stdout = bytearray(stdout)
+        self.stderr = bytearray(stderr)
+        self.completes = completes
+
+    def recv_ready(self) -> bool:
+        return bool(self.stdout)
+
+    def recv(self, size: int) -> bytes:
+        chunk = bytes(self.stdout[:size])
+        del self.stdout[:size]
+        return chunk
+
+    def recv_stderr_ready(self) -> bool:
+        return bool(self.stderr)
+
+    def recv_stderr(self, size: int) -> bytes:
+        chunk = bytes(self.stderr[:size])
+        del self.stderr[:size]
+        return chunk
+
+    def exit_status_ready(self) -> bool:
+        return self.completes and not self.stdout and not self.stderr
+
+
 class FakeTransport:
     def __init__(self, channel: FakeTransferChannel | None = None) -> None:
         self.channel = channel or FakeTransferChannel()
         self.open_session_calls = 0
 
-    def open_session(self) -> FakeTransferChannel:
+    def open_session(self, timeout=None) -> FakeTransferChannel:
         self.open_session_calls += 1
+        self.channel.timeout = timeout
         return self.channel
 
 
@@ -415,6 +450,100 @@ class RemoteBackendHostKeyTests(unittest.TestCase):
             with self.assertRaises(backend.TaskCancelledError):
                 controller.run_script("sleep 30", check=False)
 
+    def test_scan_stream_separates_progress_from_result_json(self) -> None:
+        controller = self.make_backend()
+        progress = {"phase": "walking", "directories_scanned": 3}
+        channel = FakeScanChannel(
+            stdout=b'{"items": []}\n',
+            stderr=(
+                backend.SCAN_PROGRESS_PREFIX.encode("utf-8")
+                + json.dumps(progress).encode("utf-8")
+                + b"\nremote warning\n"
+            ),
+        )
+        client = FakeSSHClient()
+        client.transport = FakeTransport(channel)
+        controller.client = client
+        events: list[dict] = []
+        logs: list[str] = []
+        controller.logger = logs.append
+
+        with mock.patch.object(controller, "connect"):
+            result = controller.run_scan_script(
+                "bdtool scan-json --progress-json",
+                progress_callback=events.append,
+                overall_timeout=1,
+                idle_timeout=1,
+            )
+
+        self.assertEqual(result.output, '{"items": []}')
+        self.assertEqual(events, [progress])
+        self.assertEqual(logs, ["remote warning"])
+        self.assertFalse(channel.combine_stderr)
+        self.assertTrue(channel.closed)
+
+    def test_scan_stream_idle_timeout_closes_channel(self) -> None:
+        controller = self.make_backend()
+        channel = FakeScanChannel(completes=False)
+        client = FakeSSHClient()
+        client.transport = FakeTransport(channel)
+        controller.client = client
+
+        with mock.patch.object(controller, "connect"):
+            with self.assertRaisesRegex(backend.RemoteCommandError, "没有任何进度"):
+                controller.run_scan_script(
+                    "bdtool scan-json --progress-json",
+                    overall_timeout=1,
+                    idle_timeout=0.05,
+                )
+
+        self.assertTrue(channel.closed)
+
+    def test_scan_stream_timeout_interrupts_hung_exec_request(self) -> None:
+        class HungExecChannel(FakeScanChannel):
+            def __init__(self) -> None:
+                super().__init__(completes=False)
+                self.release = threading.Event()
+
+            def exec_command(self, command: str) -> None:
+                self.command = command
+                self.release.wait(5)
+
+            def close(self) -> None:
+                self.release.set()
+                super().close()
+
+        controller = self.make_backend()
+        channel = HungExecChannel()
+        client = FakeSSHClient()
+        client.transport = FakeTransport(channel)
+        controller.client = client
+
+        with mock.patch.object(controller, "connect"):
+            with self.assertRaisesRegex(backend.RemoteCommandError, "没有任何进度"):
+                controller.run_scan_script(
+                    "bdtool scan-json --progress-json",
+                    overall_timeout=1,
+                    idle_timeout=0.05,
+                )
+
+        self.assertTrue(channel.closed)
+        self.assertTrue(channel.release.wait(1))
+
+    def test_scan_preparation_is_bounded_by_overall_timeout(self) -> None:
+        controller = self.make_backend()
+
+        def blocked_resolve() -> str:
+            while not controller._cancelled:
+                time.sleep(0.01)
+            raise backend.TaskCancelledError("cancelled")
+
+        with mock.patch.object(controller, "resolve_remote_command", side_effect=blocked_resolve):
+            with self.assertRaisesRegex(backend.RemoteCommandError, "准备超过总时限"):
+                controller.scan_items(overall_timeout=0.05, idle_timeout=0.05)
+
+        self.assertTrue(controller._cancelled)
+
     def test_dependency_install_receives_audio_spectrum_mode(self) -> None:
         controller = self.make_backend()
         controller.config["audio_spectrum_mode"] = "combined"
@@ -485,7 +614,7 @@ class RemoteBackendHostKeyTests(unittest.TestCase):
         ):
             self.assertEqual(controller.expected_bundle_checksum(), digest)
 
-    def test_missing_official_sidecar_uses_pinned_bootstrap_digest(self) -> None:
+    def test_missing_renamed_official_sidecar_fails_closed(self) -> None:
         unavailable = urllib.error.URLError("offline")
         controller = self.make_backend()
 
@@ -493,6 +622,28 @@ class RemoteBackendHostKeyTests(unittest.TestCase):
             mock.patch.object(backend, "BUNDLE_SHA256", ""),
             mock.patch.object(backend, "BUNDLE_DOWNLOAD_URL", backend.OFFICIAL_BUNDLE_URL),
             mock.patch.object(backend, "BUNDLE_CHECKSUM_URL", backend.OFFICIAL_CHECKSUM_URL),
+            mock.patch.object(backend.urllib.request, "urlopen", side_effect=unavailable),
+        ):
+            with self.assertRaisesRegex(backend.RemoteCommandError, "checksum 不可用") as raised:
+                controller.expected_bundle_checksum()
+        self.assertIs(raised.exception.__cause__, unavailable)
+
+    def test_missing_legacy_official_sidecar_uses_pinned_digest(self) -> None:
+        unavailable = urllib.error.URLError("offline")
+        controller = self.make_backend()
+
+        with (
+            mock.patch.object(backend, "BUNDLE_SHA256", ""),
+            mock.patch.object(
+                backend,
+                "BUNDLE_DOWNLOAD_URL",
+                backend.LEGACY_OFFICIAL_BUNDLE_URL,
+            ),
+            mock.patch.object(
+                backend,
+                "BUNDLE_CHECKSUM_URL",
+                backend.LEGACY_OFFICIAL_CHECKSUM_URL,
+            ),
             mock.patch.object(backend.urllib.request, "urlopen", side_effect=unavailable),
         ):
             self.assertEqual(

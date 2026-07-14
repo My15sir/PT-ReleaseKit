@@ -6,6 +6,7 @@ import os
 import stat
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -433,9 +434,22 @@ class WebInterfaceTests(unittest.TestCase):
             {"items": [{"index": 1, "type": "VIDEO", "type_label": "视频", "path": "/media/movie.mkv"}]}
         )
 
+        progress = {
+            "phase": "complete",
+            "directories_scanned": 1,
+            "files_scanned": 1,
+            "candidates_found": 1,
+            "processed_candidates": 1,
+            "total_candidates": 1,
+            "current_path": "/media/movie.mkv",
+            "operation": "complete",
+            "root_index": 1,
+            "root_total": 1,
+        }
+
         with mock.patch.object(
             self.web,
-            "run_capture_process",
+            "run_scan_process",
             return_value=self.web.subprocess.CompletedProcess([], 0, payload, ""),
         ) as run:
             items = self.web.local_scan_items(config, task)
@@ -443,9 +457,83 @@ class WebInterfaceTests(unittest.TestCase):
         command = run.call_args.args[0]
         child_env = run.call_args.kwargs["env"]
         self.assertEqual(command[:4], [self.web.sys.executable, "-m", "ptbd_core.cli", "scan-json"])
+        self.assertIn("--progress-json", command)
         self.assertEqual(items[0]["path"], "/media/movie.mkv")
         self.assertEqual(child_env["PYTHONIOENCODING"], "utf-8")
         self.assertEqual(child_env["PYTHONUTF8"], "1")
+        run.call_args.kwargs["progress_callback"](progress)
+        self.assertEqual(task.to_public()["progress"], progress)
+
+    def test_scan_process_streams_progress_and_keeps_stdout_as_json(self) -> None:
+        task = self.web.WebTask(kind="scan")
+        progress = {
+            "phase": "walking",
+            "directories_scanned": 4,
+            "current_path": "/media/电影",
+        }
+        progress_line = self.web.SCAN_PROGRESS_PREFIX + json.dumps(progress, ensure_ascii=False)
+        script = (
+            "import sys; "
+            f"sys.stderr.write({(progress_line + chr(10))!r}); sys.stderr.flush(); "
+            "sys.stdout.write('{\"items\": []}\\n'); sys.stdout.flush()"
+        )
+
+        result = self.web.run_scan_process(
+            [self.web.sys.executable, "-c", script],
+            env=os.environ.copy(),
+            task=task,
+            progress_callback=task.set_progress,
+            overall_timeout=5,
+            idle_timeout=2,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout), {"items": []})
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(task.to_public()["progress"], progress)
+
+    def test_scan_process_idle_timeout_terminates_child(self) -> None:
+        task = self.web.WebTask(kind="scan")
+
+        with self.assertRaisesRegex(RuntimeError, "无输出"):
+            self.web.run_scan_process(
+                [self.web.sys.executable, "-c", "import time; time.sleep(30)"],
+                env=os.environ.copy(),
+                task=task,
+                progress_callback=task.set_progress,
+                overall_timeout=5,
+                idle_timeout=0.2,
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX signal handling is required")
+    def test_scan_process_cancel_force_kills_child_that_ignores_sigterm(self) -> None:
+        task = self.web.WebTask(kind="scan")
+        progress = {"phase": "walking", "directories_scanned": 1}
+        progress_line = self.web.SCAN_PROGRESS_PREFIX + json.dumps(progress)
+        script = (
+            "import signal,sys,time; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            f"sys.stderr.write({(progress_line + chr(10))!r}); sys.stderr.flush(); "
+            "time.sleep(30)"
+        )
+
+        def cancel_on_progress(payload: dict) -> None:
+            task.set_progress(payload)
+            task.cancel()
+
+        started_at = time.monotonic()
+        with self.assertRaises(self.web.TaskCancelledError):
+            self.web.run_scan_process(
+                [self.web.sys.executable, "-c", script],
+                env=os.environ.copy(),
+                task=task,
+                progress_callback=cancel_on_progress,
+                overall_timeout=5,
+                idle_timeout=5,
+                cancel_grace_seconds=0.1,
+            )
+
+        self.assertLess(time.monotonic() - started_at, 2)
 
     def test_local_environment_keeps_main_root_and_resolves_relative_paths(self) -> None:
         config = self.web.DEFAULT_CONFIG.copy()

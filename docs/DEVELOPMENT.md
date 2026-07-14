@@ -2,7 +2,7 @@
 
 这份文档面向维护者。普通用户应先阅读根目录 `README.md`，Docker 运维请阅读 `docs/DOCKER.md`。
 
-品牌展示统一使用 **PT ReleaseKit**，仓库 slug 使用 `PT-ReleaseKit`。以下名称属于升级兼容接口，未经迁移设计不得直接重命名：`bdtool`、`ptbd-*`、`PTBD_*` 环境变量、`pt-bdtool:*` Docker 镜像标签、`/opt/PT-BDtool`、现有配置目录、`PT-BDtool-*` 下载文件名和 `bundle-latest` / `portable-latest` 标签。
+品牌展示统一使用 **PT ReleaseKit**，仓库 slug 使用 `PT-ReleaseKit`。Release 归档、打包程序和新桌面启动器使用 `PT-ReleaseKit-*` / `PT-ReleaseKit.*` 文件名。以下名称属于升级兼容接口，未经迁移设计不得直接重命名：`bdtool`、`ptbd-*`、`PTBD_*` 环境变量、`pt-bdtool:*` Docker 镜像标签、`/opt/PT-BDtool`、现有配置目录、旧版 `PT-BDtool.*` 源码启动器和 `bundle-latest` / `portable-latest` 标签。
 
 ## 1. 架构原则
 
@@ -236,9 +236,13 @@ python3 scripts/build-controller-app.py
 
 发布目标：
 
-- Windows：`PT-BDtool.exe`
-- macOS：`PT-BDtool.app`
-- Linux：`PT-BDtool-linux-portable.tar.gz`
+- Windows：`PT-ReleaseKit.exe`
+- macOS：`PT-ReleaseKit.app`
+- Linux：`PT-ReleaseKit-linux-portable.tar.gz`
+
+离线 Linux bundle 发布为 `PT-ReleaseKit-linux-amd64.tar.gz`。
+
+`scan-json --progress-json` 保持 stdout 为最终 JSON，并在 stderr 按行输出 `PTBD_SCAN_PROGRESS\t{json}`。遍历阶段 `phase=walking` 的总量未知，控制端必须使用不定进度；解析阶段 `phase=resolving` 才能按 `processed_candidates / total_candidates` 显示百分比。桌面与 Web 的 SSH 扫描必须分别消费 stdout/stderr，并保留取消、空闲超时和总时限。
 
 `.github/workflows/controller-build.yml` 负责构建并更新 `portable-latest`。改动 GUI、共享配置、远端后端或 controller runtime 资产时，需要同步检查工作流的路径触发和打包清单。
 

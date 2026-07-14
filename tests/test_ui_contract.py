@@ -50,6 +50,7 @@ class DesktopUiContractTests(unittest.TestCase):
         self.assertIn("ttk.Notebook", source)
         self.assertIn("PanedWindow", source)
         self.assertIn("ttk.Button", source)
+        self.assertIn("ttk.Progressbar", source)
         self.assertNotIn("_pack_round_button", source)
 
     def test_selected_paths_include_checked_items_hidden_by_current_filter(self) -> None:
@@ -129,6 +130,8 @@ class WebUiContractTests(unittest.TestCase):
         self.assertEqual(4, html.count('class="progress-step"'))
         self.assertIn('aria-live="polite"', html)
         self.assertIn("function setWorkflowPhase", html)
+        self.assertIn('id="scanProgress"', html)
+        self.assertIn("function renderScanProgress", html)
         self.assertNotIn("__PTBD_BASE_PATH_JSON__", html)
 
     def test_web_mode_switch_hides_irrelevant_connection_fields(self) -> None:

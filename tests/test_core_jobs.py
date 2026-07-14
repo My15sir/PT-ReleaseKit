@@ -154,6 +154,23 @@ class JobRegistryTests(unittest.TestCase):
             {"ok": True, "message": "connected", "checks": [{"name": "ssh"}]},
         )
 
+    def test_scan_progress_is_copied_on_write_and_read(self) -> None:
+        registry = JobRegistry()
+        job, _ = registry.reserve("scan")
+        assert job is not None
+        progress = {
+            "phase": "walking",
+            "directories_scanned": 3,
+            "current_path": "/media/movies",
+        }
+
+        job.set_progress(progress)
+        progress["directories_scanned"] = 99
+        public = job.to_public()
+        public["progress"]["directories_scanned"] = 100
+
+        self.assertEqual(job.to_public()["progress"]["directories_scanned"], 3)
+
     def test_failures_can_be_recorded_concurrently(self) -> None:
         registry = JobRegistry()
         job, _ = registry.reserve("process")

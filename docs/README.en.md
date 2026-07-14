@@ -2,7 +2,7 @@
 
 PT ReleaseKit (formerly PT-BDtool) scans videos, audio files, `BDMV` directories, and `ISO` images. It creates screenshots, MediaInfo, audio spectra or BDInfo reports, then packages the generated files.
 
-> Rename compatibility: the GitHub repository now uses `PT-ReleaseKit`. Existing `bdtool` and `ptbd-*` commands, `pt-bdtool:*` Docker image tags, configuration paths, and `PT-BDtool-*` download filenames remain stable, so current installations and automation do not need migration.
+> Rename compatibility: the GitHub repository now uses `PT-ReleaseKit`. Existing `bdtool` and `ptbd-*` commands, `PTBD_*` environment variables, `pt-bdtool:*` Docker image tags, install paths, configuration paths, and legacy `PT-BDtool.*` source launchers remain compatible. New Release archives and packaged applications use `PT-ReleaseKit` filenames.
 
 The project now uses a **Python-first modular core**, keeps a Shell compatibility layer, retains the Windows/macOS desktop GUI, and adds a Docker deployment for local processing on the media VPS.
 
@@ -21,16 +21,18 @@ The desktop applications remain supported. They are intended for users who contr
 
 Download a package from the [`portable-latest`](https://github.com/My15sir/PT-ReleaseKit/releases/tag/portable-latest) release:
 
-- Windows: extract `PT-BDtool-windows-portable.zip` and run `PT-BDtool.exe`
-- macOS: extract `PT-BDtool-macos-portable.zip` and run `PT-BDtool.app`
-- Linux: extract `PT-BDtool-linux-portable.tar.gz`
+- Windows: extract `PT-ReleaseKit-windows-portable.zip` and run `PT-ReleaseKit.exe`
+- macOS: extract `PT-ReleaseKit-macos-portable.zip` and run `PT-ReleaseKit.app`
+- Linux: extract `PT-ReleaseKit-linux-portable.tar.gz`
 
 Source launchers are also retained:
 
-- Windows: `PT-BDtool.bat`
-- macOS: `PT-BDtool.command`
-- Linux: `PT-BDtool.sh`
+- Windows: `PT-ReleaseKit.bat`
+- macOS: `PT-ReleaseKit.command`
+- Linux: `PT-ReleaseKit.sh` or `PT-ReleaseKit.desktop`
 - Cross-platform GUI wrapper: `ptbd-gui`
+
+The older `PT-BDtool.bat`, `PT-BDtool.command`, `PT-BDtool.sh`, and `PT-BDtool.desktop` files remain as compatibility launchers.
 
 Running the GUI from source requires Python 3 and Tk. Connection diagnostics and the built-in remote backend require Paramiko; without it, scan and processing operations fall back to system Bash and SSH. Release applications are built with PyInstaller and include the controller dependencies.
 
@@ -40,10 +42,12 @@ On first use, enter the VPS target (for example `root@host`), SSH port, a passwo
 
 Desktop configuration and log locations:
 
-- Linux: `~/.config/ptbd-gui/config.json` and `PT-BDtool.log` in the same directory
-- Windows portable app: `PT-BDtool-config.json` next to the executable
-- macOS portable app: `PT-BDtool-config.json` next to `PT-BDtool.app`
+- Linux: `~/.config/ptbd-gui/config.json` and `PT-ReleaseKit.log` in the same directory
+- Windows portable app: `PT-ReleaseKit-config.json` next to the executable
+- macOS portable app: `PT-ReleaseKit-config.json` next to `PT-ReleaseKit.app`
 - Shell remote mode: `~/.config/ptbd-remote/config.env`
+
+Existing settings remain usable after upgrading. When the new configuration does not exist, the application reads the legacy `PT-BDtool-config.json`, Windows `%APPDATA%/PT-BDtool/gui-config.json`, or macOS `Application Support/PT-BDtool/gui-config.json`; the next save writes the new filename.
 
 If scanning or processing fails, first confirm that the system terminal can log in over SSH, that the VPS account can read the media directory, and that the log does not report missing dependencies or package-repository failures. Remote automatic installation primarily supports Debian, Ubuntu, and Alpine; other distributions may need manual dependency setup.
 
@@ -148,6 +152,8 @@ The remote scan defaults to `/home /root /data /mnt /media /srv`. Use an explici
 
 The normal workflow is **Save connection**, **Test connection**, **Scan VPS**, select one or more entries, then **Generate selected**. Batch processing continues after an individual failure, reports separate success and failure totals, lets the GUI retry failed entries, and exposes an **Open output folder** action.
 
+Scanning reports real work rather than an estimated percentage. Directory walking shows live directory, file, candidate, and current-path counters. Candidate resolution switches to a determinate completed/total ratio and identifies the file being inspected by `ffprobe`. Desktop and Web controllers stop a scan after 120 seconds without any output instead of waiting indefinitely.
+
 ## Web Modes
 
 Start the source Web controller locally:
@@ -189,7 +195,7 @@ bdtool doctor
 ptbd-gui --self-check
 ```
 
-`install.sh` does not invoke a host package manager. The offline bundle can be prepared with `scripts/ensure-bundle.py`. Official downloads prefer the Release `.sha256` sidecar; the legacy official asset is authenticated by a repository-pinned digest during migration.
+`install.sh` does not invoke a host package manager. The offline bundle can be prepared with `scripts/ensure-bundle.py`. The renamed official bundle requires its Release `.sha256` sidecar or an explicit digest; only the legacy filename may use the repository-pinned migration digest.
 
 Custom bundle mirrors support `PTBD_BUNDLE_URL`, the highest-priority trusted digest `PTBD_BUNDLE_SHA256`, and `PTBD_BUNDLE_CHECKSUM_URL` (default: the archive URL plus `.sha256`). Downloads fail closed by default. `PTBD_BUNDLE_ALLOW_UNVERIFIED=1` explicitly permits a custom download only when its checksum URL is unavailable; a malformed sidecar still fails.
 

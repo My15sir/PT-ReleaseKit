@@ -25,6 +25,7 @@ class Job:
     outputs: list[str] = field(default_factory=list)
     failed: list[dict[str, str]] = field(default_factory=list)
     result_summary: dict[str, Any] = field(default_factory=dict)
+    progress: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     started_at: float | None = None
     ended_at: float | None = None
@@ -109,6 +110,10 @@ class Job:
         with self._lock:
             self.result_summary = deepcopy(dict(summary))
 
+    def set_progress(self, progress: Mapping[str, Any]) -> None:
+        with self._lock:
+            self.progress = deepcopy(dict(progress))
+
     def summarize_batch(self, total: int) -> dict[str, Any]:
         if total < 0:
             raise ValueError("batch total must not be negative")
@@ -135,6 +140,7 @@ class Job:
                 "outputs": list(self.outputs),
                 "failed": deepcopy(self.failed),
                 "result_summary": deepcopy(self.result_summary),
+                "progress": deepcopy(self.progress),
                 "created_at": self.created_at,
                 "started_at": self.started_at,
                 "ended_at": self.ended_at,

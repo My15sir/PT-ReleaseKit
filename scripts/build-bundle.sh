@@ -4,8 +4,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
-PKG_ROOT="$ROOT_DIR/.tmp-dist/PT-BDtool-linux-amd64"
-OUT_TAR="$DIST_DIR/PT-BDtool-linux-amd64.tar.gz"
+PACKAGE_DIR_NAME="PT-ReleaseKit-linux-amd64"
+PKG_ROOT="$ROOT_DIR/.tmp-dist/$PACKAGE_DIR_NAME"
+OUT_TAR="$DIST_DIR/$PACKAGE_DIR_NAME.tar.gz"
 OUT_SHA256="$OUT_TAR.sha256"
 
 log() { printf '[build-bundle] %s\n' "$*"; }
@@ -94,13 +95,13 @@ python3 "$ROOT_DIR/ptbd_core/runtime_assets.py" copy \
 mkdir -p "$PKG_ROOT/third_party/bundle/linux-amd64"
 cp -a "$ROOT_DIR/third_party/bundle/linux-amd64/bin" "$PKG_ROOT/third_party/bundle/linux-amd64/"
 cp -a "$ROOT_DIR/third_party/bundle/linux-amd64/lib" "$PKG_ROOT/third_party/bundle/linux-amd64/"
-chmod +x "$PKG_ROOT/bdtool" "$PKG_ROOT/bdtool-legacy.sh" "$PKG_ROOT/bdtool.sh" "$PKG_ROOT/ptbd" "$PKG_ROOT/ptbd-gui" "$PKG_ROOT/ptbd-web" "$PKG_ROOT/ptbd-gui.py" "$PKG_ROOT/ptbd_remote_backend.py" "$PKG_ROOT/install.sh" "$PKG_ROOT/ptbd-start.sh" "$PKG_ROOT/ptbd-remote.sh" "$PKG_ROOT/ptbd-remote-start.sh" "$PKG_ROOT/PT-BDtool.sh" "$PKG_ROOT/PT-BDtool.command" "$PKG_ROOT/scripts/ensure-bundle.py" "$PKG_ROOT/scripts/audio-spectrum.py" "$PKG_ROOT/scripts/fetch-deps.sh" "$PKG_ROOT/scripts/prepare-remote-runtime.sh" "$PKG_ROOT/scripts/remote-upload-server.py" 2>/dev/null || true
+chmod +x "$PKG_ROOT/bdtool" "$PKG_ROOT/bdtool-legacy.sh" "$PKG_ROOT/bdtool.sh" "$PKG_ROOT/ptbd" "$PKG_ROOT/ptbd-gui" "$PKG_ROOT/ptbd-web" "$PKG_ROOT/ptbd-gui.py" "$PKG_ROOT/ptbd_remote_backend.py" "$PKG_ROOT/install.sh" "$PKG_ROOT/ptbd-start.sh" "$PKG_ROOT/ptbd-remote.sh" "$PKG_ROOT/ptbd-remote-start.sh" "$PKG_ROOT/PT-ReleaseKit.sh" "$PKG_ROOT/PT-ReleaseKit.command" "$PKG_ROOT/PT-ReleaseKit.desktop" "$PKG_ROOT/PT-BDtool.sh" "$PKG_ROOT/PT-BDtool.command" "$PKG_ROOT/PT-BDtool.desktop" "$PKG_ROOT/scripts/ensure-bundle.py" "$PKG_ROOT/scripts/audio-spectrum.py" "$PKG_ROOT/scripts/fetch-deps.sh" "$PKG_ROOT/scripts/prepare-remote-runtime.sh" "$PKG_ROOT/scripts/remote-upload-server.py" 2>/dev/null || true
 
 rm -f "$OUT_TAR" "$OUT_SHA256" "${OUT_SHA256}.tmp"
-tar -czf "$OUT_TAR" -C "$ROOT_DIR/.tmp-dist" PT-BDtool-linux-amd64
+tar -czf "$OUT_TAR" -C "$ROOT_DIR/.tmp-dist" "$PACKAGE_DIR_NAME"
 write_sha256
 
 log "created: $OUT_TAR"
 log "created: $OUT_SHA256"
 log "package key files:"
-tar -tzf "$OUT_TAR" | grep -E 'third_party/bundle/linux-amd64/bin/(ffmpeg|ffprobe|mediainfo|BDInfo)$|(^PT-BDtool-linux-amd64/(bdtool|bdtool.sh|install.sh|ptbd-start.sh)$)' | sed 's/^/  - /'
+tar -tzf "$OUT_TAR" | grep -E 'third_party/bundle/linux-amd64/bin/(ffmpeg|ffprobe|mediainfo|BDInfo)$|(^PT-ReleaseKit-linux-amd64/(bdtool|bdtool.sh|install.sh|ptbd-start.sh)$)' | sed 's/^/  - /'

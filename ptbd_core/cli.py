@@ -91,6 +91,7 @@ def command_scan_json(argv: Sequence[str]) -> int:
     group.add_argument("--full", action="store_true")
     group.add_argument("--dir")
     parser.add_argument("--lang", choices=("zh", "en"), default=os.environ.get("LANG_CODE", "zh"))
+    parser.add_argument("--progress-json", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(list(argv))
     root = args.dir if args.dir is not None else os.environ.get("BDTOOL_SCAN_FULL_ROOT", "/")
     if args.dir is not None and not Path(root).is_dir():
@@ -99,7 +100,14 @@ def command_scan_json(argv: Sequence[str]) -> int:
         scan_kwargs = _scan_kwargs(root=root, full=args.dir is None, lang=args.lang)
     except ValueError as exc:
         parser.error(str(exc))
-    payload = scan_json(**scan_kwargs)
+    progress_callback = None
+    if args.progress_json:
+        def emit_progress(progress: dict[str, object]) -> None:
+            serialized = json.dumps(progress, ensure_ascii=False, separators=(",", ":"))
+            print(f"PTBD_SCAN_PROGRESS\t{serialized}", file=sys.stderr, flush=True)
+
+        progress_callback = emit_progress
+    payload = scan_json(**scan_kwargs, progress_callback=progress_callback)
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 

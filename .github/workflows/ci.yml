@@ -27,6 +27,8 @@ jobs:
             ptbd-start.sh \
             ptbd-remote.sh \
             ptbd-remote-start.sh \
+            PT-ReleaseKit.sh \
+            PT-ReleaseKit.command \
             PT-BDtool.sh \
             PT-BDtool.command \
             scripts/*.sh \
@@ -132,6 +134,18 @@ jobs:
             sleep 1
           done
           [[ "$task_status" == success ]]
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          task = json.loads(Path(".docker-smoke/task.json").read_text(encoding="utf-8"))["task"]
+          progress = task.get("progress") or {}
+          assert progress.get("phase") == "complete", progress
+          assert progress.get("directories_scanned", 0) >= 1, progress
+          assert progress.get("files_scanned", 0) >= 1, progress
+          assert progress.get("candidates_found", 0) >= 1, progress
+          assert progress.get("processed_candidates") == progress.get("total_candidates"), progress
+          PY
           selected_path="$(python3 -c 'import json; payload=json.load(open(".docker-smoke/task.json", encoding="utf-8")); print(payload["task"]["items"][0]["path"])')"
           [[ "$selected_path" == /media/smoke.mp4 ]]
 
@@ -269,7 +283,11 @@ jobs:
           test -x third_party/bundle/linux-amd64/bin/ffprobe
           test -x third_party/bundle/linux-amd64/bin/mediainfo
           test -x third_party/bundle/linux-amd64/bin/BDInfo
-          test -f dist/PT-BDtool-linux-amd64.tar.gz
+          test -f dist/PT-ReleaseKit-linux-amd64.tar.gz
+          test -f dist/PT-ReleaseKit-linux-amd64.tar.gz.sha256
+          (cd dist && sha256sum --check PT-ReleaseKit-linux-amd64.tar.gz.sha256)
+          tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz | grep -qx 'PT-ReleaseKit-linux-amd64/PT-ReleaseKit.sh'
+          tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz | grep -qx 'PT-ReleaseKit-linux-amd64/PT-ReleaseKit.desktop'
 
   offline-install:
     runs-on: ubuntu-latest

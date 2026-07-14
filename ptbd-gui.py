@@ -36,8 +36,11 @@ from ptbd_remote_backend import (
 
 
 PRODUCT_NAME = "PT ReleaseKit"
-# Keep config and log locations stable across the product rename.
-APP_NAME = "PT-BDtool"
+APP_NAME = "PT-ReleaseKit"
+LEGACY_APP_NAME = "PT-BDtool"
+SCAN_PROGRESS_PREFIX = "PTBD_SCAN_PROGRESS\t"
+SCAN_OVERALL_TIMEOUT = 1800
+SCAN_IDLE_TIMEOUT = 120
 WORKFLOW_STEPS = ("连接", "扫描", "选择", "生成")
 UI_COLORS = {
     "bg": "#f2f5f6",
@@ -118,7 +121,8 @@ def find_app_root() -> Path:
 
 
 APP_ROOT = find_app_root()
-PORTABLE_CONFIG_FILENAME = "PT-BDtool-config.json"
+PORTABLE_CONFIG_FILENAME = "PT-ReleaseKit-config.json"
+LEGACY_PORTABLE_CONFIG_FILENAME = "PT-BDtool-config.json"
 
 
 def windows_roaming_config_path() -> Path:
@@ -130,6 +134,16 @@ def windows_roaming_config_path() -> Path:
 def macos_app_support_config_path() -> Path:
     home = Path.home()
     return home / "Library/Application Support" / APP_NAME / "gui-config.json"
+
+
+def legacy_windows_roaming_config_path() -> Path:
+    home = Path.home()
+    base = Path(os.environ.get("APPDATA", home / "AppData/Roaming"))
+    return base / LEGACY_APP_NAME / "gui-config.json"
+
+
+def legacy_macos_app_support_config_path() -> Path:
+    return Path.home() / "Library/Application Support" / LEGACY_APP_NAME / "gui-config.json"
 
 
 def find_app_bundle_root(path: Path) -> Path | None:
@@ -221,7 +235,34 @@ def config_path() -> Path:
 
 
 CONFIG_PATH = config_path()
-LOG_PATH = CONFIG_PATH.parent / "PT-BDtool.log"
+LOG_PATH = CONFIG_PATH.parent / "PT-ReleaseKit.log"
+
+
+def legacy_config_paths() -> tuple[Path, ...]:
+    system = platform.system()
+    candidates: list[Path] = []
+    if system == "Windows":
+        portable_path = portable_windows_config_path()
+        if portable_path is not None:
+            candidates.append(portable_path.with_name(LEGACY_PORTABLE_CONFIG_FILENAME))
+        candidates.append(legacy_windows_roaming_config_path())
+    elif system == "Darwin":
+        portable_path = portable_macos_config_path()
+        if portable_path is not None:
+            candidates.append(portable_path.with_name(LEGACY_PORTABLE_CONFIG_FILENAME))
+        candidates.append(legacy_macos_app_support_config_path())
+    else:
+        portable_path = portable_linux_config_path()
+        if portable_path is not None:
+            candidates.append(portable_path.with_name(LEGACY_PORTABLE_CONFIG_FILENAME))
+        candidates.append(Path.home() / ".config/ptbd-gui/config.json")
+    return tuple(path for path in candidates if path != CONFIG_PATH)
+
+
+def config_read_path() -> Path:
+    if CONFIG_PATH.is_file():
+        return CONFIG_PATH
+    return next((path for path in legacy_config_paths() if path.is_file()), CONFIG_PATH)
 
 
 def default_save_dir() -> str:
@@ -232,7 +273,7 @@ DEFAULT_CONFIG = core_default_config().to_dict()
 
 
 def load_config() -> dict:
-    return core_load_config(CONFIG_PATH, include_secret=True)
+    return core_load_config(config_read_path(), include_secret=True)
 
 
 def save_config(data: dict) -> None:
@@ -476,6 +517,15 @@ def configure_gradient_theme(root: tk.Tk) -> None:
         foreground=[("pressed", "#ffffff"), ("active", "#ffffff"), ("disabled", colors["faint"]), ("!disabled", colors["danger"])],
     )
     style.configure(
+        "Scan.Horizontal.TProgressbar",
+        background=colors["accent"],
+        troughcolor=colors["surface_alt"],
+        bordercolor=colors["line"],
+        lightcolor=colors["accent"],
+        darkcolor=colors["accent"],
+        thickness=8,
+    )
+    style.configure(
         "Cyber.Treeview",
         background=colors["surface"],
         fieldbackground=colors["surface"],
@@ -538,6 +588,14 @@ class App:
         self.selected_path_var = tk.StringVar(value="")
         self.workspace_summary_var = tk.StringVar(value="0 个候选 · 0 个已选")
         self.backend_summary_var = tk.StringVar(value=standalone_backend_label())
+        self.scan_progress_detail_var = tk.StringVar(value="等待扫描")
+        self.scan_progress_value = tk.DoubleVar(value=0)
+        self.scan_progress_snapshot: dict = {}
+        self.scan_progress_started_at: float | None = None
+        self.scan_progress_after_id: str | None = None
+        self.scan_progress_lock = threading.Lock()
+        self.pending_scan_progress: dict | None = None
+        self.scan_progress_dispatch_scheduled = False
         self.config_vars = {}
         self.scan_items: list[dict] = []
         self.filtered_scan_items: list[dict] = []
@@ -562,8 +620,9 @@ class App:
         self._load_into_form(loaded_config)
         self.status_var.trace_add("write", self._on_status_change)
         remote_host = str(loaded_config.get("remote_host") or "").strip().lower()
-        first_run = not CONFIG_PATH.is_file() or remote_host in {"", "root@your-vps"}
-        if first_run and not CONFIG_PATH.is_file():
+        read_path = config_read_path()
+        first_run = not read_path.is_file() or remote_host in {"", "root@your-vps"}
+        if first_run and not read_path.is_file():
             self.config_vars["remote_host"].set("")
         self.toggle_form_panel(force=first_run)
         self._on_status_change()
@@ -690,6 +749,26 @@ class App:
         ttk.Label(status_frame, textvariable=self.workspace_summary_var, style="StatusMeta.TLabel").grid(
             row=0, column=1, sticky="e", padx=(12, 0)
         )
+        self.scan_progress_frame = ttk.Frame(status_frame, style="Status.TFrame")
+        self.scan_progress_frame.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+        self.scan_progress_frame.columnconfigure(0, weight=1)
+        self.scan_progress_bar = ttk.Progressbar(
+            self.scan_progress_frame,
+            variable=self.scan_progress_value,
+            maximum=100,
+            mode="indeterminate",
+            style="Scan.Horizontal.TProgressbar",
+            takefocus=False,
+        )
+        self.scan_progress_bar.grid(row=0, column=0, sticky="ew")
+        ttk.Label(
+            self.scan_progress_frame,
+            textvariable=self.scan_progress_detail_var,
+            style="StatusMeta.TLabel",
+            wraplength=920,
+            justify="left",
+        ).grid(row=1, column=0, sticky="w", pady=(3, 0))
+        self.scan_progress_frame.grid_remove()
 
         self.workspace_paned = tk.PanedWindow(
             self.workbench_tab,
@@ -1169,6 +1248,122 @@ class App:
         self._sync_action_states()
 
     @staticmethod
+    def _elapsed_text(seconds: float) -> str:
+        elapsed = max(0, int(seconds))
+        minutes, remaining = divmod(elapsed, 60)
+        return f"{minutes:02d}:{remaining:02d}"
+
+    @staticmethod
+    def _scan_progress_text(progress: dict) -> str:
+        phase = str(progress.get("phase") or "walking")
+        current_path = str(progress.get("current_path") or "")
+        directories = int(progress.get("directories_scanned") or 0)
+        files = int(progress.get("files_scanned") or 0)
+        candidates = int(progress.get("candidates_found") or 0)
+        if phase == "preparing":
+            summary = "正在准备远端扫描环境"
+        elif phase == "resolving":
+            processed = int(progress.get("processed_candidates") or 0)
+            total = int(progress.get("total_candidates") or 0)
+            operation = "探测媒体流" if progress.get("operation") == "ffprobe" else "识别候选"
+            summary = f"{operation}：已完成 {processed} / {total}"
+        elif phase == "complete":
+            total = int(progress.get("total_candidates") or candidates)
+            summary = f"扫描完成：遍历 {directories} 个目录、{files} 个文件，解析 {total} 个候选"
+        else:
+            root_index = int(progress.get("root_index") or 0)
+            root_total = int(progress.get("root_total") or 0)
+            root_text = f" · 根目录 {root_index}/{root_total}" if root_total else ""
+            summary = f"遍历中：{directories} 个目录 · {files} 个文件 · {candidates} 个候选{root_text}"
+        return f"{summary} · 当前：{current_path}" if current_path else summary
+
+    def begin_scan_progress(self) -> None:
+        self.scan_progress_started_at = time.monotonic()
+        self.scan_progress_snapshot = {"phase": "preparing"}
+        self.scan_progress_value.set(0)
+        self.scan_progress_bar.stop()
+        self.scan_progress_bar.configure(mode="indeterminate", maximum=100)
+        self.scan_progress_bar.start(50)
+        self.scan_progress_detail_var.set("正在准备远端扫描 · 已用时 00:00")
+        self.scan_progress_frame.grid()
+        if self.scan_progress_after_id is not None:
+            self.root.after_cancel(self.scan_progress_after_id)
+        self.scan_progress_after_id = self.root.after(500, self._tick_scan_progress)
+
+    def _tick_scan_progress(self) -> None:
+        self.scan_progress_after_id = None
+        if self.scan_progress_started_at is None:
+            return
+        detail = self._scan_progress_text(self.scan_progress_snapshot)
+        elapsed = self._elapsed_text(time.monotonic() - self.scan_progress_started_at)
+        self.scan_progress_detail_var.set(f"{detail} · 已用时 {elapsed}")
+        self.scan_progress_after_id = self.root.after(500, self._tick_scan_progress)
+
+    def update_scan_progress(self, progress: dict) -> None:
+        self.scan_progress_snapshot = dict(progress)
+        phase = str(progress.get("phase") or "walking")
+        if phase == "walking":
+            if str(self.scan_progress_bar.cget("mode")) != "indeterminate":
+                self.scan_progress_bar.stop()
+                self.scan_progress_bar.configure(mode="indeterminate")
+                self.scan_progress_bar.start(50)
+        else:
+            self.scan_progress_bar.stop()
+            self.scan_progress_bar.configure(mode="determinate")
+            processed = int(progress.get("processed_candidates") or 0)
+            total = int(progress.get("total_candidates") or 0)
+            value = 100 if phase == "complete" else (processed * 100 / total if total else 0)
+            self.scan_progress_value.set(min(100, max(0, value)))
+        if self.scan_progress_started_at is None:
+            self.scan_progress_started_at = time.monotonic()
+            self.scan_progress_frame.grid()
+        detail = self._scan_progress_text(progress)
+        elapsed = self._elapsed_text(time.monotonic() - self.scan_progress_started_at)
+        self.scan_progress_detail_var.set(f"{detail} · 已用时 {elapsed}")
+
+    def queue_scan_progress(self, progress: dict) -> None:
+        with self.scan_progress_lock:
+            self.pending_scan_progress = dict(progress)
+            if self.scan_progress_dispatch_scheduled:
+                return
+            self.scan_progress_dispatch_scheduled = True
+        self.root.after(0, self._dispatch_scan_progress)
+
+    def _dispatch_scan_progress(self) -> None:
+        with self.scan_progress_lock:
+            progress = self.pending_scan_progress
+            self.pending_scan_progress = None
+            self.scan_progress_dispatch_scheduled = False
+        if progress is not None:
+            self.update_scan_progress(progress)
+
+    def finish_scan_progress(self, state: str, message: str = "") -> None:
+        previous_mode = str(self.scan_progress_bar.cget("mode"))
+        self.scan_progress_bar.stop()
+        if self.scan_progress_after_id is not None:
+            self.root.after_cancel(self.scan_progress_after_id)
+            self.scan_progress_after_id = None
+        elapsed = "00:00"
+        if self.scan_progress_started_at is not None:
+            elapsed = self._elapsed_text(time.monotonic() - self.scan_progress_started_at)
+        self.scan_progress_started_at = None
+        if state == "success":
+            self.scan_progress_bar.configure(mode="determinate")
+            self.scan_progress_value.set(100)
+            detail = self._scan_progress_text(self.scan_progress_snapshot)
+        elif state == "cancelled":
+            self.scan_progress_bar.configure(mode="determinate")
+            if previous_mode == "indeterminate":
+                self.scan_progress_value.set(0)
+            detail = message or "扫描已取消"
+        else:
+            self.scan_progress_bar.configure(mode="determinate")
+            if previous_mode == "indeterminate":
+                self.scan_progress_value.set(0)
+            detail = message or "扫描失败，请查看日志"
+        self.scan_progress_detail_var.set(f"{detail} · 已用时 {elapsed}")
+
+    @staticmethod
     def _set_widget_enabled(widget: ttk.Widget, enabled: bool) -> None:
         widget.state(["!disabled"] if enabled else ["disabled"])
 
@@ -1392,6 +1587,117 @@ class App:
         if self.shell_cancel_event.is_set():
             raise TaskCancelledError("任务已取消。")
         return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+    def run_cancellable_scan_capture(
+        self,
+        command: list[str],
+        *,
+        env: dict[str, str],
+        progress_callback,
+        overall_timeout: int = SCAN_OVERALL_TIMEOUT,
+        idle_timeout: int = SCAN_IDLE_TIMEOUT,
+    ) -> subprocess.CompletedProcess[str]:
+        if self.shell_cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
+        creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
+        process = subprocess.Popen(
+            command,
+            cwd=str(APP_ROOT),
+            env=env,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+            bufsize=1,
+            creationflags=creationflags,
+            start_new_session=(os.name != "nt"),
+        )
+        self.process = process
+        output_queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        def read_stream(name: str, stream) -> None:
+            try:
+                for line in stream:
+                    output_queue.put((name, line))
+            finally:
+                output_queue.put((name, None))
+
+        assert process.stdout is not None
+        assert process.stderr is not None
+        readers = [
+            threading.Thread(target=read_stream, args=("stdout", process.stdout), daemon=True),
+            threading.Thread(target=read_stream, args=("stderr", process.stderr), daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+
+        started_at = time.monotonic()
+        last_activity = started_at
+        ended_streams: set[str] = set()
+        try:
+            while process.poll() is None or len(ended_streams) < 2:
+                if self.shell_cancel_event.is_set():
+                    self.terminate_shell_process(process)
+                    raise TaskCancelledError("任务已取消。")
+                now = time.monotonic()
+                if overall_timeout > 0 and now - started_at > overall_timeout:
+                    self.terminate_shell_process(process, force=True)
+                    raise RuntimeError(f"扫描超过总时限（{overall_timeout} 秒），已终止。")
+                if idle_timeout > 0 and now - last_activity > idle_timeout:
+                    self.terminate_shell_process(process, force=True)
+                    raise RuntimeError(f"扫描超过 {idle_timeout} 秒没有任何进度，已终止。")
+                try:
+                    stream_name, line = output_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    ended_streams.add(stream_name)
+                    continue
+                last_activity = time.monotonic()
+                if stream_name == "stderr":
+                    value = line.rstrip("\r\n")
+                    if value.startswith(SCAN_PROGRESS_PREFIX):
+                        try:
+                            progress = json.loads(value[len(SCAN_PROGRESS_PREFIX) :])
+                        except json.JSONDecodeError:
+                            stderr_lines.append(line)
+                        else:
+                            if isinstance(progress, dict):
+                                progress_callback(progress)
+                        continue
+                    stderr_lines.append(line)
+                else:
+                    stdout_lines.append(line)
+            returncode = process.wait(timeout=5)
+        finally:
+            if process.poll() is None:
+                self.terminate_shell_process(process, force=True)
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+            for reader in readers:
+                reader.join(timeout=1)
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+            if self.process is process:
+                self.process = None
+        if self.shell_cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
+        return subprocess.CompletedProcess(
+            command,
+            returncode,
+            "".join(stdout_lines),
+            "".join(stderr_lines),
+        )
 
     def clear_backend_task(self, backend: PTBDRemoteBackend) -> None:
         backend.close()
@@ -1817,7 +2123,7 @@ class App:
             f"export BDTOOL_SCAN_EXCLUDE_ROOTS_LINES={shlex.quote(chr(10).join(exclude_values))};"
             if exclude_values
             else "",
-            f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh",
+            f"exec {shlex.quote(remote_cmd)} scan-json --full --lang zh --progress-json",
             ]
         ).strip()
         return [
@@ -1831,6 +2137,19 @@ class App:
         ]
 
     def apply_scan_results(self, items: list[dict], *, auto_start: bool = False) -> None:
+        if hasattr(self, "scan_progress_bar") and self.scan_progress_snapshot.get("phase") != "complete":
+            final_progress = dict(self.scan_progress_snapshot)
+            total = int(final_progress.get("total_candidates") or len(items))
+            final_progress.update(
+                phase="complete",
+                operation="complete",
+                processed_candidates=total,
+                total_candidates=total,
+                current_path="",
+            )
+            self.update_scan_progress(final_progress)
+        if hasattr(self, "scan_progress_bar"):
+            self.finish_scan_progress("success")
         self.scan_items = list(items)
         self.checked_scan_paths = reconcile_checked_paths(self.scan_items, self.checked_scan_paths)
         if self.has_active_scan_filter():
@@ -1849,6 +2168,17 @@ class App:
         data = self.form_data()
         self.status_var.set("扫描中：正在从 VPS 获取候选列表")
         self.append_log("[gui] 开始通过 scan-json 获取 VPS 候选列表")
+        self.begin_scan_progress()
+
+        def post_progress(progress: dict) -> None:
+            self.queue_scan_progress(progress)
+
+        def post_scan_end(state: str, message: str) -> None:
+            def update() -> None:
+                self.finish_scan_progress(state, message)
+                self.status_var.set(message)
+
+            self.root.after(0, update)
 
         if backend_available():
             backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
@@ -1858,15 +2188,15 @@ class App:
                 try:
                     if data["remote_bootstrap"]:
                         self.log_queue.put("[gui] 空白 VPS 自举已开启：先尝试系统依赖自动安装，不够时才回退上传内置运行包")
-                    items = backend.scan_items()
+                    items = backend.scan_items(progress_callback=post_progress)
                     self.log_queue.put(f"[gui] scan-json 返回 {len(items)} 个候选")
                     self.root.after(0, lambda items=items: self.apply_scan_results(items, auto_start=auto_start))
                 except TaskCancelledError:
                     self.log_queue.put("[gui] 扫描已取消")
-                    self.root.after(0, lambda: self.status_var.set("扫描已取消"))
+                    post_scan_end("cancelled", "扫描已取消")
                 except Exception as exc:
                     self.log_queue.put(f"[gui] 获取候选失败：{exc}")
-                    self.root.after(0, lambda: self.status_var.set("获取候选失败：请看下方日志或打开日志文件"))
+                    post_scan_end("error", "获取候选失败：请看下方日志或打开日志文件")
                 finally:
                     self.clear_backend_task(backend)
 
@@ -1884,7 +2214,11 @@ class App:
                     self.log_queue.put(f"[gui] 远端运行包就绪：{remote_cmd}")
                 cmd = self.build_scan_command(data, remote_cmd)
                 env, askpass_path = self.build_ssh_env(data)
-                result = self.run_cancellable_capture(cmd, env=env, timeout=1800)
+                result = self.run_cancellable_scan_capture(
+                    cmd,
+                    env=env,
+                    progress_callback=post_progress,
+                )
                 if result.returncode != 0:
                     if result.stdout.strip():
                         self.log_queue.put("[gui] scan-json stdout:")
@@ -1907,10 +2241,10 @@ class App:
                 self.root.after(0, lambda items=items: self.apply_scan_results(items, auto_start=auto_start))
             except TaskCancelledError:
                 self.log_queue.put("[gui] 扫描已取消")
-                self.root.after(0, lambda: self.status_var.set("扫描已取消"))
+                post_scan_end("cancelled", "扫描已取消")
             except Exception as exc:
                 self.log_queue.put(f"[gui] 获取候选失败：{exc}")
-                self.root.after(0, lambda: self.status_var.set("获取候选失败：请看下方日志或打开日志文件"))
+                post_scan_end("error", "获取候选失败：请看下方日志或打开日志文件")
             finally:
                 if askpass_path:
                     try:
@@ -2354,6 +2688,9 @@ class App:
                 return
             self.stop_remote()
             time.sleep(0.2)
+        if self.scan_progress_after_id is not None:
+            self.root.after_cancel(self.scan_progress_after_id)
+            self.scan_progress_after_id = None
         self.root.destroy()
 
 
@@ -2384,9 +2721,9 @@ def run_ui_smoke_check() -> int:
             if widget_bottom > root_bottom + 1:
                 failures.append(f"{label}: {name} extends below the window")
         if app.scan_tree.winfo_height() < 70:
-            failures.append(f"{label}: candidates pane is too short")
+            failures.append(f"{label}: candidates pane is too short ({app.scan_tree.winfo_height()}px)")
         if app.log_view.winfo_height() < 60:
-            failures.append(f"{label}: log pane is too short")
+            failures.append(f"{label}: log pane is too short ({app.log_view.winfo_height()}px)")
 
     check_workbench("default")
     default_geometry = f"{root.winfo_width()}x{root.winfo_height()}"
@@ -2406,6 +2743,31 @@ def run_ui_smoke_check() -> int:
         failures.append("minimum: settings actions are not reachable by scrolling")
     if not isinstance(app.scan_button, ttk.Button) or not isinstance(app.start_button, ttk.Button):
         failures.append("primary actions are not native ttk buttons")
+    if not isinstance(app.scan_progress_bar, ttk.Progressbar):
+        failures.append("scan progress is not a native ttk progressbar")
+    app.toggle_form_panel(force=False)
+    app.begin_scan_progress()
+    app.update_scan_progress(
+        {
+            "phase": "resolving",
+            "processed_candidates": 2,
+            "total_candidates": 4,
+            "directories_scanned": 3,
+            "files_scanned": 8,
+            "candidates_found": 4,
+            "current_path": "/media/movie.mkv",
+            "operation": "ffprobe",
+        }
+    )
+    root.update_idletasks()
+    if not app.scan_progress_bar.winfo_viewable():
+        failures.append("scan progress is not visible while scanning")
+    if str(app.scan_progress_bar.cget("mode")) != "determinate" or int(app.scan_progress_value.get()) != 50:
+        failures.append("scan progress did not switch to resolved percentage")
+    check_workbench("minimum-progress")
+    app.finish_scan_progress("cancelled")
+    if int(app.scan_progress_value.get()) != 50:
+        failures.append("cancelled scan did not preserve completed percentage")
     root.destroy()
     if failures:
         print(f"ui_layout=FAIL default={default_geometry} minimum={minimum_geometry}: {'; '.join(failures)}")

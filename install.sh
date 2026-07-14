@@ -59,6 +59,10 @@ preflight_install_context() {
     "$SCRIPT_DIR/ptbd-start.sh"
     "$SCRIPT_DIR/ptbd-remote.sh"
     "$SCRIPT_DIR/ptbd-remote-start.sh"
+    "$SCRIPT_DIR/PT-ReleaseKit.sh"
+    "$SCRIPT_DIR/PT-ReleaseKit.desktop"
+    "$SCRIPT_DIR/PT-ReleaseKit.command"
+    "$SCRIPT_DIR/PT-ReleaseKit.bat"
     "$SCRIPT_DIR/PT-BDtool.sh"
     "$SCRIPT_DIR/PT-BDtool.desktop"
     "$SCRIPT_DIR/PT-BDtool.command"
@@ -300,6 +304,7 @@ post_install_self_check() {
     "$install_root/ptbd-start.sh"
     "$install_root/ptbd-remote.sh"
     "$install_root/ptbd-remote-start.sh"
+    "$install_root/PT-ReleaseKit.sh"
     "$install_root/PT-BDtool.sh"
     "$install_root/lib/ui.sh"
     "$install_root/scripts/remote-upload-server.py"
@@ -383,6 +388,10 @@ post_install_self_check() {
   fi
   if ! "$install_root/ptbd-start.sh" --help >/dev/null 2>&1; then
     err "self-check failed: $install_root/ptbd-start.sh --help"
+    fail=1
+  fi
+  if ! "$install_root/PT-ReleaseKit.sh" --help >/dev/null 2>&1; then
+    err "self-check failed: $install_root/PT-ReleaseKit.sh --help"
     fail=1
   fi
   if ! "$install_root/PT-BDtool.sh" --help >/dev/null 2>&1; then
@@ -595,10 +604,15 @@ copy_if_changed "$SCRIPT_DIR/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd_remote_
 copy_if_changed "$SCRIPT_DIR/ptbd-start.sh" "$INSTALL_ROOT/ptbd-start.sh" "ptbd-start.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote.sh" "ptbd-remote.sh"
 copy_if_changed "$SCRIPT_DIR/ptbd-remote-start.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "ptbd-remote-start.sh"
+copy_if_changed "$SCRIPT_DIR/PT-ReleaseKit.sh" "$INSTALL_ROOT/PT-ReleaseKit.sh" "PT-ReleaseKit.sh"
 copy_if_changed "$SCRIPT_DIR/PT-BDtool.sh" "$INSTALL_ROOT/PT-BDtool.sh" "PT-BDtool.sh"
 copy_if_changed "$SCRIPT_DIR/install.sh" "$INSTALL_ROOT/install.sh" "install.sh"
+copy_if_changed "$SCRIPT_DIR/PT-ReleaseKit.command" "$INSTALL_ROOT/PT-ReleaseKit.command" "PT-ReleaseKit.command"
+copy_if_changed "$SCRIPT_DIR/PT-ReleaseKit.bat" "$INSTALL_ROOT/PT-ReleaseKit.bat" "PT-ReleaseKit.bat"
+copy_if_changed "$SCRIPT_DIR/PT-ReleaseKit.desktop" "$INSTALL_ROOT/PT-ReleaseKit.desktop" "PT-ReleaseKit.desktop"
 copy_if_changed "$SCRIPT_DIR/PT-BDtool.command" "$INSTALL_ROOT/PT-BDtool.command" "PT-BDtool.command"
 copy_if_changed "$SCRIPT_DIR/PT-BDtool.bat" "$INSTALL_ROOT/PT-BDtool.bat" "PT-BDtool.bat"
+copy_if_changed "$SCRIPT_DIR/PT-BDtool.desktop" "$INSTALL_ROOT/PT-BDtool.desktop" "PT-BDtool.desktop"
 if [[ -f "$SCRIPT_DIR/README.md" ]]; then
   copy_if_changed "$SCRIPT_DIR/README.md" "$INSTALL_ROOT/README.md" "README.md"
 else
@@ -615,7 +629,7 @@ copy_if_changed "$SCRIPT_DIR/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/s
 copy_if_changed "$SCRIPT_DIR/scripts/audio-spectrum.py" "$INSTALL_ROOT/scripts/audio-spectrum.py" "scripts/audio-spectrum.py"
 copy_manifest_prefix "install" "ptbd_core/"
 sync_bundle "$SCRIPT_DIR/third_party/bundle/linux-amd64" "$INSTALL_ROOT/third_party/bundle/linux-amd64"
-chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool-legacy.sh" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-web" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/PT-BDtool.sh" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/audio-spectrum.py" "$INSTALL_ROOT/PT-BDtool.command" 2>/dev/null || true
+chmod +x "$INSTALL_ROOT/bdtool" "$INSTALL_ROOT/bdtool-legacy.sh" "$INSTALL_ROOT/bdtool.sh" "$INSTALL_ROOT/ptbd" "$INSTALL_ROOT/ptbd-gui" "$INSTALL_ROOT/ptbd-web" "$INSTALL_ROOT/ptbd-gui.py" "$INSTALL_ROOT/ptbd_remote_backend.py" "$INSTALL_ROOT/ptbd-start.sh" "$INSTALL_ROOT/ptbd-remote.sh" "$INSTALL_ROOT/ptbd-remote-start.sh" "$INSTALL_ROOT/PT-ReleaseKit.sh" "$INSTALL_ROOT/PT-ReleaseKit.command" "$INSTALL_ROOT/PT-ReleaseKit.desktop" "$INSTALL_ROOT/PT-BDtool.sh" "$INSTALL_ROOT/PT-BDtool.command" "$INSTALL_ROOT/PT-BDtool.desktop" "$INSTALL_ROOT/install.sh" "$INSTALL_ROOT/scripts/remote-upload-server.py" "$INSTALL_ROOT/scripts/prepare-remote-runtime.sh" "$INSTALL_ROOT/scripts/audio-spectrum.py" 2>/dev/null || true
 if [[ -f "$INSTALL_ROOT/scripts/ensure-bundle.py" ]]; then
   chmod +x "$INSTALL_ROOT/scripts/ensure-bundle.py"
 fi
@@ -632,23 +646,23 @@ install_desktop_launcher() {
   desktop_dir="$user_home/Desktop"
   [[ -d "$user_home/桌面" ]] && desktop_dir="$user_home/桌面"
   mkdir -p "$applications_dir"
-  launcher_path="$applications_dir/PT-BDtool.desktop"
+  launcher_path="$applications_dir/PT-ReleaseKit.desktop"
   cat > "$launcher_path" <<EOF
 [Desktop Entry]
 Version=1.0
 Type=Application
 Name=PT ReleaseKit
 Comment=PT media release material generator
-Exec=$install_root/PT-BDtool.sh
+Exec=$install_root/PT-ReleaseKit.sh
 Terminal=false
 StartupNotify=true
 Categories=Utility;
 EOF
   chmod +x "$launcher_path"
   if [[ -d "$desktop_dir" && -w "$desktop_dir" ]]; then
-    cp -f "$launcher_path" "$desktop_dir/PT-BDtool.desktop"
-    chmod +x "$desktop_dir/PT-BDtool.desktop"
-    log "installed desktop launcher: $desktop_dir/PT-BDtool.desktop"
+    cp -f "$launcher_path" "$desktop_dir/PT-ReleaseKit.desktop"
+    chmod +x "$desktop_dir/PT-ReleaseKit.desktop"
+    log "installed desktop launcher: $desktop_dir/PT-ReleaseKit.desktop"
   fi
   log "installed desktop launcher: $launcher_path"
 }
@@ -694,6 +708,3 @@ if [[ -t 0 && -t 1 ]]; then
 fi
 
 log "non-interactive terminal detected: skip auto launch"
-if [[ -f "$SCRIPT_DIR/PT-BDtool.desktop" ]]; then
-  copy_if_changed "$SCRIPT_DIR/PT-BDtool.desktop" "$INSTALL_ROOT/PT-BDtool.desktop" "PT-BDtool.desktop"
-fi

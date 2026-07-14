@@ -6,6 +6,7 @@ import queue
 import sys
 import threading
 import time
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -33,6 +34,25 @@ class GuiCancellationTests(unittest.TestCase):
         app.process = None
         app.shell_cancel_event = threading.Event()
         return app
+
+    def test_renamed_portable_config_reads_legacy_file_as_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            current = root / "PT-ReleaseKit-config.json"
+            legacy = root / "PT-BDtool-config.json"
+            legacy.write_text("{}\n", encoding="utf-8")
+            with (
+                mock.patch.object(self.gui, "CONFIG_PATH", current),
+                mock.patch.object(self.gui, "legacy_config_paths", return_value=(legacy,)),
+            ):
+                self.assertEqual(self.gui.config_read_path(), legacy)
+
+            current.write_text("{}\n", encoding="utf-8")
+            with (
+                mock.patch.object(self.gui, "CONFIG_PATH", current),
+                mock.patch.object(self.gui, "legacy_config_paths", return_value=(legacy,)),
+            ):
+                self.assertEqual(self.gui.config_read_path(), current)
 
     def test_shell_batch_continues_after_failure_and_records_retry_paths(self) -> None:
         class FakeProcess:
@@ -226,6 +246,54 @@ class GuiCancellationTests(unittest.TestCase):
         self.assertEqual(result.stdout, "中文路径\n")
         self.assertEqual(popen.call_args.kwargs["encoding"], "utf-8")
         self.assertEqual(popen.call_args.kwargs["errors"], "replace")
+
+    def test_scan_capture_streams_progress_without_polluting_result_json(self) -> None:
+        app = self.make_app()
+        progress = {
+            "phase": "resolving",
+            "processed_candidates": 1,
+            "total_candidates": 2,
+            "current_path": "/媒体/movie.ts",
+        }
+        progress_line = self.gui.SCAN_PROGRESS_PREFIX + self.gui.json.dumps(progress, ensure_ascii=False)
+        script = (
+            "import sys; "
+            f"sys.stderr.write({(progress_line + chr(10))!r}); sys.stderr.flush(); "
+            "sys.stdout.write('{\"items\": []}\\n'); sys.stdout.flush()"
+        )
+        events: list[dict] = []
+
+        result = app.run_cancellable_scan_capture(
+            [sys.executable, "-c", script],
+            env=os.environ.copy(),
+            progress_callback=events.append,
+            overall_timeout=5,
+            idle_timeout=2,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, '{"items": []}\n')
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(events, [progress])
+
+    def test_scan_progress_dispatch_coalesces_worker_updates(self) -> None:
+        app = self.make_app()
+        app.scan_progress_lock = threading.Lock()
+        app.pending_scan_progress = None
+        app.scan_progress_dispatch_scheduled = False
+        callbacks = []
+        app.root = mock.Mock()
+        app.root.after.side_effect = lambda _delay, callback: callbacks.append(callback)
+        app.update_scan_progress = mock.Mock()
+
+        app.queue_scan_progress({"phase": "walking", "directories_scanned": 1})
+        app.queue_scan_progress({"phase": "walking", "directories_scanned": 200})
+
+        self.assertEqual(len(callbacks), 1)
+        callbacks[0]()
+        app.update_scan_progress.assert_called_once_with(
+            {"phase": "walking", "directories_scanned": 200}
+        )
 
     def test_new_shell_batch_clears_stale_retry_state_before_worker(self) -> None:
         class FakeThread:
