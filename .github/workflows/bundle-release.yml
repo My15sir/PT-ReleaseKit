@@ -73,12 +73,12 @@ jobs:
           bash scripts/build-bundle.sh
           (cd dist && sha256sum --check PT-ReleaseKit-linux-amd64.tar.gz.sha256)
           tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
-            | grep -qx 'PT-ReleaseKit-linux-amd64/PT-ReleaseKit.sh'
+            | grep -x 'PT-ReleaseKit-linux-amd64/PT-ReleaseKit.sh' >/dev/null
           tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
-            | grep -qx 'PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py'
+            | grep -x 'PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py' >/dev/null
           tar -xOzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
             PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py \
-            | grep -q 'progress_callback'
+            | grep 'progress_callback' >/dev/null
 
       - name: Publish Linux bundle release
         uses: ncipollo/release-action@v1
