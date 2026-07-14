@@ -293,3 +293,12 @@ jobs:
             说明：
             - 本项目为 AI 生成项目
             - 不接受反馈，不做答疑，不单独适配个别环境
+
+      - name: Move release tag to this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/portable-latest" \
+            -f sha="$GITHUB_SHA" \
+            -F force=true

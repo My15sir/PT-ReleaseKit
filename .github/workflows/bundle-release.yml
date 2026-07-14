@@ -78,3 +78,12 @@ jobs:
             归档同时发布 SHA256 sidecar，控制端下载时会强制校验。
             主要给控制端打包和源码仓库按需下载使用。
             普通用户请优先使用 `portable-latest` 里的成品包。
+
+      - name: Move release tag to this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/bundle-latest" \
+            -f sha="$GITHUB_SHA" \
+            -F force=true

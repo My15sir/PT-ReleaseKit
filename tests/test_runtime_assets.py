@@ -71,6 +71,23 @@ class RuntimeAssetManifestTests(unittest.TestCase):
                 self.assertIn("ptbd_core/**", source)
                 self.assertIn("scripts/audio-spectrum.py", source)
 
+    def test_release_workflows_move_mutable_tags_after_asset_publish(self) -> None:
+        workflows = {
+            ".github/workflows/bundle-release.yml": "bundle-latest",
+            ".github/workflows/controller-build.yml": "portable-latest",
+        }
+        for relative_path, tag in workflows.items():
+            source = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+            release_step = "uses: ncipollo/release-action@v1"
+            tag_update = f"git/refs/tags/{tag}"
+            with self.subTest(workflow=relative_path):
+                self.assertIn(tag_update, source)
+                self.assertIn("GH_TOKEN: ${{ github.token }}", source)
+                self.assertIn("--method PATCH", source)
+                self.assertIn('-f sha="$GITHUB_SHA"', source)
+                self.assertIn("-F force=true", source)
+                self.assertLess(source.index(release_step), source.index(tag_update))
+
 
 if __name__ == "__main__":
     unittest.main()
