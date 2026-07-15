@@ -61,6 +61,8 @@ class BrandingContractTests(unittest.TestCase):
         self.assertIn("sha256sum --check PT-ReleaseKit-linux-amd64.tar.gz.sha256", portable_workflow)
         self.assertIn("ditto -c -k --sequesterRsrc --keepParent", portable_workflow)
         self.assertIn("codesign --verify --deep --strict", portable_workflow)
+        self.assertIn("quick_start_name: README-FIRST.txt", portable_workflow)
+        self.assertIn('for required in ("本机电脑", "/home", "ffmpeg", "图床上传默认关闭")', portable_workflow)
 
     def test_compose_passes_documented_image_host_http_opt_in(self) -> None:
         compose = source("compose.yaml")

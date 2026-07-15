@@ -79,7 +79,7 @@ jobs:
             archive_format: zip
             package_layout: app-bundle
             smoke_path: dist/controller-app/macos/PT-ReleaseKit.app/Contents/MacOS/PT-ReleaseKit
-            quick_start_name: 打开前先看.txt
+            quick_start_name: README-FIRST.txt
             quick_start_title: PT ReleaseKit macOS 快速开始
             quick_start_body: |
               1. 双击 PT-ReleaseKit.app；若被拦住，请右键应用后点“打开”
@@ -298,6 +298,19 @@ jobs:
             "$verify_dir/PT-ReleaseKit" --self-check
             "$verify_dir/PT-ReleaseKit" --core-cli version
           fi
+          python - <<'PY'
+          from pathlib import Path
+
+          verify_dir = Path("artifact/verify-${{ matrix.label }}")
+          expected_name = r"${{ matrix.quick_start_name }}"
+          matches = list(verify_dir.rglob(expected_name))
+          if len(matches) != 1:
+              raise SystemExit(f"expected one {expected_name!r}, found: {matches}")
+          quick_start = matches[0].read_text(encoding="utf-8")
+          for required in ("本机电脑", "/home", "ffmpeg", "图床上传默认关闭"):
+              if required not in quick_start:
+                  raise SystemExit(f"quick-start file is missing {required!r}")
+          PY
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
