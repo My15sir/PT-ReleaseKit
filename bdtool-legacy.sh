@@ -864,9 +864,7 @@ collect_results() {
         roots+=("$target_root")
       elif [[ -n "${SSH_CONNECTION:-}" ]]; then
         bounded_remote_default=1
-        for item in /home; do
-          [[ -d "$item" ]] && roots+=("$item")
-        done
+        [[ -d /home ]] && roots+=("/home")
       else
         roots+=("/")
       fi
