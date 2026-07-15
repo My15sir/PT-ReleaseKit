@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest import mock
 
 from ptbd_core.models import MediaType
-from ptbd_core.scanner import resolve_candidate, scan, scan_json
+from ptbd_core.scanner import _scan_roots, resolve_candidate, scan, scan_json
 
 
 class ScannerTests(unittest.TestCase):
@@ -108,6 +108,65 @@ class ScannerTests(unittest.TestCase):
         self.touch(self.root / "movie.mkv")
 
         self.assertEqual(scan(self.root, full=True, include_roots=[]), [])
+
+    def test_remote_fallback_scans_only_regular_user_homes(self) -> None:
+        with mock.patch.object(
+            Path,
+            "is_dir",
+            autospec=True,
+            side_effect=lambda path: path in {Path("/home"), Path("/data")},
+        ):
+            roots = _scan_roots(
+                Path("/"),
+                include_roots=None,
+                full=True,
+                remote_session=True,
+            )
+
+        self.assertEqual(roots, [Path("/home")])
+
+    def test_remote_explicit_include_can_enable_non_default_root(self) -> None:
+        with mock.patch.object(
+            Path,
+            "is_dir",
+            autospec=True,
+            side_effect=lambda path: path == Path("/data"),
+        ):
+            roots = _scan_roots(
+                Path("/"),
+                include_roots=["/data"],
+                full=True,
+                remote_session=True,
+            )
+
+        self.assertEqual(roots, [Path("/data")])
+
+    def test_remote_default_does_not_fall_back_to_root_when_home_is_missing(self) -> None:
+        with mock.patch.object(Path, "is_dir", autospec=True, return_value=False):
+            roots = _scan_roots(
+                Path("/"),
+                include_roots=None,
+                full=True,
+                remote_session=True,
+            )
+
+        self.assertEqual(roots, [])
+
+    def test_remote_explicit_root_enables_full_filesystem_scan(self) -> None:
+        with mock.patch.object(
+            Path,
+            "is_dir",
+            autospec=True,
+            side_effect=lambda path: path == Path("/"),
+        ):
+            roots = _scan_roots(
+                Path("/"),
+                include_roots=["/"],
+                full=True,
+                remote_session=True,
+            )
+
+        self.assertEqual(roots, [Path("/")])
 
     def test_scan_json_has_legacy_shape_and_english_labels(self) -> None:
         media = self.touch(self.root / "movie.mp4")

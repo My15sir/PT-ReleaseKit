@@ -218,6 +218,78 @@ class RemoteShellScanRootTests(unittest.TestCase):
             {str(first_movie), str(second_movie)},
         )
 
+    def test_legacy_remote_default_scans_only_home(self) -> None:
+        find_roots = self.root / "find-roots.txt"
+        self._write_executable(
+            self.fake_bin / "find",
+            """
+            #!/usr/bin/env bash
+            printf '%s\n' "${1:-}" >> "$PTBD_TEST_FIND_ROOTS"
+            """,
+        )
+        env = {
+            **os.environ,
+            "PATH": f"{self.fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            "SSH_CONNECTION": "client 12345 server 22",
+            "BDTOOL_SCAN_FULL_ROOT": "/",
+            "PTBD_TEST_FIND_ROOTS": str(find_roots),
+        }
+        for name in (
+            "BDTOOL_SCAN_INCLUDE_ROOTS",
+            "BDTOOL_SCAN_INCLUDE_ROOTS_JSON",
+            "BDTOOL_SCAN_INCLUDE_ROOTS_LINES",
+        ):
+            env.pop(name, None)
+
+        result = subprocess.run(
+            [str(PROJECT_ROOT / "bdtool-legacy.sh"), "scan-json", "--full", "--lang", "en"],
+            cwd=PROJECT_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"items": []})
+        self.assertTrue(find_roots.is_file())
+        self.assertEqual(set(find_roots.read_text(encoding="utf-8").splitlines()), {"/home"})
+
+    def test_legacy_remote_explicit_root_enables_full_scan(self) -> None:
+        find_roots = self.root / "find-roots.txt"
+        self._write_executable(
+            self.fake_bin / "find",
+            """
+            #!/usr/bin/env bash
+            printf '%s\n' "${1:-}" >> "$PTBD_TEST_FIND_ROOTS"
+            """,
+        )
+        env = {
+            **os.environ,
+            "PATH": f"{self.fake_bin}{os.pathsep}{os.environ.get('PATH', '')}",
+            "SSH_CONNECTION": "client 12345 server 22",
+            "BDTOOL_SCAN_FULL_ROOT": "/",
+            "BDTOOL_SCAN_INCLUDE_ROOTS": "/",
+            "BDTOOL_SCAN_INCLUDE_ROOTS_LINES": "/",
+            "PTBD_TEST_FIND_ROOTS": str(find_roots),
+        }
+        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS_JSON", None)
+
+        result = subprocess.run(
+            [str(PROJECT_ROOT / "bdtool-legacy.sh"), "scan-json", "--full", "--lang", "en"],
+            cwd=PROJECT_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=15,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"items": []})
+        self.assertEqual(set(find_roots.read_text(encoding="utf-8").splitlines()), {"/"})
+
 
 if __name__ == "__main__":
     unittest.main()

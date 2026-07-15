@@ -74,18 +74,190 @@ class WebInterfaceTests(unittest.TestCase):
                 "local_root": "/media",
                 "save_dir": "/output",
                 "remote_password": "secret-value",
+                "image_host_enabled": True,
+                "image_host_provider": "imgbb",
+                "image_host_token": "image-secret",
             },
         )
         self.assertTrue(saved["ok"])
         self.assertEqual(saved["config"]["remote_password"], "")
         self.assertTrue(saved["config"]["password_saved"])
+        self.assertEqual(saved["config"]["image_host_token"], "")
+        self.assertTrue(saved["config"]["image_host_token_saved"])
         self.assertNotIn("secret-value", json.dumps(saved, ensure_ascii=False))
+        self.assertNotIn("image-secret", json.dumps(saved, ensure_ascii=False))
 
         loaded = self.request_json("/api/config")
         self.assertEqual(loaded["config"]["remote_password"], "")
         self.assertTrue(loaded["config"]["password_saved"])
+        self.assertTrue(loaded["config"]["image_host_token_saved"])
         mode = stat.S_IMODE(self.web.CONFIG_PATH.stat().st_mode)
         self.assertEqual(mode, 0o600)
+
+    def test_image_host_report_is_exposed_without_becoming_a_process_failure(self) -> None:
+        task = self.web.WebTask("process")
+        report = mock.Mock()
+        report.cancelled = False
+        report.error = ""
+        report.success_count = 2
+        report.failed_count = 1
+        report.attempted_count = 3
+        report.urls = ("https://img.example/1.png", "https://img.example/2.png")
+        report.to_dict.return_value = {
+            "archive": "/output/Movie.zip",
+            "success_count": 2,
+            "failed_count": 1,
+            "attempted_count": 3,
+            "urls": list(report.urls),
+            "error": "",
+        }
+        config = {
+            "image_host_enabled": True,
+            "image_host_token": "never-log-this",
+        }
+
+        with mock.patch.object(self.web, "upload_archive_images", return_value=report) as uploader:
+            self.web.upload_archive_images_for_task(task, config, "/output/Movie.zip")
+
+        should_cancel = uploader.call_args.kwargs["should_cancel"]
+        progress_callback = uploader.call_args.kwargs["progress_callback"]
+        self.assertFalse(should_cancel())
+        progress_callback(2, 3, "正在上传 3/3: frame.png")
+
+        public = task.to_public()
+        self.assertEqual(public["image_uploads"], [report.to_dict.return_value])
+        self.assertIn("图床上传：成功 2 / 失败 1 / 共 3", "\n".join(public["logs"]))
+        self.assertIn("图床上传进度：2/3 · 正在上传 3/3: frame.png", "\n".join(public["logs"]))
+        self.assertNotIn("never-log-this", json.dumps(public, ensure_ascii=False))
+
+    def test_cancelled_image_upload_preserves_local_archive_and_finishes_cancelled(self) -> None:
+        root = Path(self.temporary.name)
+        media_root = root / "media"
+        source = media_root / "Movie" / "movie.mkv"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"video")
+        save_dir = root / "output"
+        archive = save_dir / "Movie.zip"
+        runtime_dir = root / "runtime"
+        config = self.web.DEFAULT_CONFIG.copy()
+        config.update(
+            {
+                "mode": "local",
+                "local_root": str(media_root),
+                "save_dir": str(save_dir),
+                "image_host_enabled": True,
+                "image_host_token": "secret",
+            }
+        )
+        task = self.web.WebTask(kind="process")
+        report = mock.Mock()
+        report.cancelled = True
+        report.error = ""
+        report.to_dict.return_value = {"archive": str(archive), "cancelled": True}
+
+        def fake_process(command, _env, _task, *, output_lines=None):
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            archive.write_bytes(b"zip")
+            self.assertIsNotNone(output_lines)
+            output_lines.append(
+                serialize_return_record(ReturnResult(mode="local", destination=str(archive)))
+            )
+            return 0
+
+        with (
+            mock.patch.dict(os.environ, {"BDTOOL_DATA_DIR": str(runtime_dir)}),
+            mock.patch.object(self.web, "run_process_stream", side_effect=fake_process),
+            mock.patch.object(self.web, "upload_archive_images", return_value=report) as uploader,
+        ):
+            self.web.run_process_task(task, config, [str(source)])
+
+        state = task.to_public()
+        self.assertEqual(state["status"], "cancelled")
+        self.assertEqual(state["outputs"], [str(archive.resolve())])
+        self.assertEqual(state["image_uploads"], [report.to_dict.return_value])
+        self.assertIn("本地结果包已保存", "\n".join(state["logs"]))
+        self.assertIn("图床上传已取消", "\n".join(state["logs"]))
+        self.assertNotIn("完成本地处理", "\n".join(state["logs"]))
+        self.assertNotIn("处理完成：成功", "\n".join(state["logs"]))
+        self.assertTrue(callable(uploader.call_args.kwargs["should_cancel"]))
+
+    def test_cancel_after_upload_helper_returns_cannot_finish_success(self) -> None:
+        root = Path(self.temporary.name)
+        media_root = root / "media"
+        source = media_root / "Movie" / "movie.mkv"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"video")
+        archive = root / "output" / "Movie.zip"
+        config = self.web.DEFAULT_CONFIG.copy()
+        config.update({"mode": "local", "local_root": str(media_root), "save_dir": str(archive.parent)})
+        task = self.web.WebTask(kind="process")
+
+        def fake_process(command, _env, _task, *, output_lines=None):
+            archive.parent.mkdir(parents=True, exist_ok=True)
+            archive.write_bytes(b"zip")
+            output_lines.append(
+                serialize_return_record(ReturnResult(mode="local", destination=str(archive)))
+            )
+            return 0
+
+        def cancel_after_upload(_task, _config, _archive):
+            task.cancel()
+
+        with (
+            mock.patch.object(self.web, "run_process_stream", side_effect=fake_process),
+            mock.patch.object(
+                self.web,
+                "upload_archive_images_for_task",
+                side_effect=cancel_after_upload,
+            ),
+        ):
+            self.web.run_process_task(task, config, [str(source)])
+
+        state = task.to_public()
+        self.assertEqual(state["status"], "cancelled")
+        self.assertNotIn("完成本地处理", "\n".join(state["logs"]))
+
+    def test_cancel_after_batch_summary_cannot_finish_success(self) -> None:
+        config = self.web.DEFAULT_CONFIG.copy()
+        config.update({"mode": "remote", "save_dir": "/output"})
+        task = self.web.WebTask(kind="process")
+        original_summarize = task.summarize_batch
+
+        def summarize_then_cancel(total: int):
+            summary = original_summarize(total)
+            task.cancel()
+            return summary
+
+        task.summarize_batch = summarize_then_cancel  # type: ignore[method-assign]
+        with (
+            mock.patch.object(self.web, "backend_available", return_value=False),
+            mock.patch.object(self.web, "run_process_stream", return_value=0),
+        ):
+            self.web.run_process_task(task, config, ["/media/movie.mkv"])
+
+        self.assertEqual(task.to_public()["status"], "cancelled")
+
+    def test_cancel_during_final_state_snapshot_cannot_finish_success(self) -> None:
+        config = self.web.DEFAULT_CONFIG.copy()
+        config.update({"mode": "local", "save_dir": "/output"})
+        task = self.web.WebTask(kind="process")
+        original_to_public = task.to_public
+        snapshot_calls = 0
+
+        def snapshot_then_cancel():
+            nonlocal snapshot_calls
+            state = original_to_public()
+            snapshot_calls += 1
+            if snapshot_calls == 1:
+                task.cancel()
+            return state
+
+        task.to_public = snapshot_then_cancel  # type: ignore[method-assign]
+        with mock.patch.object(self.web, "local_process_paths") as process_paths:
+            process_paths.side_effect = lambda _config, paths, current: current.summarize_batch(len(paths))
+            self.web.run_process_task(task, config, ["/media/movie.mkv"])
+
+        self.assertEqual(original_to_public()["status"], "cancelled")
 
     def test_status_exposes_active_task_for_page_refresh_recovery(self) -> None:
         task, active = self.web.TASK_REGISTRY.reserve("process")
@@ -558,7 +730,7 @@ class WebInterfaceTests(unittest.TestCase):
             json.loads(env["BDTOOL_SCAN_INCLUDE_ROOTS_JSON"]),
             [str((cwd / "relative-media").resolve()), str((cwd / "relative-extra").resolve())],
         )
-        self.assertEqual(env["BDTOOL_DOWNLOAD_DIR"], "relative-output")
+        self.assertEqual(env["BDTOOL_DOWNLOAD_DIR"], str(Path("relative-output").resolve()))
 
     def test_local_structured_roots_preserve_spaces(self) -> None:
         config = self.web.DEFAULT_CONFIG.copy()

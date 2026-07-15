@@ -239,9 +239,37 @@ class RemoteBackendHostKeyTests(unittest.TestCase):
         controller = self.make_backend()
         controller.config["scan_full"] = False
 
+        self.assertEqual(backend.preferred_scan_roots_text(), "/home")
+        self.assertEqual(backend.build_effective_scan_include(controller.config), "/home")
+
+    def test_diagnose_reports_safe_default_root(self) -> None:
+        controller = self.make_backend()
+        remote_info = backend.RemoteSystemInfo(os_name="Linux", distro_id="debian", arch="x86_64")
+
+        with (
+            mock.patch.object(controller, "connect"),
+            mock.patch.object(controller, "probe_remote_system", return_value=remote_info),
+            mock.patch.object(controller, "ensure_sftp"),
+        ):
+            report = controller.diagnose_connection()
+
+        self.assertTrue(report["ok"])
+        self.assertEqual(report["scan_mode"], "preferred")
+        self.assertEqual(report["scan_roots"], "/home")
+        self.assertTrue(any("默认扫描优先目录：/home" in hint for hint in report["hints"]))
+
+    def test_explicit_vps_roots_remain_available(self) -> None:
+        controller = self.make_backend()
+        controller.config.update(
+            {
+                "scan_full": False,
+                "scan_include": "/root /data /mnt /media /srv",
+            }
+        )
+
         self.assertEqual(
             backend.build_effective_scan_include(controller.config),
-            backend.preferred_scan_roots_text(),
+            "/root /data /mnt /media /srv",
         )
 
     def test_diagnose_reports_explicit_whitelist_over_full_scan(self) -> None:

@@ -16,6 +16,7 @@ from tkinter import BOTH, END, LEFT, W, X, filedialog, messagebox, ttk
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter.scrolledtext import ScrolledText
+from typing import Callable
 
 from ptbd_core.config import default_config as core_default_config
 from ptbd_core.config import default_save_dir as core_default_save_dir
@@ -24,6 +25,15 @@ from ptbd_core.config import normalize_remote_connection
 from ptbd_core.config import normalize_scan_roots
 from ptbd_core.config import save_config as core_save_config
 from ptbd_core.config import split_path_roots
+from ptbd_core.cli import main as core_cli_main
+from ptbd_core.image_hosts import ImageHostReport, upload_archive_images
+from ptbd_core.local_runtime import (
+    build_local_cli_command,
+    build_local_runtime_env,
+    ensure_local_path_allowed,
+    local_dependency_report,
+    parse_local_archive,
+)
 from ptbd_core.runtime_assets import AssetManifestError, validate_profile
 from ptbd_remote_backend import (
     PTBDRemoteBackend,
@@ -41,7 +51,7 @@ LEGACY_APP_NAME = "PT-BDtool"
 SCAN_PROGRESS_PREFIX = "PTBD_SCAN_PROGRESS\t"
 SCAN_OVERALL_TIMEOUT = 1800
 SCAN_IDLE_TIMEOUT = 120
-WORKFLOW_STEPS = ("连接", "扫描", "选择", "生成")
+WORKFLOW_STEPS = ("位置", "扫描", "选择", "生成")
 UI_COLORS = {
     "bg": "#f2f5f6",
     "surface": "#ffffff",
@@ -575,7 +585,7 @@ def configure_gradient_theme(root: tk.Tk) -> None:
 class App:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
-        self.root.title(f"{PRODUCT_NAME} 远程材料工作台")
+        self.root.title(f"{PRODUCT_NAME} 材料工作台")
         self.root.geometry("1040x760")
         self.root.minsize(820, 710)
         self.process: subprocess.Popen[str] | None = None
@@ -584,7 +594,7 @@ class App:
         self.backend: PTBDRemoteBackend | None = None
         self.backend_thread: threading.Thread | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self.status_var = tk.StringVar(value="就绪：确认 VPS 连接后扫描候选，再勾选需要生成材料的条目")
+        self.status_var = tk.StringVar(value="就绪：选择本机电脑或远端 VPS，扫描后勾选需要生成材料的条目")
         self.selected_path_var = tk.StringVar(value="")
         self.workspace_summary_var = tk.StringVar(value="0 个候选 · 0 个已选")
         self.backend_summary_var = tk.StringVar(value=standalone_backend_label())
@@ -601,7 +611,7 @@ class App:
         self.filtered_scan_items: list[dict] = []
         self.auto_start_after_scan = False
         self.form_expanded = tk.BooleanVar(value=False)
-        self.summary_host_var = tk.StringVar(value="VPS：未配置")
+        self.summary_host_var = tk.StringVar(value="处理位置：未配置")
         self.summary_save_var = tk.StringVar(value="保存目录：未配置")
         self.filter_type_var = tk.StringVar(value="全部类型")
         self.filter_keyword_var = tk.StringVar(value="")
@@ -610,19 +620,29 @@ class App:
         self.path_tooltip_label: tk.Label | None = None
         self.tooltip_item: str | None = None
         self.tooltip_after_id: str | None = None
+        self.last_scan_click_item: str | None = None
+        self.last_scan_click_time = -1000
         self.tree_font = tkfont.nametofont("TkDefaultFont")
         self.scan_context_menu: tk.Menu | None = None
         self.last_failed_paths: list[str] = []
         self.last_success_paths: list[str] = []
+        self.last_image_links: list[str] = []
+        self.image_host_provider_token_reset = False
+        self.current_mode = "remote"
+        self.config_fields: dict[str, tuple[ttk.Frame, ttk.Entry]] = {}
+        self.remote_only_widgets: list[tk.Misc] = []
+        self.local_only_widgets: list[tk.Misc] = []
+        self.image_host_widgets: list[tk.Misc] = []
         self.workflow_step_widgets: list[tuple[tk.Frame, tk.Label, tk.Label]] = []
         self._build_ui()
         loaded_config = load_config()
         self._load_into_form(loaded_config)
         self.status_var.trace_add("write", self._on_status_change)
+        mode = str(loaded_config.get("mode") or "remote").strip().lower()
         remote_host = str(loaded_config.get("remote_host") or "").strip().lower()
         read_path = config_read_path()
-        first_run = not read_path.is_file() or remote_host in {"", "root@your-vps"}
-        if first_run and not read_path.is_file():
+        first_run = not read_path.is_file() or (mode == "remote" and remote_host in {"", "root@your-vps"})
+        if first_run and not read_path.is_file() and mode == "remote":
             self.config_vars["remote_host"].set("")
         self.toggle_form_panel(force=first_run)
         self._on_status_change()
@@ -649,7 +669,7 @@ class App:
         ).pack(anchor="w")
         tk.Label(
             title_group,
-            text="远程材料工作台 · 扫描、生成、回传在一个窗口完成",
+            text="本机或远端扫描、生成与图床链接在一个窗口完成",
             bg=colors["header"],
             fg=colors["header_muted"],
             font=(ui_font_families()[0], 9),
@@ -720,12 +740,12 @@ class App:
         summary_actions.grid(row=0, column=1, sticky="e", padx=(12, 0))
         self.form_toggle_button = ttk.Button(
             summary_actions,
-            text="编辑连接",
+            text="位置与设置",
             command=self.toggle_form_panel,
             style="Action.TButton",
         )
         self.form_toggle_button.grid(row=0, column=0, padx=(0, 7))
-        ttk.Button(summary_actions, text="保存连接", command=self.save_form, style="Action.TButton").grid(
+        ttk.Button(summary_actions, text="保存设置", command=self.save_form, style="Action.TButton").grid(
             row=0, column=1, padx=(0, 7)
         )
         self.test_button = ttk.Button(
@@ -784,8 +804,10 @@ class App:
 
         candidate_panel = ttk.Frame(self.workspace_paned, style="Surface.TFrame", padding=(12, 10))
         activity_panel = ttk.Frame(self.workspace_paned, style="Surface.TFrame", padding=(12, 10))
+        self.candidate_panel = candidate_panel
+        self.activity_panel = activity_panel
         self.workspace_paned.add(candidate_panel, minsize=220, stretch="always")
-        self.workspace_paned.add(activity_panel, minsize=166, stretch="never")
+        self.workspace_paned.add(activity_panel, minsize=180, stretch="never")
 
         candidate_head = ttk.Frame(candidate_panel, style="SurfaceBody.TFrame")
         candidate_head.pack(fill=X, pady=(0, 8))
@@ -793,7 +815,8 @@ class App:
         self.candidate_head = candidate_head
         candidate_title = ttk.Frame(candidate_head, style="SurfaceBody.TFrame")
         candidate_title.grid(row=0, column=0, sticky="w")
-        ttk.Label(candidate_title, text="VPS 候选", style="SectionTitle.TLabel").pack(anchor=W)
+        self.candidate_title_var = tk.StringVar(value="媒体候选")
+        ttk.Label(candidate_title, textvariable=self.candidate_title_var, style="SectionTitle.TLabel").pack(anchor=W)
         self.candidate_hint = ttk.Label(
             candidate_title,
             text="勾选一个或多个条目，再生成并回传材料包",
@@ -859,10 +882,16 @@ class App:
         ).grid(row=0, column=5, padx=(0, 7))
         ttk.Button(
             filter_bar,
+            text="只选当前",
+            command=self.select_only_current_scan_item,
+            style="Action.TButton",
+        ).grid(row=0, column=6, padx=(0, 7))
+        ttk.Button(
+            filter_bar,
             text="清空勾选",
             command=self.clear_checked_scan_items,
             style="Action.TButton",
-        ).grid(row=0, column=6)
+        ).grid(row=0, column=7)
 
         scan_list = ttk.Frame(candidate_panel, style="SurfaceBody.TFrame")
         scan_list.pack(fill=BOTH, expand=True)
@@ -871,7 +900,7 @@ class App:
             scan_list,
             columns=columns,
             show="headings",
-            height=8,
+            height=12,
             style="Cyber.Treeview",
             selectmode="browse",
             takefocus=True,
@@ -945,6 +974,13 @@ class App:
         ttk.Button(log_actions, text="日志文件", command=self.open_log_file, style="Action.TButton").grid(
             row=0, column=3
         )
+        self.copy_image_links_button = ttk.Button(
+            log_actions,
+            text="复制图床 BBCode",
+            command=self.copy_image_links,
+            style="Action.TButton",
+        )
+        self.copy_image_links_button.grid(row=0, column=4, padx=(7, 0))
         self.log_view = ScrolledText(
             activity_panel,
             wrap="word",
@@ -998,10 +1034,10 @@ class App:
         settings_head.columnconfigure(0, weight=1)
         settings_title = ttk.Frame(settings_head, style="SurfaceBody.TFrame")
         settings_title.grid(row=0, column=0, sticky="w")
-        ttk.Label(settings_title, text="连接与保存设置", style="SectionTitle.TLabel").pack(anchor=W)
+        ttk.Label(settings_title, text="处理位置与保存设置", style="SectionTitle.TLabel").pack(anchor=W)
         ttk.Label(
             settings_title,
-            text="首次使用先填写 VPS；低频扫描规则留在这里，不占用工作台空间",
+            text="可以直接处理本机媒体，也可以连接保存媒体的 VPS",
             style="SummaryHint.TLabel",
         ).pack(anchor=W, pady=(2, 0))
         ttk.Button(
@@ -1014,22 +1050,62 @@ class App:
         self.form_details = ttk.Frame(settings_shell, style="SurfaceBody.TFrame")
         self.form_details.pack(fill=BOTH, expand=True)
         form = self.form_details
-        self._add_compact_entry(form, "VPS 地址", "remote_host", 0, 0, "例如：root@1.2.3.4")
-        self._add_compact_entry(form, "SSH 端口", "remote_port", 0, 1, "默认 22")
-        self._add_compact_entry(form, "SSH 密码", "remote_password", 1, 0, "留空表示使用密钥", show="*")
-        self._add_compact_entry(form, "远端命令", "remote_cmd", 1, 1, "通常保持 pt")
+        location_group = ttk.Frame(form, style="Soft.TFrame", padding=(12, 9))
+        location_group.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 5))
+        ttk.Label(location_group, text="媒体所在位置", style="Field.TLabel").pack(side=tk.LEFT)
+        self.config_vars["mode"] = tk.StringVar(value="remote")
+        ttk.Radiobutton(
+            location_group,
+            text="远端 VPS",
+            variable=self.config_vars["mode"],
+            value="remote",
+            command=self.update_mode_ui,
+        ).pack(side=tk.LEFT, padx=(18, 8))
+        ttk.Radiobutton(
+            location_group,
+            text="本机电脑",
+            variable=self.config_vars["mode"],
+            value="local",
+            command=self.update_mode_ui,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+
+        remote_host_field = self._add_compact_entry(
+            form, "VPS 地址", "remote_host", 1, 0, "例如：root@1.2.3.4"
+        )
+        remote_port_field = self._add_compact_entry(form, "SSH 端口", "remote_port", 1, 1, "默认 22")
+        remote_password_field = self._add_compact_entry(
+            form, "SSH 密码", "remote_password", 2, 0, "留空表示使用密钥", show="*"
+        )
+        remote_cmd_field = self._add_compact_entry(form, "远端命令", "remote_cmd", 2, 1, "通常保持 pt")
+        self.remote_only_widgets.extend(
+            (remote_host_field, remote_port_field, remote_password_field, remote_cmd_field)
+        )
+
+        local_root_field = self._add_compact_entry(
+            form,
+            "本机媒体目录",
+            "local_root",
+            1,
+            0,
+            "仅扫描这个目录；不会扫描整台电脑",
+            browse_text="选择目录",
+            browse_command=self.pick_local_root,
+        )
+        local_root_field.grid_configure(columnspan=2, padx=(0, 0))
+        self.local_only_widgets.append(local_root_field)
+
         self._add_compact_entry(
             form,
-            "额外扫描目录",
+            "扫描目录",
             "scan_include",
-            2,
+            3,
             0,
-            f"可留空，默认：{preferred_scan_roots_text()}",
+            f"远端留空仅扫描 {preferred_scan_roots_text()}；填写后仅扫描所填目录",
         )
-        self._add_compact_entry(form, "排除目录", "scan_exclude", 2, 1, "多个目录用空格分隔，可留空")
+        self._add_compact_entry(form, "排除目录", "scan_exclude", 3, 1, "多个目录用空格分隔，可留空")
 
         save_group = ttk.Frame(form, style="Soft.TFrame", padding=(12, 9))
-        save_group.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 4))
+        save_group.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(5, 4))
         save_group.columnconfigure(0, weight=1)
         ttk.Label(save_group, text="本机保存目录", style="Field.TLabel").grid(row=0, column=0, sticky=W)
         variable = tk.StringVar()
@@ -1043,30 +1119,92 @@ class App:
         )
 
         option_group = ttk.Frame(form, style="SurfaceBody.TFrame", padding=(0, 7, 0, 0))
-        option_group.grid(row=4, column=0, columnspan=2, sticky="ew")
+        option_group.grid(row=5, column=0, columnspan=2, sticky="ew")
         option_group.columnconfigure(0, weight=1)
         option_group.columnconfigure(1, weight=1)
         self.config_vars["auto_cleanup"] = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             option_group,
-            text="成功后清理 VPS 临时结果",
+            text="任务结束后清理临时工作目录",
             variable=self.config_vars["auto_cleanup"],
         ).grid(row=0, column=0, sticky=W, pady=(0, 6))
         self.config_vars["remote_bootstrap"] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
+        remote_bootstrap_check = ttk.Checkbutton(
             option_group,
             text="空白 VPS 自动准备运行环境",
             variable=self.config_vars["remote_bootstrap"],
-        ).grid(row=0, column=1, sticky=W, pady=(0, 6))
+        )
+        remote_bootstrap_check.grid(row=0, column=1, sticky=W, pady=(0, 6))
+        self.remote_only_widgets.append(remote_bootstrap_check)
         self.config_vars["scan_full"] = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
+        scan_full_check = ttk.Checkbutton(
             option_group,
-            text="启用全盘扫描（较慢）",
+            text="明确启用 VPS 全盘扫描（较慢）",
             variable=self.config_vars["scan_full"],
-        ).grid(row=1, column=0, sticky=W)
+        )
+        scan_full_check.grid(row=1, column=0, sticky=W)
+        self.remote_only_widgets.append(scan_full_check)
+
+        image_group = ttk.Frame(form, style="Soft.TFrame", padding=(12, 9))
+        image_group.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(7, 0))
+        image_group.columnconfigure(1, weight=1)
+        self.config_vars["image_host_enabled"] = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            image_group,
+            text="生成完成后上传截图到图床",
+            variable=self.config_vars["image_host_enabled"],
+            command=self.update_image_host_ui,
+        ).grid(row=0, column=0, columnspan=3, sticky=W, pady=(0, 7))
+        ttk.Label(image_group, text="图床类型", style="Field.TLabel").grid(row=1, column=0, sticky=W)
+        self.config_vars["image_host_provider"] = tk.StringVar(value="imgbb")
+        image_provider = ttk.Combobox(
+            image_group,
+            textvariable=self.config_vars["image_host_provider"],
+            values=("imgbb", "lsky_v2", "see", "custom"),
+            state="readonly",
+            width=14,
+        )
+        image_provider.grid(row=1, column=1, sticky="w", padx=(10, 0))
+        image_provider.bind("<<ComboboxSelected>>", self.on_image_host_provider_changed)
+        ttk.Label(
+            image_group,
+            text="ImgBB / Lsky Pro v2 / S.EE 或 SM.MS / 自定义 Bearer API",
+            style="PanelHint.TLabel",
+        ).grid(row=1, column=2, sticky=W, padx=(10, 0))
+        ttk.Label(image_group, text="API 地址", style="Field.TLabel").grid(row=2, column=0, sticky=W, pady=(7, 0))
+        self.config_vars["image_host_endpoint"] = tk.StringVar()
+        image_endpoint = ttk.Entry(
+            image_group,
+            textvariable=self.config_vars["image_host_endpoint"],
+            style="Cyber.TEntry",
+        )
+        image_endpoint.grid(row=2, column=1, columnspan=2, sticky="ew", padx=(10, 0), pady=(7, 0))
+        ttk.Label(image_group, text="API Token", style="Field.TLabel").grid(row=3, column=0, sticky=W, pady=(7, 0))
+        self.config_vars["image_host_token"] = tk.StringVar()
+        self.config_vars["image_host_token"].trace_add("write", self._on_image_host_token_changed)
+        image_token = ttk.Entry(
+            image_group,
+            textvariable=self.config_vars["image_host_token"],
+            show="*",
+            style="Cyber.TEntry",
+        )
+        image_token.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(7, 0))
+        self.config_vars["clear_image_host_token"] = tk.BooleanVar(value=False)
+        clear_image_token = ttk.Checkbutton(
+            image_group,
+            text="清空已保存 Token",
+            variable=self.config_vars["clear_image_host_token"],
+        )
+        clear_image_token.grid(row=3, column=2, sticky=W, padx=(10, 0), pady=(7, 0))
+        ttk.Label(
+            image_group,
+            text="默认关闭；上传在结果包回到控制端后执行，失败不会删除本地材料。",
+            style="PanelHint.TLabel",
+        ).grid(row=4, column=0, columnspan=3, sticky=W, pady=(7, 0))
+        self.image_host_widgets.extend((image_provider, image_endpoint, image_token, clear_image_token))
 
         settings_actions = ttk.Frame(form, style="SurfaceBody.TFrame")
-        settings_actions.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        settings_actions.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         self.settings_save_button = ttk.Button(
             settings_actions,
             text="保存并返回",
@@ -1076,7 +1214,7 @@ class App:
         self.settings_save_button.pack(side=tk.LEFT)
         self.settings_test_button = ttk.Button(
             settings_actions,
-            text="测试连接",
+            text="检查环境",
             command=self.test_connection,
             style="Action.TButton",
         )
@@ -1151,7 +1289,19 @@ class App:
         entry.grid(row=row, column=1, sticky="ew", pady=4)
         ttk.Label(parent, text=hint, style="Hint.TLabel").grid(row=row, column=2, sticky=W, padx=(10, 0), pady=4)
 
-    def _add_compact_entry(self, parent, label_text: str, key: str, row: int, column: int, hint: str, show: str | None = None) -> None:
+    def _add_compact_entry(
+        self,
+        parent,
+        label_text: str,
+        key: str,
+        row: int,
+        column: int,
+        hint: str,
+        show: str | None = None,
+        *,
+        browse_text: str | None = None,
+        browse_command=None,
+    ) -> ttk.Frame:
         field = ttk.Frame(parent, style="Soft.TFrame", padding=(10, 6, 10, 6))
         field.grid(row=row, column=column, sticky="nsew", padx=(0, 10 if column == 0 else 0), pady=2)
         field.columnconfigure(0, weight=1)
@@ -1161,6 +1311,10 @@ class App:
         variable.trace_add("write", lambda *_args: self.refresh_config_summary())
         entry = ttk.Entry(field, textvariable=variable, show=show or "", style="Cyber.TEntry")
         entry.grid(row=1, column=0, sticky="ew", pady=(3, 2))
+        if browse_text and browse_command:
+            ttk.Button(field, text=browse_text, command=browse_command, style="Action.TButton").grid(
+                row=1, column=1, padx=(8, 0), pady=(3, 2)
+            )
         ttk.Label(
             field,
             text=hint,
@@ -1168,24 +1322,93 @@ class App:
             wraplength=320,
             justify="left",
         ).grid(row=2, column=0, sticky=W)
+        self.config_fields[key] = (field, entry)
+        return field
 
     def _load_into_form(self, data: dict) -> None:
+        self.image_host_provider_token_reset = False
         for key, value in data.items():
             var = self.config_vars.get(key)
             if isinstance(var, tk.BooleanVar):
                 var.set(bool(value))
             elif var is not None:
                 var.set(str(value))
+        self.current_mode = str(data.get("mode") or "remote").strip().lower()
+        self.update_mode_ui(clear_results=False)
+        self.update_image_host_ui()
         self.refresh_config_summary()
 
     def refresh_config_summary(self) -> None:
+        mode = self.form_mode()
         host = self.config_vars.get("remote_host")
+        local_root = self.config_vars.get("local_root")
         save_dir = self.config_vars.get("save_dir")
         host_value = host.get().strip() if isinstance(host, tk.StringVar) else ""
+        local_value = local_root.get().strip() if isinstance(local_root, tk.StringVar) else ""
         save_value = save_dir.get().strip() if isinstance(save_dir, tk.StringVar) else ""
-        display_host = "未配置" if host_value.lower() in {"", "root@your-vps"} else host_value
-        self.summary_host_var.set(f"VPS：{display_host}")
+        if mode == "local":
+            self.summary_host_var.set(f"本机媒体：{local_value or Path.home()}")
+        else:
+            display_host = "未配置" if host_value.lower() in {"", "root@your-vps"} else host_value
+            self.summary_host_var.set(f"远端 VPS：{display_host}")
         self.summary_save_var.set(f"保存目录：{save_value or default_save_dir()}")
+
+    def form_mode(self) -> str:
+        variable = self.config_vars.get("mode")
+        value = variable.get().strip().lower() if isinstance(variable, tk.StringVar) else "remote"
+        return "local" if value == "local" else "remote"
+
+    def update_mode_ui(self, *, clear_results: bool = True) -> None:
+        mode = self.form_mode()
+        local = mode == "local"
+        for widget in self.remote_only_widgets:
+            if local:
+                widget.grid_remove()
+            else:
+                widget.grid()
+        for widget in self.local_only_widgets:
+            if local:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        if hasattr(self, "test_button"):
+            self.test_button.configure(text="检查本机依赖" if local else "测试连接")
+        if hasattr(self, "settings_test_button"):
+            self.settings_test_button.configure(text="检查本机依赖" if local else "测试连接")
+        if hasattr(self, "scan_button"):
+            self.scan_button.configure(text="扫描本机" if local else "扫描 VPS")
+        if hasattr(self, "candidate_title_var"):
+            self.candidate_title_var.set("本机媒体候选" if local else "VPS 媒体候选")
+        self.backend_summary_var.set("本机处理模式" if local else standalone_backend_label())
+        if clear_results and self.current_mode != mode and self.scan_items:
+            self.scan_items = []
+            self.filtered_scan_items = []
+            self.checked_scan_paths.clear()
+            self.refresh_scan_items()
+            self.status_var.set("处理位置已改变，请重新扫描媒体。")
+        self.current_mode = mode
+        self.refresh_config_summary()
+
+    def update_image_host_ui(self) -> None:
+        variable = self.config_vars.get("image_host_enabled")
+        enabled = bool(variable.get()) if isinstance(variable, tk.BooleanVar) else False
+        interactive = enabled and not self.task_running()
+        for widget in self.image_host_widgets:
+            self._set_widget_enabled(widget, interactive)
+
+    def on_image_host_provider_changed(self, _event=None) -> None:
+        self.image_host_provider_token_reset = True
+        self.config_vars["image_host_token"].set("")
+        self.config_vars["clear_image_host_token"].set(True)
+        self.status_var.set("图床类型已切换：请重新填写 API Token。")
+        self.log_queue.put("[gui] 图床类型已切换，旧 Token 将被清除，请重新填写。")
+
+    def _on_image_host_token_changed(self, *_args) -> None:
+        token = self.config_vars["image_host_token"].get()
+        if token:
+            self.config_vars["clear_image_host_token"].set(False)
+        elif self.image_host_provider_token_reset:
+            self.config_vars["clear_image_host_token"].set(True)
 
     def toggle_form_panel(self, force: bool | None = None) -> None:
         selected = self.main_notebook.select()
@@ -1253,15 +1476,15 @@ class App:
         minutes, remaining = divmod(elapsed, 60)
         return f"{minutes:02d}:{remaining:02d}"
 
-    @staticmethod
-    def _scan_progress_text(progress: dict) -> str:
+    def _scan_progress_text(self, progress: dict) -> str:
         phase = str(progress.get("phase") or "walking")
         current_path = str(progress.get("current_path") or "")
         directories = int(progress.get("directories_scanned") or 0)
         files = int(progress.get("files_scanned") or 0)
         candidates = int(progress.get("candidates_found") or 0)
         if phase == "preparing":
-            summary = "正在准备远端扫描环境"
+            location = "本机" if self.form_mode() == "local" else "VPS"
+            summary = f"正在准备{location}扫描环境"
         elif phase == "resolving":
             processed = int(progress.get("processed_candidates") or 0)
             total = int(progress.get("total_candidates") or 0)
@@ -1284,7 +1507,9 @@ class App:
         self.scan_progress_bar.stop()
         self.scan_progress_bar.configure(mode="indeterminate", maximum=100)
         self.scan_progress_bar.start(50)
-        self.scan_progress_detail_var.set("正在准备远端扫描 · 已用时 00:00")
+        self.scan_progress_detail_var.set(
+            f"{self._scan_progress_text(self.scan_progress_snapshot)} · 已用时 00:00"
+        )
         self.scan_progress_frame.grid()
         if self.scan_progress_after_id is not None:
             self.root.after_cancel(self.scan_progress_after_id)
@@ -1379,6 +1604,9 @@ class App:
         if hasattr(self, "settings_test_button"):
             self._set_widget_enabled(self.settings_test_button, not running)
         self._set_widget_enabled(self.retry_button, not running and bool(self.last_failed_paths))
+        if hasattr(self, "copy_image_links_button"):
+            self._set_widget_enabled(self.copy_image_links_button, bool(self.last_image_links))
+        self.update_image_host_ui()
 
     def refresh_workspace_summary(self) -> None:
         shown = len(self.visible_scan_items())
@@ -1394,6 +1622,8 @@ class App:
 
     def form_data(self) -> dict:
         return {
+            "mode": self.form_mode(),
+            "local_root": self.config_vars["local_root"].get().strip() or str(Path.home()),
             "remote_host": self.config_vars["remote_host"].get().strip(),
             "remote_port": self.config_vars["remote_port"].get().strip() or "22",
             "remote_password": self.config_vars["remote_password"].get(),
@@ -1404,10 +1634,24 @@ class App:
             "scan_exclude": self.config_vars["scan_exclude"].get().strip(),
             "scan_full": bool(self.config_vars["scan_full"].get()),
             "auto_cleanup": bool(self.config_vars["auto_cleanup"].get()),
+            "image_host_enabled": bool(self.config_vars["image_host_enabled"].get()),
+            "image_host_provider": self.config_vars["image_host_provider"].get().strip() or "imgbb",
+            "image_host_endpoint": self.config_vars["image_host_endpoint"].get().strip(),
+            "image_host_token": self.config_vars["image_host_token"].get(),
+            "clear_image_host_token": bool(self.config_vars["clear_image_host_token"].get()),
         }
 
     def normalize_connection_fields(self) -> dict | None:
         data = self.form_data()
+        if data.get("mode", "remote") == "local":
+            local_root = Path(data["local_root"]).expanduser()
+            if not local_root.is_dir():
+                messagebox.showerror("本机目录无效", f"媒体目录不存在或不是目录：\n{local_root}")
+                self.toggle_form_panel(force=True)
+                return None
+            data["local_root"] = str(local_root.resolve())
+            self.config_vars["local_root"].set(data["local_root"])
+            return data
         if not data["remote_host"] or data["remote_host"].strip().lower() == "root@your-vps":
             messagebox.showerror("缺少配置", "请先填写 VPS 地址。")
             self.toggle_form_panel(force=True)
@@ -1435,6 +1679,10 @@ class App:
         except Exception as exc:
             messagebox.showerror("保存失败", str(exc))
             return False
+        if data.get("clear_image_host_token"):
+            self.config_vars["image_host_token"].set("")
+            self.config_vars["clear_image_host_token"].set(False)
+        self.image_host_provider_token_reset = False
         self.status_var.set(f"已保存配置：{CONFIG_PATH}")
         self.append_log(f"[gui] 配置已保存到 {CONFIG_PATH}")
         self.refresh_config_summary()
@@ -1444,6 +1692,13 @@ class App:
         chosen = filedialog.askdirectory(initialdir=self.config_vars["save_dir"].get() or default_save_dir())
         if chosen:
             self.config_vars["save_dir"].set(chosen)
+            self.refresh_config_summary()
+
+    def pick_local_root(self) -> None:
+        initial = self.config_vars["local_root"].get().strip() or str(Path.home())
+        chosen = filedialog.askdirectory(initialdir=initial)
+        if chosen:
+            self.config_vars["local_root"].set(chosen)
             self.refresh_config_summary()
 
     def open_config_dir(self) -> None:
@@ -1503,6 +1758,16 @@ class App:
         self.root.clipboard_append(text)
         self.root.update_idletasks()
         self.status_var.set("日志已复制到剪贴板。")
+
+    def copy_image_links(self) -> None:
+        if not self.last_image_links:
+            self.status_var.set("当前没有可复制的图床链接。")
+            return
+        text = "".join(f"[img]{url}[/img]\n" for url in self.last_image_links)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.root.update_idletasks()
+        self.status_var.set(f"已复制 {len(self.last_image_links)} 条图床 BBCode。")
 
     def clear_log_view(self) -> None:
         self.log_view.configure(state="normal")
@@ -1713,6 +1978,7 @@ class App:
         self.start_remote_with_backend_batch(data, save_dir, [selected_path])
 
     def start_remote_with_backend_batch(self, data: dict, save_dir: Path, selected_paths: list[str]) -> None:
+        self.shell_cancel_event.clear()
         backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
         self.backend = backend
         self.append_log("")
@@ -1726,6 +1992,7 @@ class App:
         self.status_var.set(f"运行中：准备顺序处理 {len(selected_paths)} 个条目")
         self.last_success_paths = []
         self.last_failed_paths = []
+        self.last_image_links = []
 
         def worker() -> None:
             success_paths: list[str] = []
@@ -1738,6 +2005,14 @@ class App:
                         local_path = backend.process_selected_path(selected_path, save_dir)
                         last_local = local_path
                         success_paths.append(str(local_path))
+                        self.log_queue.put(f"[gui] 本地结果包已保存：{local_path}")
+                        self.upload_images_for_archive(
+                            data,
+                            local_path,
+                            should_cancel=lambda: self.remote_upload_cancelled(backend),
+                        )
+                        if self.remote_upload_cancelled(backend):
+                            raise TaskCancelledError("任务已取消。")
                         self.log_queue.put(f"[gui] 成功 {index}/{len(selected_paths)}：{local_path}")
                     except TaskCancelledError:
                         raise
@@ -1745,6 +2020,8 @@ class App:
                         failed.append((selected_path, str(item_exc)))
                         self.log_queue.put(f"[gui] 失败 {index}/{len(selected_paths)}：{selected_path} -> {item_exc}")
                         continue
+                if self.remote_upload_cancelled(backend):
+                    raise TaskCancelledError("任务已取消。")
                 self.last_success_paths = success_paths
                 self.last_failed_paths = [path for path, _ in failed]
                 summary = f"[gui] 批量完成：成功 {len(success_paths)} / 失败 {len(failed)} / 共 {len(selected_paths)}"
@@ -1785,13 +2062,33 @@ class App:
             return
         if not self.save_form():
             return
+        data = self.form_data()
+        if data.get("mode", "remote") == "local":
+            report = local_dependency_report()
+            self.append_log("[gui] 本机媒体工具检查：")
+            for command, path in report["paths"].items():
+                self.append_log(f"  - {command}: {path or '未找到'}")
+            if report["missing_required"]:
+                missing = ", ".join(report["missing_required"])
+                self.status_var.set(f"本机依赖缺失：{missing}")
+                messagebox.showerror(
+                    "本机依赖缺失",
+                    f"缺少必要工具：{missing}\n\n安装后重新打开应用或确保它们位于 PATH 中。",
+                )
+            else:
+                optional = ", ".join(report["missing_optional"])
+                detail = "本机视频与音频处理依赖已就绪。"
+                if optional:
+                    detail += f"\n可选工具未找到：{optional}（只影响原盘精确报告）。"
+                self.status_var.set("本机处理依赖已就绪")
+                messagebox.showinfo("本机环境", detail)
+            return
         if not backend_available():
             messagebox.showerror(
                 "无法测连",
                 "当前环境没有内置 Python 后端（缺少 paramiko）。\n请使用打包版，或安装 paramiko 后重试。",
             )
             return
-        data = self.form_data()
         self.status_var.set("测连中：正在检查 SSH 与远端依赖")
         self.append_log("[gui] 开始测试连接与依赖预检")
         backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
@@ -1864,6 +2161,168 @@ class App:
         )
         return env
 
+    def upload_images_for_archive(
+        self,
+        data: dict,
+        archive: str | os.PathLike[str],
+        *,
+        should_cancel: Callable[[], bool] | None = None,
+    ) -> ImageHostReport | None:
+        if not data.get("image_host_enabled", False):
+            return None
+
+        if should_cancel is None:
+            cancel_event = getattr(self, "shell_cancel_event", None)
+            should_cancel = cancel_event.is_set if cancel_event is not None else (lambda: False)
+
+        def log_progress(completed: int, total: int, message: str) -> None:
+            detail = f" · {message}" if message else ""
+            self.log_queue.put(f"[gui] 图床上传进度：{completed}/{total}{detail}")
+
+        report = upload_archive_images(
+            archive,
+            data,
+            should_cancel=should_cancel,
+            progress_callback=log_progress,
+        )
+        if report.cancelled or should_cancel():
+            self.log_queue.put("[gui] 图床上传已取消，本地结果包已保留")
+            raise TaskCancelledError("任务已取消。")
+        if report.error:
+            self.log_queue.put(
+                f"[gui] 图床上传未完成：{report.error}；本地结果包仍然有效"
+            )
+            return report
+        self.log_queue.put(
+            f"[gui] 图床上传：成功 {report.success_count} / 失败 {report.failed_count} / 共 {report.attempted_count}"
+        )
+        for url in report.urls:
+            if url not in self.last_image_links:
+                self.last_image_links.append(url)
+            self.log_queue.put(f"[gui] 图床直链：{url}")
+        return report
+
+    def remote_upload_cancelled(self, backend: PTBDRemoteBackend) -> bool:
+        if self.shell_cancel_event.is_set():
+            return True
+        try:
+            backend.ensure_not_cancelled()
+        except TaskCancelledError:
+            return True
+        return False
+
+    def start_local_batch(self, data: dict, save_dir: Path, selected_paths: list[str]) -> None:
+        report = local_dependency_report()
+        if report["missing_required"]:
+            missing = ", ".join(report["missing_required"])
+            messagebox.showerror(
+                "本机依赖缺失",
+                f"缺少必要工具：{missing}\n\n请先安装，再点击“检查本机依赖”确认。",
+            )
+            self.status_var.set(f"本机依赖缺失：{missing}")
+            return
+
+        self.shell_cancel_event.clear()
+        save_dir.mkdir(parents=True, exist_ok=True)
+        runtime_parent = CONFIG_PATH.parent / "runtime" / "gui"
+        runtime_parent.mkdir(parents=True, exist_ok=True)
+        task_root = Path(tempfile.mkdtemp(prefix="task-", dir=runtime_parent))
+        env = build_local_runtime_env(data, data_dir=task_root)
+        cli = build_local_cli_command()
+        self.last_success_paths = []
+        self.last_failed_paths = []
+        self.last_image_links = []
+        self.append_log("")
+        self.append_log(f"[gui] 启动方式：本机电脑；媒体根目录：{data['local_root']}")
+        self.append_log(f"[gui] 已选 {len(selected_paths)} 个候选；结果目录：{save_dir}")
+        self.status_var.set(f"运行中：本机顺序处理 {len(selected_paths)} 个条目")
+
+        def worker() -> None:
+            success_paths: list[str] = []
+            failed: list[tuple[str, str]] = []
+            try:
+                for index, selected_path in enumerate(selected_paths, start=1):
+                    if self.shell_cancel_event.is_set():
+                        raise TaskCancelledError("任务已取消。")
+                    try:
+                        source = ensure_local_path_allowed(data, selected_path)
+                        work_dir = task_root / f"{index:04d}"
+                        self.log_queue.put(
+                            f"[gui] 开始本机处理 {index}/{len(selected_paths)}：{source}"
+                        )
+                        command = [
+                            *cli,
+                            "generate-path",
+                            "--path",
+                            str(source),
+                            "--work-dir",
+                            str(work_dir),
+                            "--lang",
+                            "zh",
+                            "--result-json",
+                        ]
+                        result = self.run_cancellable_capture(command, env=env, timeout=3600)
+                        if result.stderr.strip():
+                            for line in result.stderr.strip().splitlines():
+                                self.log_queue.put(line)
+                        if result.returncode != 0:
+                            raise RuntimeError(
+                                result.stderr.strip()
+                                or result.stdout.strip()
+                                or f"本机处理退出码 {result.returncode}"
+                            )
+                        archive = parse_local_archive(result.stdout, save_dir)
+                        success_paths.append(str(archive))
+                        self.log_queue.put(f"[gui] 本地结果包已保存：{archive}")
+                        self.upload_images_for_archive(
+                            data,
+                            archive,
+                            should_cancel=self.shell_cancel_event.is_set,
+                        )
+                        if self.shell_cancel_event.is_set():
+                            raise TaskCancelledError("任务已取消。")
+                        self.log_queue.put(
+                            f"[gui] 成功 {index}/{len(selected_paths)}：{archive}"
+                        )
+                    except TaskCancelledError:
+                        raise
+                    except Exception as exc:
+                        failed.append((selected_path, str(exc)))
+                        self.log_queue.put(
+                            f"[gui] 失败 {index}/{len(selected_paths)}：{selected_path} -> {exc}"
+                        )
+                if self.shell_cancel_event.is_set():
+                    raise TaskCancelledError("任务已取消。")
+                self.last_success_paths = list(success_paths)
+                self.last_failed_paths = [path for path, _ in failed]
+                self.log_queue.put(
+                    f"[gui] 批量完成：成功 {len(success_paths)} / 失败 {len(failed)} / 共 {len(selected_paths)}"
+                )
+                if success_paths:
+                    self.log_queue.put("[gui] 成功文件：")
+                    for path in success_paths:
+                        self.log_queue.put(f"  - {path}")
+                if failed:
+                    self.log_queue.put("[gui] 失败条目（可点“重试失败”）：")
+                    for path, error in failed:
+                        self.log_queue.put(f"  - {path} | {error}")
+                exit_code = 1 if failed and not success_paths else (2 if failed else 0)
+                self.log_queue.put(f"[gui] 任务结束，退出码：{exit_code}")
+            except TaskCancelledError:
+                self.log_queue.put("[gui] 本机任务已取消")
+                self.log_queue.put("[gui] 任务结束，退出码：130")
+            except Exception as exc:
+                self.log_queue.put(f"[gui] 本机任务失败：{exc}")
+                self.log_queue.put("[gui] 任务结束，退出码：1")
+            finally:
+                self.last_success_paths = list(success_paths)
+                self.last_failed_paths = [path for path, _ in failed]
+                if data.get("auto_cleanup", True):
+                    shutil.rmtree(task_root, ignore_errors=True)
+
+        self.backend_thread = threading.Thread(target=worker, daemon=True)
+        self.backend_thread.start()
+
     def retry_failed_paths(self) -> None:
         if self.task_running():
             messagebox.showinfo("任务进行中", "请先等当前任务结束。")
@@ -1880,6 +2339,9 @@ class App:
         self.checked_scan_paths = set(paths)
         self.refresh_scan_items()
         self.append_log(f"[gui] 重试失败条目：{len(paths)} 个")
+        if data["mode"] == "local":
+            self.start_local_batch(data, save_dir, paths)
+            return
         if backend_available():
             self.start_remote_with_backend_batch(data, save_dir, paths)
             return
@@ -1906,9 +2368,18 @@ class App:
         save_dir.mkdir(parents=True, exist_ok=True)
         selected_paths = self.current_selected_paths()
         if not selected_paths and not self.scan_items:
-            self.append_log("[gui] 尚未选择候选，先自动扫描一次 VPS")
-            self.status_var.set("扫描中：先自动获取 VPS 候选列表")
+            location = "本机" if data["mode"] == "local" else "VPS"
+            self.append_log(f"[gui] 尚未选择候选，先自动扫描一次{location}")
+            self.status_var.set(f"扫描中：先自动获取{location}候选列表")
             self.scan_remote(auto_start=True)
+            return
+
+        if data["mode"] == "local":
+            if not selected_paths:
+                messagebox.showinfo("先选条目", "请先勾选一个或多个本机媒体条目，再点“生成所选”。")
+                self.status_var.set("等待选择：先勾选要处理的本机媒体")
+                return
+            self.start_local_batch(data, save_dir, selected_paths)
             return
 
         if backend_available():
@@ -1941,6 +2412,8 @@ class App:
             return
 
         env = self.build_remote_shell_env(data, save_dir)
+        if data.get("image_host_enabled", False):
+            self.append_log("[gui] Shell 回退后端无法定位单个回传归档，本次跳过图床上传")
         if not selected_paths:
             self.status_var.set("运行中：未选中候选，将回退到远端菜单模式")
             selected_paths = [""]
@@ -1963,6 +2436,7 @@ class App:
             self.append_log(f"[gui] 已选 {len(real_paths)} 个候选，旧版 shell 模式将顺序处理")
         self.last_success_paths = []
         self.last_failed_paths = []
+        self.last_image_links = []
         creationflags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 
         def worker() -> None:
@@ -2166,8 +2640,10 @@ class App:
             return
         self.auto_start_after_scan = auto_start
         data = self.form_data()
-        self.status_var.set("扫描中：正在从 VPS 获取候选列表")
-        self.append_log("[gui] 开始通过 scan-json 获取 VPS 候选列表")
+        local_mode = data["mode"] == "local"
+        location = "本机" if local_mode else "VPS"
+        self.status_var.set(f"扫描中：正在从{location}获取候选列表")
+        self.append_log(f"[gui] 开始通过 scan-json 获取{location}候选列表")
         self.begin_scan_progress()
 
         def post_progress(progress: dict) -> None:
@@ -2179,6 +2655,52 @@ class App:
                 self.status_var.set(message)
 
             self.root.after(0, update)
+
+        if local_mode:
+            self.shell_cancel_event.clear()
+            env = build_local_runtime_env(data)
+            command = [
+                *build_local_cli_command(),
+                "scan-json",
+                "--full",
+                "--lang",
+                "zh",
+                "--progress-json",
+            ]
+
+            def local_worker() -> None:
+                try:
+                    self.log_queue.put(f"[gui] 本机扫描根目录：{data['local_root']}")
+                    result = self.run_cancellable_scan_capture(
+                        command,
+                        env=env,
+                        progress_callback=post_progress,
+                    )
+                    if result.returncode != 0:
+                        raise RuntimeError(
+                            result.stderr.strip()
+                            or result.stdout.strip()
+                            or f"本机扫描退出码 {result.returncode}"
+                        )
+                    if not result.stdout.strip():
+                        raise RuntimeError("本机 scan-json 没有返回候选数据。")
+                    payload = json.loads(result.stdout)
+                    items = payload.get("items", [])
+                    self.log_queue.put(f"[gui] 本机 scan-json 返回 {len(items)} 个候选")
+                    self.root.after(
+                        0,
+                        lambda items=items: self.apply_scan_results(items, auto_start=auto_start),
+                    )
+                except TaskCancelledError:
+                    self.log_queue.put("[gui] 本机扫描已取消")
+                    post_scan_end("cancelled", "本机扫描已取消")
+                except Exception as exc:
+                    self.log_queue.put(f"[gui] 获取本机候选失败：{exc}")
+                    post_scan_end("error", "本机扫描失败：请查看任务日志")
+
+            self.backend_thread = threading.Thread(target=local_worker, daemon=True)
+            self.backend_thread.start()
+            return
 
         if backend_available():
             backend = PTBDRemoteBackend(APP_ROOT, data, logger=self.log_queue.put)
@@ -2268,6 +2790,15 @@ class App:
             if str(item.get("path") or "").strip()
         )
         self.refresh_scan_items()
+
+    def select_only_current_scan_item(self) -> None:
+        selected_path = self.current_selected_path()
+        if not selected_path:
+            self.status_var.set("请先点击一个候选条目。")
+            return
+        self.checked_scan_paths = {selected_path}
+        self.refresh_scan_items()
+        self.status_var.set(f"已只选择当前条目：{selected_path}")
 
     def clear_checked_scan_items(self) -> None:
         self.checked_scan_paths.clear()
@@ -2498,15 +3029,20 @@ class App:
 
     def on_scan_click(self, event) -> str | None:
         item_id = self.scan_tree.identify_row(event.y)
-        column = self.scan_tree.identify_column(event.x)
         if not item_id:
             return None
         self.scan_tree.focus(item_id)
-        if column == "#1":
+        self.scan_tree.selection_set(item_id)
+        event_time = int(getattr(event, "time", 0) or 0)
+        repeated_double_click = (
+            item_id == self.last_scan_click_item
+            and 0 <= event_time - self.last_scan_click_time < 350
+        )
+        self.last_scan_click_item = item_id
+        self.last_scan_click_time = event_time
+        if not repeated_double_click:
             self.toggle_scan_item_checked(item_id)
-            self.scan_tree.selection_set(item_id)
-            return "break"
-        return None
+        return "break"
 
     def on_scan_space(self, _event=None) -> str:
         item_id = self.scan_tree.focus()
@@ -2619,6 +3155,7 @@ class App:
 
     def stop_remote(self) -> None:
         if self.backend_thread and self.backend_thread.is_alive() and self.backend is not None:
+            self.shell_cancel_event.set()
             self.backend.cancel()
             self.append_log("[gui] 已请求停止当前独立后端任务")
             self.status_var.set("已请求停止，请稍等。")
@@ -2726,6 +3263,8 @@ def run_ui_smoke_check() -> int:
             failures.append(f"{label}: log pane is too short ({app.log_view.winfo_height()}px)")
 
     check_workbench("default")
+    if app.candidate_panel.winfo_height() < app.workspace_paned.winfo_height() * 0.5:
+        failures.append("default: candidates pane does not occupy the majority of the workbench")
     default_geometry = f"{root.winfo_width()}x{root.winfo_height()}"
     root.geometry("820x700")
     check_workbench("minimum")
@@ -2745,6 +3284,17 @@ def run_ui_smoke_check() -> int:
         failures.append("primary actions are not native ttk buttons")
     if not isinstance(app.scan_progress_bar, ttk.Progressbar):
         failures.append("scan progress is not a native ttk progressbar")
+    app.config_vars["mode"].set("local")
+    app.update_mode_ui()
+    root.update_idletasks()
+    local_root_field = app.config_fields["local_root"][0]
+    remote_host_field = app.config_fields["remote_host"][0]
+    if not local_root_field.winfo_viewable() or remote_host_field.winfo_viewable():
+        failures.append("local mode did not replace VPS fields with the local media directory")
+    if app.scan_button.cget("text") != "扫描本机" or app.test_button.cget("text") != "检查本机依赖":
+        failures.append("local mode actions did not update")
+    app.config_vars["mode"].set("remote")
+    app.update_mode_ui()
     app.toggle_form_panel(force=False)
     app.begin_scan_progress()
     app.update_scan_progress(
@@ -2779,7 +3329,30 @@ def run_ui_smoke_check() -> int:
     return 0
 
 
+def restore_core_cli_streams() -> None:
+    """Restore inherited pipes hidden by windowed PyInstaller bootloaders."""
+
+    for name, descriptor in (("stdout", 1), ("stderr", 2)):
+        if getattr(sys, name) is not None:
+            continue
+        try:
+            stream = os.fdopen(
+                os.dup(descriptor),
+                "w",
+                encoding="utf-8",
+                errors="replace",
+                buffering=1,
+            )
+        except OSError:
+            stream = open(os.devnull, "w", encoding="utf-8")
+        setattr(sys, name, stream)
+
+
 def cli_main() -> int:
+    if "--core-cli" in sys.argv:
+        index = sys.argv.index("--core-cli")
+        restore_core_cli_streams()
+        return core_cli_main(sys.argv[index + 1 :])
     if "--print-config-path" in sys.argv:
         print(CONFIG_PATH)
         return 0

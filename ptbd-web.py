@@ -31,7 +31,11 @@ from ptbd_core.config import save_config as core_save_config
 from ptbd_core.config import split_path_roots as core_split_path_roots
 from ptbd_core.jobs import Job as WebTask
 from ptbd_core.jobs import JobRegistry
-from ptbd_core.returns import parse_return_record
+from ptbd_core.image_hosts import upload_archive_images
+from ptbd_core.local_runtime import build_local_runtime_env as core_build_local_runtime_env
+from ptbd_core.local_runtime import ensure_local_path_allowed as core_ensure_local_path_allowed
+from ptbd_core.local_runtime import local_allowed_roots as core_local_allowed_roots
+from ptbd_core.local_runtime import parse_local_archive
 from ptbd_remote_backend import (
     PTBDRemoteBackend,
     TaskCancelledError,
@@ -545,41 +549,7 @@ def shell_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, An
 
 
 def local_runtime_env(config: dict[str, Any]) -> dict[str, str]:
-    env = os.environ.copy()
-    env.setdefault("HOME", str(Path.home()))
-    local_root = str(Path(effective_scan_root(config)).expanduser().resolve())
-    include_roots = scan_include_env_value(config)
-    env["BDTOOL_SCAN_FULL_ROOT"] = local_root
-    if include_roots:
-        env["BDTOOL_SCAN_INCLUDE_ROOTS"] = include_roots
-        structured_roots = [local_root, *(str(Path(root).expanduser().resolve()) for root in extra_scan_roots(config))]
-        env["BDTOOL_SCAN_INCLUDE_ROOTS_JSON"] = json.dumps(structured_roots, ensure_ascii=False)
-        env["BDTOOL_SCAN_INCLUDE_ROOTS_LINES"] = "\n".join(structured_roots)
-    else:
-        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS", None)
-        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS_JSON", None)
-        env.pop("BDTOOL_SCAN_INCLUDE_ROOTS_LINES", None)
-    exclude_values = split_path_roots(str(config.get("scan_exclude") or ""))
-    env["BDTOOL_SCAN_EXCLUDE_ROOTS"] = normalize_scan_roots(exclude_values)
-    if exclude_values:
-        env["BDTOOL_SCAN_EXCLUDE_ROOTS_JSON"] = json.dumps(exclude_values, ensure_ascii=False)
-        env["BDTOOL_SCAN_EXCLUDE_ROOTS_LINES"] = "\n".join(exclude_values)
-    else:
-        env.pop("BDTOOL_SCAN_EXCLUDE_ROOTS_JSON", None)
-        env.pop("BDTOOL_SCAN_EXCLUDE_ROOTS_LINES", None)
-    env["BDTOOL_DOWNLOAD_DIR"] = str(config.get("save_dir") or default_save_dir())
-    env["BDTOOL_RETURN_MODE"] = "local"
-    env["BDTOOL_AUTO_CLEANUP"] = "1" if config.get("auto_cleanup", True) else "0"
-    env["BDTOOL_AUDIO_SPECTRUM_MODE"] = str(config.get("audio_spectrum_mode") or "single")
-    env["BDTOOL_AUDIO_SPECTRUM_BACKEND"] = str(config.get("audio_spectrum_backend") or "auto")
-    env["BDTOOL_AUDIO_SPECTRUM_COMBINED_TRACK_SECONDS"] = str(config.get("audio_spectrum_combined_track_seconds") or "12")
-    env["BDTOOL_POST_ACTION"] = "0"
-    env["LANG_CODE"] = "zh"
-    env["PYTHONIOENCODING"] = "utf-8"
-    env["PYTHONUTF8"] = "1"
-    env["LANG"] = env.get("LANG") or "C.UTF-8"
-    env["LC_ALL"] = env.get("LC_ALL") or "C.UTF-8"
-    return env
+    return core_build_local_runtime_env(config)
 
 
 def split_path_roots(raw: str) -> list[str]:
@@ -613,22 +583,11 @@ def scan_include_env_value(config: dict[str, Any]) -> str:
 
 
 def local_allowed_roots(config: dict[str, Any]) -> list[Path]:
-    roots = [effective_scan_root(config), *extra_scan_roots(config)]
-    resolved: list[Path] = []
-    for root in roots:
-        try:
-            resolved.append(Path(root).expanduser().resolve())
-        except OSError:
-            continue
-    return resolved or [Path("/")]
+    return core_local_allowed_roots(config)
 
 
 def ensure_local_path_allowed(config: dict[str, Any], selected_path: str) -> Path:
-    target = Path(selected_path).expanduser().resolve()
-    for root in local_allowed_roots(config):
-        if target == root or root in target.parents:
-            return target
-    raise ValueError(f"路径不在允许扫描范围内：{selected_path}")
+    return core_ensure_local_path_allowed(config, selected_path)
 
 
 def local_scan_items(config: dict[str, Any], task: WebTask) -> list[dict[str, Any]]:
@@ -757,25 +716,39 @@ def run_process_stream(
 
 
 def local_archive_from_output(output_lines: list[str], save_dir: Path) -> Path:
-    records = [record for line in output_lines if (record := parse_return_record(line)) is not None]
-    if len(records) != 1:
-        raise RuntimeError(f"本机处理未返回唯一归档路径，收到 {len(records)} 条结果记录。")
-    record = records[0]
-    if record.mode != "local":
-        raise RuntimeError(f"本机处理返回了非本地模式：{record.mode}")
+    return parse_local_archive("\n".join(output_lines), save_dir)
 
-    archive = Path(record.destination).expanduser()
-    if not archive.is_absolute():
-        archive = save_dir / archive
-    try:
-        save_root = save_dir.resolve(strict=True)
-        resolved_archive = archive.resolve(strict=True)
-        resolved_archive.relative_to(save_root)
-    except (OSError, ValueError) as exc:
-        raise RuntimeError(f"本机处理返回了保存目录之外的归档：{archive}") from exc
-    if not resolved_archive.is_file() or resolved_archive.stat().st_size <= 0:
-        raise RuntimeError(f"本机处理返回的归档不存在或为空：{resolved_archive}")
-    return resolved_archive
+
+def upload_archive_images_for_task(
+    task: WebTask,
+    config: dict[str, Any],
+    archive: str | os.PathLike[str],
+) -> None:
+    if not config.get("image_host_enabled", False):
+        return
+
+    def log_progress(completed: int, total: int, message: str) -> None:
+        detail = f" · {message}" if message else ""
+        task.log(f"图床上传进度：{completed}/{total}{detail}")
+
+    report = upload_archive_images(
+        archive,
+        config,
+        should_cancel=task.cancel_event.is_set,
+        progress_callback=log_progress,
+    )
+    task.add_image_upload(report.to_dict())
+    if report.cancelled or task.cancel_event.is_set():
+        task.log("图床上传已取消，本地结果包已保留")
+        raise TaskCancelledError("任务已取消。")
+    if report.error:
+        task.log(f"图床上传未完成：{report.error}；本地结果包仍然有效")
+        return
+    task.log(
+        f"图床上传：成功 {report.success_count} / 失败 {report.failed_count} / 共 {report.attempted_count}"
+    )
+    for url in report.urls:
+        task.log(f"图床直链：{url}")
 
 
 def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask) -> None:
@@ -785,6 +758,8 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
     remote_script = APP_ROOT / "ptbd-remote.sh"
     if not remote_script.is_file():
         raise RuntimeError(f"找不到远端流程脚本：{remote_script}")
+    if config.get("image_host_enabled", False):
+        task.log("Shell 回退后端无法定位单个回传归档，本次保留本地结果但跳过图床上传")
 
     scan_include = scan_include_env_value(config)
     include_values = split_path_roots(scan_include)
@@ -850,6 +825,8 @@ def shell_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
             task.add_failure(selected_path, str(exc))
             task.log(f"失败 {index}/{len(paths)}：{selected_path} -> {exc}")
     task.summarize_batch(len(paths))
+    if task.cancel_event.is_set():
+        raise TaskCancelledError("任务已取消。")
 
 
 def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask) -> None:
@@ -892,6 +869,10 @@ def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
                     raise RuntimeError(f"本地处理失败，退出码：{rc}")
                 archive = local_archive_from_output(output_lines, save_dir)
                 task.add_output(str(archive))
+                task.log(f"本地结果包已保存：{archive}")
+                upload_archive_images_for_task(task, config, archive)
+                if task.cancel_event.is_set():
+                    raise TaskCancelledError("任务已取消。")
                 task.log(f"完成本地处理 {index}/{len(paths)}，归档：{archive}")
             except TaskCancelledError:
                 raise
@@ -902,6 +883,8 @@ def local_process_paths(config: dict[str, Any], paths: list[str], task: WebTask)
         if config.get("auto_cleanup", True):
             shutil.rmtree(task_work_root, ignore_errors=True)
     task.summarize_batch(len(paths))
+    if task.cancel_event.is_set():
+        raise TaskCancelledError("任务已取消。")
 
 
 def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) -> None:
@@ -925,6 +908,10 @@ def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) ->
                 try:
                     local_path = backend.process_selected_path(selected_path, save_dir)
                     task.add_output(str(local_path))
+                    task.log(f"本地结果包已保存：{local_path}")
+                    upload_archive_images_for_task(task, config, local_path)
+                    if task.cancel_event.is_set():
+                        raise TaskCancelledError("任务已取消。")
                     task.log(f"完成处理 {index}/{len(paths)}：{local_path}")
                 except TaskCancelledError:
                     raise
@@ -932,6 +919,8 @@ def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) ->
                     task.add_failure(selected_path, str(item_exc))
                     task.log(f"失败 {index}/{len(paths)}：{selected_path} -> {item_exc}")
             task.summarize_batch(len(paths))
+            if task.cancel_event.is_set():
+                raise TaskCancelledError("任务已取消。")
         else:
             task.log(f"启动方式：shell 回退后端，{backend_status()}")
             shell_process_paths(config, paths, task)
@@ -943,6 +932,8 @@ def run_process_task(task: WebTask, config: dict[str, Any], paths: list[str]) ->
             "total": len(paths),
         }
         msg = f"处理完成：成功 {summary.get('success', 0)} / 失败 {summary.get('failed', 0)} / 共 {summary.get('total', len(paths))}"
+        if task.cancel_event.is_set():
+            raise TaskCancelledError("任务已取消。")
         if summary.get("failed", 0) and not summary.get("success", 0):
             task.finish("error", msg)
         elif summary.get("failed", 0):
@@ -1291,6 +1282,26 @@ INDEX_HTML = r"""<!doctype html>
       margin-top: 12px;
     }
 
+    .image-host-settings {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-soft);
+    }
+
+    .image-host-settings > p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+    }
+
+    #imageHostFields {
+      display: grid;
+      gap: 10px;
+    }
+
     label {
       display: grid;
       gap: 6px;
@@ -1337,6 +1348,10 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: 1fr 92px;
       gap: 10px;
+    }
+
+    .image-host-row {
+      grid-template-columns: minmax(160px, 0.7fr) minmax(280px, 1.3fr);
     }
 
     .checks {
@@ -1413,6 +1428,12 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--ink);
     }
 
+    .button.compact {
+      min-height: 32px;
+      padding: 0 10px;
+      font-size: 0.82rem;
+    }
+
     .toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -1442,9 +1463,17 @@ INDEX_HTML = r"""<!doctype html>
     .candidate-list {
       display: grid;
       gap: 6px;
-      max-height: 560px;
+      min-height: clamp(320px, 45vh, 560px);
+      max-height: min(72vh, 760px);
+      align-content: start;
       overflow: auto;
       padding-right: 4px;
+      overscroll-behavior: contain;
+    }
+
+    .candidate-list:focus-visible {
+      outline: 3px solid oklch(0.72 0.09 175 / 0.45);
+      outline-offset: 2px;
     }
 
     .list-tools {
@@ -1496,23 +1525,40 @@ INDEX_HTML = r"""<!doctype html>
 
     .candidate {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
       gap: 12px;
-      align-items: start;
+      align-items: center;
       padding: 11px 12px;
       border: 1px solid var(--line);
       border-radius: 10px;
       background: var(--bg);
+      cursor: pointer;
+      transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
     }
 
+    .candidate:hover {
+      border-color: var(--line-strong);
+      background: var(--surface-soft);
+    }
+
+    .candidate.is-selected,
     .candidate:has(input:checked) {
       border-color: var(--primary);
-      background: oklch(0.96 0.018 246);
+      background: oklch(0.95 0.025 175);
+      box-shadow: inset 0 0 0 1px var(--primary);
+    }
+
+    .candidate:focus-within {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px oklch(0.45 0.074 175 / 0.16);
     }
 
     .candidate input {
-      width: 16px;
-      height: 16px;
+      width: 18px;
+      height: 18px;
+      margin: 0;
+      accent-color: var(--primary);
+      cursor: pointer;
     }
 
     .type {
@@ -1532,6 +1578,7 @@ INDEX_HTML = r"""<!doctype html>
       min-width: 0;
       display: grid;
       gap: 2px;
+      cursor: pointer;
     }
 
     .candidate-title {
@@ -1560,6 +1607,25 @@ INDEX_HTML = r"""<!doctype html>
     .candidate-materials {
       color: var(--muted);
       font-size: 0.82rem;
+    }
+
+    .candidate-only {
+      min-height: 32px;
+      padding: 0 10px;
+      white-space: nowrap;
+      font-size: 0.8rem;
+    }
+
+    .candidate-only[aria-pressed="true"] {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: white;
+    }
+
+    .candidate-list > .empty:only-child {
+      display: grid;
+      min-height: inherit;
+      place-items: center;
     }
 
     [hidden] {
@@ -1701,6 +1767,16 @@ INDEX_HTML = r"""<!doctype html>
       overflow-wrap: anywhere;
     }
 
+    .image-upload-result {
+      display: grid;
+      gap: 7px;
+    }
+
+    .image-upload-result a {
+      color: var(--primary-strong);
+      overflow-wrap: anywhere;
+    }
+
     @media (max-width: 900px) {
       .shell {
         width: min(100vw - 20px, 720px);
@@ -1711,9 +1787,15 @@ INDEX_HTML = r"""<!doctype html>
       .workbench,
       .quick-config,
       .filters,
-      .list-tools {
+      .list-tools,
+      .image-host-row {
         display: grid;
         grid-template-columns: 1fr;
+      }
+
+      .button,
+      .candidate-only {
+        min-height: 44px;
       }
 
       .pager {
@@ -1729,12 +1811,22 @@ INDEX_HTML = r"""<!doctype html>
       }
 
       .candidate {
-        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-columns: auto minmax(0, 1fr) auto;
       }
 
       .candidate .type {
         grid-column: 2;
         justify-self: start;
+      }
+
+      .candidate-only {
+        grid-column: 3;
+        grid-row: 1 / span 2;
+      }
+
+      .candidate-list {
+        min-height: clamp(220px, 34vh, 360px);
+        max-height: min(56vh, 520px);
       }
     }
 
@@ -1788,7 +1880,7 @@ INDEX_HTML = r"""<!doctype html>
           <div class="quick-config">
             <label>处理位置
               <select name="mode">
-                <option value="local">本机服务器</option>
+                <option value="local">当前电脑 / Docker 主机</option>
                 <option value="remote">远端 VPS</option>
               </select>
             </label>
@@ -1823,10 +1915,33 @@ INDEX_HTML = r"""<!doctype html>
               <label>额外排除目录
                 <textarea name="scan_exclude" placeholder="/mnt/cache /data/tmp，可留空"></textarea>
               </label>
+              <div class="image-host-settings">
+                <label class="check"><input name="image_host_enabled" type="checkbox"> 生成完成后上传截图到图床</label>
+                <div id="imageHostFields" hidden>
+                  <div class="row image-host-row">
+                    <label>图床类型
+                      <select name="image_host_provider">
+                        <option value="imgbb">ImgBB</option>
+                        <option value="lsky_v2">Lsky Pro v2</option>
+                        <option value="see">S.EE / SM.MS</option>
+                        <option value="custom">自定义 Bearer API</option>
+                      </select>
+                    </label>
+                    <label>API 地址
+                      <input name="image_host_endpoint" type="text" placeholder="预设服务可留空；自建服务填写完整上传地址">
+                    </label>
+                  </div>
+                  <label>API Token
+                    <input name="image_host_token" type="password" autocomplete="new-password" placeholder="未保存 Token">
+                  </label>
+                  <label class="check"><input name="clear_image_host_token" type="checkbox"> 清空已保存的图床 Token</label>
+                </div>
+                <p>默认关闭。上传发生在结果包回到控制端之后，Token 不发送到 VPS；失败不会删除本地材料。</p>
+              </div>
               <div class="checks">
                 <label class="check" data-mode-only="remote"><input name="remote_bootstrap" type="checkbox"> 空白 VPS 自动准备运行环境</label>
                 <label class="check"><input name="auto_cleanup" type="checkbox"> 任务结束后清理临时工作目录</label>
-                <label class="check"><input name="scan_full" type="checkbox"> 启用全盘扫描（高级）</label>
+                <label class="check" data-mode-only="remote"><input name="scan_full" type="checkbox"> 明确启用 VPS 全盘扫描（高级）</label>
                 <label class="check" data-mode-only="remote"><input name="clear_password" type="checkbox"> 清空已保存密码</label>
               </div>
             </div>
@@ -1889,7 +2004,7 @@ INDEX_HTML = r"""<!doctype html>
                   </label>
                 </div>
               </div>
-              <div id="candidateList" class="candidate-list">
+              <div id="candidateList" class="candidate-list" role="region" aria-label="扫描候选资源" tabindex="0">
                 <div class="empty">还没有资源。先确认工作区，然后点击“扫描资源”。</div>
               </div>
             </div>
@@ -1994,6 +2109,7 @@ INDEX_HTML = r"""<!doctype html>
     const scanProgressBar = document.querySelector("#scanProgressBar");
     const scanProgressCounts = document.querySelector("#scanProgressCounts");
     const scanProgressPath = document.querySelector("#scanProgressPath");
+    const imageHostFields = document.querySelector("#imageHostFields");
 
     let candidates = [];
     let rawCandidateCount = 0;
@@ -2028,6 +2144,8 @@ INDEX_HTML = r"""<!doctype html>
       data.auto_cleanup = form.auto_cleanup.checked;
       data.scan_full = form.scan_full ? form.scan_full.checked : false;
       data.clear_password = form.clear_password.checked;
+      data.image_host_enabled = form.image_host_enabled.checked;
+      data.clear_image_host_token = form.clear_image_host_token.checked;
       return data;
     }
 
@@ -2182,10 +2300,11 @@ INDEX_HTML = r"""<!doctype html>
       cancelBtn.disabled = uiBusy || !taskRunning;
       retryFailedBtn.hidden = lastFailedPaths.length === 0;
       retryFailedBtn.disabled = uiBusy || taskRunning || lastFailedPaths.length === 0;
-      for (const name of ["mode", "local_root", "remote_host", "remote_port", "remote_cmd", "scan_include", "scan_exclude", "scan_full"]) {
+      for (const name of ["mode", "local_root", "remote_host", "remote_port", "remote_cmd", "scan_include", "scan_exclude", "scan_full", "image_host_enabled"]) {
         const field = form.elements.namedItem(name);
         if (field) field.disabled = taskRunning;
       }
+      updateImageHostFields();
       form.setAttribute("aria-busy", String(uiBusy || taskRunning));
     }
 
@@ -2205,7 +2324,7 @@ INDEX_HTML = r"""<!doctype html>
     function updateRuntimeCopy() {
       if (isLocalMode()) {
         runtimeMode.textContent = "本机处理模式";
-        runtimeDetail.textContent = "媒体与服务位于同一台 VPS，结果写入宿主机输出目录";
+        runtimeDetail.textContent = "直接读取当前电脑或 Docker 主机目录，不经过 SSH";
       } else {
         runtimeMode.textContent = backendAvailable ? "远端 VPS 控制 · Python 后端" : "远端 VPS 控制 · Shell 回退";
         runtimeDetail.textContent = backendStatusText || "等待后端状态";
@@ -2217,11 +2336,31 @@ INDEX_HTML = r"""<!doctype html>
       for (const element of document.querySelectorAll("[data-mode-only]")) {
         element.hidden = element.dataset.modeOnly !== mode;
       }
-      scanIncludeLabel.textContent = isLocalMode() ? "额外扫描目录" : "VPS 扫描目录";
+      scanIncludeLabel.textContent = isLocalMode() ? "额外扫描目录" : "扫描目录（留空仅 /home）";
       workspaceHelp.textContent = isLocalMode()
-        ? "Docker 部署在媒体所在 VPS：选择挂载的媒体根目录，扫描后直接在本机生成。"
-        : "桌面控制远端 VPS：填写 SSH 连接与扫描目录，结果会回传到保存目录。";
+        ? "直接处理当前电脑或 Docker 主机上的媒体；只会扫描媒体根目录和显式添加的目录。"
+        : "控制远端 VPS：默认仅扫描 /home；其他顶层目录需要在扫描目录中明确填写。";
       updateRuntimeCopy();
+    }
+
+    function updateImageHostFields() {
+      const enabled = form.image_host_enabled.checked;
+      imageHostFields.hidden = !enabled;
+      for (const field of imageHostFields.querySelectorAll("input, select")) {
+        field.disabled = !enabled || taskRunning;
+      }
+      const provider = form.image_host_provider.value;
+      form.image_host_endpoint.placeholder = ["lsky_v2", "custom"].includes(provider)
+        ? "必填：完整 HTTP(S) 上传地址"
+        : "可留空使用预设地址，也可覆盖为兼容地址";
+    }
+
+    function handleImageHostProviderChange() {
+      form.image_host_token.value = "";
+      form.clear_image_host_token.checked = true;
+      updateImageHostFields();
+      form.image_host_token.placeholder = "图床类型已切换，请重新填写 Token";
+      appendFrontendLog("[web] 图床类型已切换，旧 Token 将被清除，请重新填写。");
     }
 
     function isLocalMode() {
@@ -2431,6 +2570,10 @@ INDEX_HTML = r"""<!doctype html>
         }
       }
       form.remote_password.placeholder = config.password_saved ? "已保存密码，留空不修改" : "未保存密码";
+      form.image_host_token.placeholder = config.image_host_token_saved
+        ? "已保存 Token，留空不修改"
+        : "未保存 Token";
+      form.clear_image_host_token.checked = false;
       let storedPlan = null;
       try {
         storedPlan = localStorage.getItem("ptbd-material-plan");
@@ -2442,6 +2585,7 @@ INDEX_HTML = r"""<!doctype html>
         ? storedPlan
         : (config.audio_spectrum_mode === "combined" ? "music-combined" : "auto");
       syncPlanCards();
+      updateImageHostFields();
       updateRunSummary();
       updateModeCopy();
       return config;
@@ -2455,6 +2599,11 @@ INDEX_HTML = r"""<!doctype html>
       form.remote_password.value = "";
       form.clear_password.checked = false;
       form.remote_password.placeholder = payload.config.password_saved ? "已保存密码，留空不修改" : "未保存密码";
+      form.image_host_token.value = "";
+      form.clear_image_host_token.checked = false;
+      form.image_host_token.placeholder = payload.config.image_host_token_saved
+        ? "已保存 Token，留空不修改"
+        : "未保存 Token";
       appendFrontendLog("[web] 配置已保存");
       loadedConfig = {...payload.config};
       return payload.config;
@@ -2495,11 +2644,12 @@ INDEX_HTML = r"""<!doctype html>
       nextPageBtn.disabled = currentPage >= state.totalPages;
     }
 
-    function renderCandidates() {
+    function renderCandidates(focusPath = "", focusControl = "checkbox") {
       const filtered = filteredCandidates();
       const state = pageState(filtered);
       const visible = state.pageItems;
       candidateList.innerHTML = "";
+      let requestedFocus = null;
       const collapsedCount = candidates.filter((item) => item.collapsed_into_album).length;
       const rawSuffix = collapsedCount
         ? `，已把 ${collapsedCount} 首目录内单曲归入音乐目录`
@@ -2521,19 +2671,26 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       const spectrumMode = recommendedSpectrumMode();
-      for (const item of visible) {
-        const row = document.createElement("label");
+      for (const [itemIndex, item] of visible.entries()) {
+        const selected = selectedPaths.has(item.path);
+        const row = document.createElement("div");
         row.className = "candidate";
+        row.classList.toggle("is-selected", selected);
+        row.setAttribute("role", "group");
+        row.setAttribute("aria-label", `资源：${displayTitle(item)}`);
         const checkbox = document.createElement("input");
+        checkbox.id = `candidate-${state.start + itemIndex}`;
         checkbox.type = "checkbox";
-        checkbox.checked = selectedPaths.has(item.path);
+        checkbox.checked = selected;
+        checkbox.setAttribute("aria-label", `选择资源：${displayTitle(item)}`);
         checkbox.addEventListener("change", () => {
           if (checkbox.checked) selectedPaths.add(item.path);
           else selectedPaths.delete(item.path);
-          renderCandidates();
+          renderCandidates(item.path, "checkbox");
         });
-        const main = document.createElement("span");
+        const main = document.createElement("label");
         main.className = "candidate-main";
+        main.htmlFor = checkbox.id;
         const title = document.createElement("span");
         title.className = item.type === "AUDIO_DIR" ? "candidate-title dir" : "candidate-title";
         title.title = item.path;
@@ -2549,10 +2706,42 @@ INDEX_HTML = r"""<!doctype html>
         const type = document.createElement("span");
         type.className = "type";
         type.textContent = item.type_label || item.type;
-        row.append(checkbox, main, type);
+        const onlyButton = document.createElement("button");
+        const isOnlySelected = selected && selectedPaths.size === 1;
+        onlyButton.className = "button secondary candidate-only";
+        onlyButton.type = "button";
+        onlyButton.textContent = isOnlySelected ? "取消选择" : "仅选此项";
+        onlyButton.title = isOnlySelected ? "取消选择此资源" : "清空其他选择，只选择此资源";
+        onlyButton.setAttribute("aria-pressed", String(isOnlySelected));
+        onlyButton.setAttribute(
+          "aria-label",
+          `${isOnlySelected ? "取消选择" : "仅选择"}资源：${displayTitle(item)}`,
+        );
+        onlyButton.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (isOnlySelected) {
+            selectedPaths.delete(item.path);
+          } else {
+            selectedPaths.clear();
+            selectedPaths.add(item.path);
+          }
+          renderCandidates(item.path, "only");
+        });
+        row.addEventListener("click", (event) => {
+          const target = event.target;
+          if (target instanceof Element && target.closest("input, label, button")) return;
+          if (selectedPaths.has(item.path)) selectedPaths.delete(item.path);
+          else selectedPaths.add(item.path);
+          renderCandidates(item.path, "checkbox");
+        });
+        row.append(checkbox, main, type, onlyButton);
         candidateList.appendChild(row);
+        if (item.path === focusPath) {
+          requestedFocus = focusControl === "only" ? onlyButton : checkbox;
+        }
       }
       updateRunSummary();
+      if (requestedFocus) requestedFocus.focus();
     }
 
     function setTask(payload) {
@@ -2603,6 +2792,33 @@ INDEX_HTML = r"""<!doctype html>
           const item = document.createElement("div");
           item.className = "output";
           item.textContent = "失败：" + (failed.path || "") + " | " + (failed.error || "");
+          outputsEl.appendChild(item);
+        }
+        for (const report of task.image_uploads || []) {
+          const item = document.createElement("div");
+          item.className = "output image-upload-result";
+          const summary = document.createElement("strong");
+          summary.textContent = report.error
+            ? `图床未完成：${report.error}`
+            : `图床：成功 ${report.success_count || 0} / 失败 ${report.failed_count || 0} / 共 ${report.attempted_count || 0}`;
+          item.appendChild(summary);
+          const urls = Array.isArray(report.urls) ? report.urls.filter((url) => typeof url === "string" && url) : [];
+          for (const url of urls) {
+            const link = document.createElement("a");
+            link.href = url;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = url;
+            item.appendChild(link);
+          }
+          if (urls.length) {
+            const copyButton = document.createElement("button");
+            copyButton.type = "button";
+            copyButton.className = "button secondary compact";
+            copyButton.textContent = "复制 BBCode";
+            copyButton.addEventListener("click", () => void copyImageBbcode(urls));
+            item.appendChild(copyButton);
+          }
           outputsEl.appendChild(item);
         }
         if (task.result_summary && Object.keys(task.result_summary).length) {
@@ -2768,6 +2984,19 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    async function copyImageBbcode(urls) {
+      const text = urls.map((url) => `[img]${url}[/img]`).join("\n") + "\n";
+      try {
+        if (!navigator.clipboard || !window.isSecureContext) {
+          throw new Error("clipboard unavailable");
+        }
+        await navigator.clipboard.writeText(text);
+        appendFrontendLog(`[web] 已复制 ${urls.length} 条图床 BBCode。`);
+      } catch (_) {
+        appendFrontendLog("[web] 浏览器禁止直接复制，请从结果包里的 image-host-bbcode.txt 获取链接。");
+      }
+    }
+
     async function runAction(label, action) {
       setUiBusy(true);
       let failure = null;
@@ -2858,6 +3087,11 @@ INDEX_HTML = r"""<!doctype html>
       updateModeCopy();
       renderCandidates();
       if (!taskRunning) setWorkflowPhase(candidates.length ? 3 : 1);
+    });
+    form.image_host_enabled.addEventListener("change", updateImageHostFields);
+    form.image_host_provider.addEventListener("change", handleImageHostProviderChange);
+    form.image_host_token.addEventListener("input", () => {
+      form.clear_image_host_token.checked = form.image_host_token.value === "";
     });
     for (const name of ["local_root", "remote_host", "remote_port", "remote_cmd", "scan_include", "scan_exclude", "scan_full"]) {
       const field = form.elements.namedItem(name);

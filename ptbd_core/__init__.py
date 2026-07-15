@@ -7,11 +7,32 @@ from .config import (
     save_config,
     split_path_roots,
 )
-from .models import AppConfig, MediaType, RunMode, ScanItem, SpectrumBackend, SpectrumMode
+from .image_hosts import (
+    ImageHostCancelledError,
+    ImageHostError,
+    ImageHostReport,
+    ImageUploadResult,
+    upload_archive_images,
+    upload_image,
+)
+from .models import (
+    AppConfig,
+    ImageHostProvider,
+    MediaType,
+    RunMode,
+    ScanItem,
+    SpectrumBackend,
+    SpectrumMode,
+)
 from .scanner import resolve_candidate, scan, scan_json
 
 __all__ = [
     "AppConfig",
+    "ImageHostCancelledError",
+    "ImageHostError",
+    "ImageHostProvider",
+    "ImageHostReport",
+    "ImageUploadResult",
     "MediaType",
     "RunMode",
     "ScanItem",
@@ -27,4 +48,6 @@ __all__ = [
     "scan",
     "scan_json",
     "split_path_roots",
+    "upload_archive_images",
+    "upload_image",
 ]

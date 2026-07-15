@@ -841,6 +841,7 @@ collect_results() {
     local item=""
     local -a roots=()
     local explicit_roots=0
+    local bounded_remote_default=0
 
     if [[ -n "$lines" ]]; then
       explicit_roots=1
@@ -862,7 +863,8 @@ collect_results() {
       if [[ "$target_root" != "/" ]]; then
         roots+=("$target_root")
       elif [[ -n "${SSH_CONNECTION:-}" ]]; then
-        for item in /home /root /data /mnt /media /srv; do
+        bounded_remote_default=1
+        for item in /home; do
           [[ -d "$item" ]] && roots+=("$item")
         done
       else
@@ -872,7 +874,7 @@ collect_results() {
       roots+=("$target_root")
     fi
 
-    if [[ "${#roots[@]}" -eq 0 && "$explicit_roots" == "0" ]]; then
+    if [[ "${#roots[@]}" -eq 0 && "$explicit_roots" == "0" && "$bounded_remote_default" == "0" ]]; then
       roots+=("$target_root")
     fi
 
@@ -946,7 +948,7 @@ collect_results() {
     if [[ -n "${BDTOOL_SCAN_INCLUDE_ROOTS:-}" ]]; then
       screen "扫描白名单：${BDTOOL_SCAN_INCLUDE_ROOTS}"
     elif [[ "$root" == "/" && -n "${SSH_CONNECTION:-}" ]]; then
-      screen "扫描白名单：/home /root /data /mnt /media /srv"
+      screen "扫描白名单：/home"
     fi
     screen "扫描进度: 0%"
     tmp_candidates="$(mktemp)"

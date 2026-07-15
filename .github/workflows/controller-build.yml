@@ -58,16 +58,18 @@ jobs:
             quick_start_name: 打开前先看.txt
             quick_start_title: PT ReleaseKit Windows 快速开始
             quick_start_body: |
-              1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
-              2. 双击 PT-ReleaseKit.exe，填写 VPS 地址、端口、密码、本机保存目录
-              3. 点击“测试连接”，再点击“扫描 VPS”
-              4. 勾选要处理的条目，点击“生成所选”
-              5. 等待结果自动下载回本机
+              1. 双击 PT-ReleaseKit.exe，在“连接设置”选择“本机电脑”或“远端 VPS”
+              2. 本机模式：选择媒体与保存目录，先点“检查本机依赖”，再点“扫描本机”
+              3. 远端模式：先在系统终端 SSH 登录并核对主机密钥，再填写连接信息并点“测试连接”
+              4. 远端“扫描目录”留空只扫描 /home；/root、/data、/mnt、/media、/srv 需要明确填写
+              5. 扫描后逐项勾选，点击“生成所选”，再到保存目录查看结果
               
               提醒：
               - 如果 Windows 拦截，请点“更多信息 -> 仍要运行”
-              - 不需要安装 Python
-              - 不需要安装 Git for Windows
+              - 便携版不需要 Python 或 Git for Windows
+              - 本机处理仍需系统 PATH 中有 ffmpeg、ffprobe、mediainfo；BDInfo 可选
+              - 桌面便携版只生成单曲频谱；组合频谱请使用 Docker/Web 或带 NumPy、Pillow 的源码 CLI
+              - 图床上传默认关闭，只有主动配置提供方、HTTPS 地址和 Token 后才执行
           - os: macos-14
             label: macOS
             built_path: dist/controller-app/macos/PT-ReleaseKit.app
@@ -80,16 +82,18 @@ jobs:
             quick_start_name: 打开前先看.txt
             quick_start_title: PT ReleaseKit macOS 快速开始
             quick_start_body: |
-              1. 先在系统终端 SSH 登录 VPS，通过可信渠道核对并接受主机密钥
-              2. 双击 PT-ReleaseKit.app；若被拦住，请右键应用后点“打开”
-              3. 填 VPS 地址、端口、密码、本机保存目录并点击“测试连接”
-              4. 返回工作台，点击“扫描 VPS”
-              5. 勾选要处理的条目，点击“生成所选”
-              6. 等待结果自动下载回本机
+              1. 双击 PT-ReleaseKit.app；若被拦住，请右键应用后点“打开”
+              2. 在“连接设置”选择“本机电脑”或“远端 VPS”
+              3. 本机模式：选择媒体与保存目录，先点“检查本机依赖”，再点“扫描本机”
+              4. 远端模式：先用系统 ssh 核对主机密钥，再填写连接信息并点“测试连接”
+              5. 远端“扫描目录”留空只扫描 /home；/root、/data、/mnt、/media、/srv 需要明确填写
+              6. 扫描后逐项勾选，点击“生成所选”，再到保存目录查看结果
               
               提醒：
-              - 不需要安装 Python
-              - 不需要另装 Python 或 bash；首次验证主机密钥使用 macOS 自带 ssh
+              - 便携版不需要另装 Python 或 bash；首次验证主机密钥使用 macOS 自带 ssh
+              - 本机处理仍需系统 PATH 中有 ffmpeg、ffprobe、mediainfo；BDInfo 可选
+              - 桌面便携版只生成单曲频谱；组合频谱请使用 Docker/Web 或带 NumPy、Pillow 的源码 CLI
+              - 图床上传默认关闭，只有主动配置提供方、HTTPS 地址和 Token 后才执行
           - os: ubuntu-latest
             label: Linux
             built_path: dist/controller-app/linux/PT-ReleaseKit
@@ -103,15 +107,20 @@ jobs:
             quick_start_title: PT ReleaseKit Linux 快速开始
             quick_start_body: |
               1. 解压 PT-ReleaseKit-linux-portable.tar.gz
-              2. 先在系统终端 SSH 登录 VPS，核对并接受主机密钥
-              3. 优先双击 PT-ReleaseKit.desktop；如果桌面环境不认，再双击 PT-ReleaseKit.sh
-              4. 填写配置并点“测试连接”，再点击“扫描 VPS”
-              5. 勾选条目，点击“生成所选”
+              2. 优先双击 PT-ReleaseKit.desktop；如果桌面环境不认，再双击 PT-ReleaseKit.sh
+              3. 在“连接设置”选择“本机电脑”或“远端 VPS”
+              4. 本机模式：选择媒体与保存目录，先点“检查本机依赖”，再点“扫描本机”
+              5. 远端模式：先用系统 ssh 核对主机密钥，再填写连接信息并点“测试连接”
+              6. 远端“扫描目录”留空只扫描 /home；/root、/data、/mnt、/media、/srv 需要明确填写
+              7. 扫描后逐项勾选，点击“生成所选”，再到保存目录查看结果
               
               提醒：
               - Deepin 25 / Ubuntu / Debian 桌面版优先尝试
               - 如果系统提示没执行权限，先运行：chmod +x PT-ReleaseKit.desktop PT-ReleaseKit.sh PT-ReleaseKit
               - Linux 便携版配置优先保存在程序同目录
+              - 本机处理仍需系统 PATH 中有 ffmpeg、ffprobe、mediainfo；BDInfo 可选
+              - 桌面便携版只生成单曲频谱；组合频谱请使用 Docker/Web 或带 NumPy、Pillow 的源码 CLI
+              - 图床上传默认关闭，只有主动配置提供方、HTTPS 地址和 Token 后才执行
               - 只有 VPS 依赖自动安装不够时，程序才会额外联网下载 Linux 兜底运行包
 
     steps:
@@ -145,6 +154,15 @@ jobs:
           if not artifact.exists():
               raise SystemExit(f"missing artifact: {artifact}")
           subprocess.run([str(artifact), "--self-check"], check=True)
+          core = subprocess.run(
+              [str(artifact), "--core-cli", "version"],
+              check=True,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              text=True,
+          )
+          if not core.stdout.startswith("bdtool "):
+              raise SystemExit(f"packaged core CLI returned no version: {core!r}")
           if r"${{ matrix.label }}" == "Linux":
               subprocess.run(["xvfb-run", "-a", str(artifact), "--ui-smoke-check"], check=True)
           PY
@@ -267,15 +285,18 @@ jobs:
             test -n "$app_path"
             codesign --verify --deep --strict "$app_path"
             "$app_path/Contents/MacOS/PT-ReleaseKit" --self-check
+            "$app_path/Contents/MacOS/PT-ReleaseKit" --core-cli version
           elif [[ "${{ matrix.label }}" == "Windows" ]]; then
             python -m zipfile -e "$archive" "$verify_dir"
             "$verify_dir/PT-ReleaseKit.exe" --self-check
+            "$verify_dir/PT-ReleaseKit.exe" --core-cli version
           else
             tar -xzf "$archive" -C "$verify_dir"
             test -x "$verify_dir/PT-ReleaseKit"
             test -x "$verify_dir/PT-ReleaseKit.sh"
             test -x "$verify_dir/PT-ReleaseKit.desktop"
             "$verify_dir/PT-ReleaseKit" --self-check
+            "$verify_dir/PT-ReleaseKit" --core-cli version
           fi
 
       - name: Upload build artifact
@@ -350,20 +371,25 @@ jobs:
             - macOS：`PT-ReleaseKit-macos-portable.zip`
             - Linux：`PT-ReleaseKit-linux-portable.tar.gz`
 
-            ## 3 步上手
+            ## 开始使用
 
-            1. 解压
-            2. Windows 双击 `PT-ReleaseKit.exe` / macOS 双击 `PT-ReleaseKit.app` / Linux 优先双击 `PT-ReleaseKit.desktop`
-            3. 先用系统 SSH 核对 VPS 主机密钥；填写配置并测试连接，扫描后勾选条目，再点 `生成所选`
+            1. 解压后启动：Windows 双击 `PT-ReleaseKit.exe`，macOS 双击 `PT-ReleaseKit.app`，Linux 优先双击 `PT-ReleaseKit.desktop`
+            2. 在“连接设置”选择“本机电脑”或“远端 VPS”
+            3. 本机模式选择媒体与保存目录并点“检查本机依赖”；远端模式先用系统 SSH 核对主机密钥，再填写连接信息并点“测试连接”
+            4. 扫描后逐项勾选需要处理的条目，再点“生成所选”
 
-            VPS 上先放好视频 / 音频 / BDMV / ISO。
+            本机模式不需要 VPS，但便携包不内置 `ffmpeg`、`ffprobe`、`mediainfo` 或 `BDInfo`。前三项必须在系统 `PATH` 中可用，`BDInfo` 为蓝光可选工具。
+
+            远端模式留空“扫描目录”时只扫描 `/home`。`/root`、`/data`、`/mnt`、`/media`、`/srv` 需要明确填写；确实需要时才开启全盘扫描。
+
+            图床上传默认关闭。只有主动配置提供方、HTTPS 地址和 Token 后才执行；非回环 HTTP 默认拒绝，明确接受可信内网明文风险时才设置 `PTBD_ALLOW_INSECURE_IMAGE_HOST=1`。便携版使用内置 Python/Paramiko 远端后端，在结果回传后上传，Token 不发送到媒体 VPS。
 
             程序会自动：
 
-            - 扫描 VPS 媒体候选
+            - 扫描所选本机目录或明确允许的 VPS 目录
             - 生成截图和媒体信息
-            - 下载结果回你的电脑
-            - 清理这次生成的 VPS 输出目录
+            - 本机模式直接保存，远端模式下载结果回你的电脑
+            - 按配置清理这次任务的临时输出目录
 
             不会删你原始源文件。
 

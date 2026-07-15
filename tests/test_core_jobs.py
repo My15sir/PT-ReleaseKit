@@ -35,6 +35,32 @@ class JobRegistryTests(unittest.TestCase):
         self.assertTrue(job.cancel_event.is_set())
         self.assertEqual(calls, ["cancelled"])
 
+    def test_cancelled_job_cannot_be_finished_as_success(self) -> None:
+        registry = JobRegistry()
+        job, _ = registry.reserve("process")
+        assert job is not None
+        job.start()
+
+        job.cancel()
+        job.finish("success", "completed")
+
+        public = job.to_public()
+        self.assertEqual(public["status"], "cancelled")
+        self.assertEqual(public["message"], "任务已取消")
+
+    def test_cancel_after_terminal_finish_is_ignored(self) -> None:
+        registry = JobRegistry()
+        job, _ = registry.reserve("process")
+        assert job is not None
+        job.start()
+
+        job.finish("success", "completed")
+        job.cancel()
+
+        public = job.to_public()
+        self.assertEqual(public["status"], "success")
+        self.assertFalse(job.cancel_event.is_set())
+
     def test_callback_added_after_cancel_runs_immediately_once(self) -> None:
         registry = JobRegistry()
         job, _ = registry.reserve("scan")
@@ -113,6 +139,7 @@ class JobRegistryTests(unittest.TestCase):
         job, _ = registry.reserve("process")
         assert job is not None
         job.add_output("/output/one.zip")
+        job.add_image_upload({"archive": "/output/one.zip", "urls": ["https://img.example/1.png"]})
         job.add_failure("/media/two.mkv", "ffprobe failed")
 
         summary = job.summarize_batch(2)
@@ -129,6 +156,10 @@ class JobRegistryTests(unittest.TestCase):
             },
         )
         self.assertEqual(public["failed"], summary["failed_items"])
+        self.assertEqual(
+            public["image_uploads"],
+            [{"archive": "/output/one.zip", "urls": ["https://img.example/1.png"]}],
+        )
         self.assertEqual(public["result_summary"], summary)
 
         public["failed"][0]["error"] = "changed"

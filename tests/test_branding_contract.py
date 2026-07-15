@@ -62,6 +62,14 @@ class BrandingContractTests(unittest.TestCase):
         self.assertIn("ditto -c -k --sequesterRsrc --keepParent", portable_workflow)
         self.assertIn("codesign --verify --deep --strict", portable_workflow)
 
+    def test_compose_passes_documented_image_host_http_opt_in(self) -> None:
+        compose = source("compose.yaml")
+
+        self.assertIn(
+            'PTBD_ALLOW_INSECURE_IMAGE_HOST: "${PTBD_ALLOW_INSECURE_IMAGE_HOST:-0}"',
+            compose,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

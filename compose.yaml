@@ -14,6 +14,7 @@ services:
       PTBD_WEB_LOCAL_ROOT: /media
       PTBD_WEB_CONFIG: /config/config.json
       PTBD_CONTAINER_SAVE_DIR: /output
+      PTBD_ALLOW_INSECURE_IMAGE_HOST: "${PTBD_ALLOW_INSECURE_IMAGE_HOST:-0}"
       BDTOOL_DATA_DIR: /config/runtime
     volumes:
       - "${PTBD_MEDIA_DIR:-./media}:/media:ro"

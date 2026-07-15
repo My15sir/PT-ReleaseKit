@@ -76,6 +76,10 @@ jobs:
             | grep -x 'PT-ReleaseKit-linux-amd64/PT-ReleaseKit.sh' >/dev/null
           tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
             | grep -x 'PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py' >/dev/null
+          tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
+            | grep -x 'PT-ReleaseKit-linux-amd64/ptbd_core/local_runtime.py' >/dev/null
+          tar -tzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
+            | grep -x 'PT-ReleaseKit-linux-amd64/ptbd_core/image_hosts.py' >/dev/null
           tar -xOzf dist/PT-ReleaseKit-linux-amd64.tar.gz \
             PT-ReleaseKit-linux-amd64/ptbd_core/scanner.py \
             | grep 'progress_callback' >/dev/null

@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 from ptbd_core.config import (
+    default_config,
     load_config,
     normalize_scan_roots,
     parse_path_roots_json,
@@ -19,10 +20,68 @@ from ptbd_core.config import (
     split_path_roots,
     trim_path_root,
 )
-from ptbd_core.models import RunMode, SpectrumBackend, SpectrumMode
+from ptbd_core.models import ImageHostProvider, RunMode, SpectrumBackend, SpectrumMode
 
 
 class ConfigTests(unittest.TestCase):
+    def test_local_root_defaults_to_home_and_environment_remains_authoritative(self) -> None:
+        with mock.patch.dict(os.environ, {}, clear=True), mock.patch("ptbd_core.config.Path.home", return_value=Path("/home/media")):
+            self.assertEqual(default_config().local_root, "/home/media")
+            self.assertEqual(sanitize_config({"local_root": ""}).local_root, "/home/media")
+
+        with mock.patch.dict(os.environ, {"PTBD_WEB_LOCAL_ROOT": "/mnt/videos"}, clear=True):
+            self.assertEqual(default_config().local_root, "/mnt/videos")
+
+    def test_image_host_config_is_closed_by_default_and_preserves_secret_updates(self) -> None:
+        self.assertFalse(default_config().image_host_enabled)
+        existing = sanitize_config(
+            {
+                "image_host_enabled": "true",
+                "image_host_provider": "lsky_v2",
+                "image_host_endpoint": " https://img.example.test/api/v1/upload ",
+                "image_host_token": "top-secret",
+            }
+        )
+        updated = sanitize_config({"image_host_token": ""}, existing=existing)
+
+        self.assertTrue(updated.image_host_enabled)
+        self.assertEqual(updated.image_host_provider, ImageHostProvider.LSKY_V2)
+        self.assertEqual(updated.image_host_endpoint, "https://img.example.test/api/v1/upload")
+        self.assertEqual(updated.image_host_token, "top-secret")
+        self.assertNotIn("top-secret", repr(updated))
+
+        visible = public_config(updated)
+        self.assertEqual(visible["image_host_token"], "")
+        self.assertTrue(visible["image_host_token_saved"])
+
+        cleared = sanitize_config({"clear_image_host_token": True}, existing=updated)
+        self.assertEqual(cleared.image_host_token, "")
+
+        changed_provider = sanitize_config(
+            {"image_host_provider": "imgbb", "image_host_token": ""},
+            existing=updated,
+        )
+        self.assertEqual(changed_provider.image_host_provider, ImageHostProvider.IMGBB)
+        self.assertEqual(changed_provider.image_host_token, "")
+
+        changed_with_token = sanitize_config(
+            {"image_host_provider": "imgbb", "image_host_token": "new-secret"},
+            existing=updated,
+        )
+        self.assertEqual(changed_with_token.image_host_token, "new-secret")
+
+    def test_image_host_secret_round_trips_privately(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "config.json"
+            save_config(path, sanitize_config({"image_host_token": "secret"}))
+
+            public = load_config(path, include_secret=False)
+            private = load_config(path, include_secret=True)
+
+        self.assertEqual(public["image_host_token"], "")
+        self.assertTrue(public["image_host_token_saved"])
+        self.assertEqual(private["image_host_token"], "secret")
+
     def test_sanitize_covers_local_and_spectrum_settings(self) -> None:
         config = sanitize_config(
             {

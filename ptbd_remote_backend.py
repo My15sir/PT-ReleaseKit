@@ -64,7 +64,9 @@ BUNDLE_DOWNLOAD_URL = os.environ.get(
 BUNDLE_SHA256 = os.environ.get("PTBD_BUNDLE_SHA256", "").strip()
 BUNDLE_CHECKSUM_URL = os.environ.get("PTBD_BUNDLE_CHECKSUM_URL", f"{BUNDLE_DOWNLOAD_URL}.sha256")
 BUNDLE_ALLOW_UNVERIFIED = os.environ.get("PTBD_BUNDLE_ALLOW_UNVERIFIED", "0") == "1"
-PREFERRED_SCAN_ROOTS = ("/home", "/root", "/data", "/mnt", "/media", "/srv")
+# Keep unattended remote scans inside regular user homes. Other VPS roots are
+# available only when the user explicitly whitelists them or enables full scan.
+PREFERRED_SCAN_ROOTS = ("/home",)
 
 
 def preferred_scan_roots_text() -> str:

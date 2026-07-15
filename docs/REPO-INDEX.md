@@ -26,6 +26,8 @@
 - `ptbd_core/artifacts.py`：截图、报告和频谱产物
 - `ptbd_core/pipeline.py`：处理流程编排
 - `ptbd_core/returns.py`：打包和回传
+- `ptbd_core/local_runtime.py`：本机执行环境、依赖检查和允许路径边界
+- `ptbd_core/image_hosts.py`：可选图床上传、响应校验和 ZIP 链接清单
 - `ptbd_core/bundle_archive.py`：bundle 安全解包与资源限制
 - `ptbd_core/jobs.py`：异步任务状态与取消
 - `ptbd_core/runtime_assets.py`：交付形态的规范运行资产清单
@@ -41,7 +43,9 @@
 - `ptbd-web`、`ptbd-web.py`：Web 控制端
 - `ptbd_remote_backend.py`：SSH/远端控制后端
 
-Windows/macOS GUI 继续交付。它们与 Docker 服务不同：桌面端控制远端 VPS；Docker 在媒体 VPS 上直接运行 local 模式。
+Windows/macOS GUI 继续交付。桌面端可选择“本机电脑”直接处理所选媒体根目录，也可控制远端 VPS；Docker 则在媒体 VPS 上运行依赖齐备的 local 模式。桌面便携包包含控制端依赖，但不捆绑 `ffmpeg`、`ffprobe`、`mediainfo` 或 `BDInfo`。
+
+Tk 和 Web 工作台都把主要空间留给候选列表，并维护独立的逐项勾选状态。Tk 提供“只选当前”，Web 每行提供“仅选此项”；筛选不会隐式改成全选。
 
 ## 4. Docker
 
@@ -57,6 +61,8 @@ Windows/macOS GUI 继续交付。它们与 Docker 服务不同：桌面端控制
 - `/output`：生成结果，可写
 - `/config`：配置和运行状态，可写
 
+镜像内置媒体处理依赖。容器只扫描 `/media` 和显式增加的挂载根，不会遍历 VPS 其他系统目录。
+
 部署说明：`docs/DOCKER.md`。
 
 ## 5. 远端运行与回传
@@ -70,6 +76,10 @@ Windows/macOS GUI 继续交付。它们与 Docker 服务不同：桌面端控制
 
 远端传输优先使用 SFTP，不可用时自动回退 SSH 管道。上传 runtime 前会把脚本、Python 和文本配置规范化为 LF，以兼容 Linux VPS。
 
+远端默认扫描根只有 `/home`。`/root`、`/data`、`/mnt`、`/media`、`/srv` 或全盘 `/` 需要用户显式填写扫描根或开启全盘扫描。远端图床上传仅由内置 Python/Paramiko 后端在结果包回到控制端后执行，图床 Token 不进入 SSH 或远端 runtime；本机 Bash/SSH fallback 会保留材料并跳过上传。
+
+启用图床时支持 ImgBB、Lsky Pro v2、S.EE/SM.MS 和自定义 API。非回环端点默认必须使用 HTTPS，`PTBD_ALLOW_INSECURE_IMAGE_HOST=1` 只用于明确接受可信内网明文风险的场景。结果 ZIP 中的 `image-host.json`、`image-host-links.txt`、`image-host-bbcode.txt` 记录上传结果；上传失败不删除材料。Docker 控制端本身位于 VPS，因此 Token 保存在受 `0600` 保护的 `/config/config.json`，公开配置只返回保存状态。
+
 ## 6. 安装、打包与发布
 
 - `scripts/fetch-deps.sh`：获取或整理运行依赖
@@ -81,7 +91,7 @@ Windows/macOS GUI 继续交付。它们与 Docker 服务不同：桌面端控制
 
 ## 7. 测试与 CI
 
-- `tests/`：Python 核心、配置、任务和 Web 接口单元测试
+- `tests/`：Python 核心、配置、任务、Web/GUI 合同、本机执行和图床接口单元测试
 - `scripts/full-test.sh`：跨入口全量回归与真实媒体 fixture
 - `.github/workflows/ci.yml`：ShellCheck、全量回归、Docker smoke、bundle 和离线安装
 

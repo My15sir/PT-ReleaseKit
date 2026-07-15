@@ -2,11 +2,13 @@
 
 Docker 模式用于在**媒体文件所在的 VPS**直接处理文件。容器运行 Web 控制端的 local 模式，扫描宿主机只读挂载的媒体目录，并把生成结果写入宿主机输出目录。
 
-Windows/macOS 桌面 GUI 继续保留，用于从个人电脑控制远端 VPS。Docker 是额外的 VPS 本机处理方式，不是桌面 GUI 的替代品。
+Windows/macOS 桌面 GUI 继续保留，可直接处理个人电脑媒体，也可控制远端 VPS。Docker 是额外的 VPS 本机处理方式，不是桌面 GUI 的替代品。
 
 产品展示名已更新为 PT ReleaseKit；为避免破坏现有 Compose 部署，`pt-bdtool:local` 镜像标签、`PTBD_*` 环境变量和容器内 `/opt/PT-BDtool` 路径继续作为兼容接口保留。
 
-Web 扫描区会实时显示遍历的目录数、文件数、候选数和当前路径；候选总量确定后切换为真实解析比例。扫描进程连续 120 秒无输出时会被终止并返回错误，停止任务也会直接结束对应子进程。
+Docker 镜像已包含 `ffmpeg`、`ffprobe`、`mediainfo` 和镜像提供的蓝光处理工具，属于依赖齐备的 local 模式。桌面便携包不包含这些系统媒体工具，两种交付形态不要混淆。
+
+Web 扫描区会把主要空间留给候选结果，并实时显示遍历的目录数、文件数、候选数和当前路径；候选总量确定后切换为真实解析比例。每项都有独立复选框和“仅选此项”操作。扫描进程连续 120 秒无输出时会被终止并返回错误，停止任务也会直接结束对应子进程。
 
 ## 1. 前置条件
 
@@ -73,6 +75,9 @@ Compose 变量说明：
 | `PTBD_WEB_PORT` | `8899` | Web 服务宿主端口 |
 | `PTBD_UID` | `1000` | 容器进程 UID |
 | `PTBD_GID` | `1000` | 容器进程 GID |
+| `PTBD_ALLOW_INSECURE_IMAGE_HOST` | `0` | 是否明确允许非回环图床使用明文 HTTP；默认禁止 |
+
+正常部署不需要设置 `PTBD_ALLOW_INSECURE_IMAGE_HOST`。图床地址只有在 `localhost`、`127.0.0.1`、`[::1]` 等容器回环端点时才默认允许 HTTP，其他地址必须使用 HTTPS。如果明确接受可信内网中的 Token 和截图明文传输风险，可在 `.env` 中设为 `1` 后重建容器；不要用它连接公网 HTTP 图床。
 
 不创建 `.env` 时，也可以只对一次命令传入变量：
 
@@ -131,17 +136,27 @@ http://127.0.0.1:8899/
 
 首次启动会在 `/config/config.json` 创建 local 模式配置，文件权限为 `0600`。在 Web 界面中保持“本机服务器”，媒体根目录使用 `/media`，结果保存目录使用 `/output`。local 模式会自动隐藏 VPS、SSH 和远端自举字段。
 
+容器只扫描 `/media` 和 Web 配置中显式添加的额外根目录，不会遍历 VPS 的 `/root`、`/data`、`/mnt`、`/srv` 或整个根文件系统。需要另一个宿主媒体目录时，应先把它明确只读挂载进容器，再把容器内路径加入扫描目录。
+
 ## 5. 使用流程
 
 1. 打开 Web 页面。
 2. 确认处理位置为“本机服务器”。
 3. 确认媒体根目录为 `/media`。
 4. 点击“扫描本机资源”。
-5. 选择视频、音频、`BDMV` 或 `ISO`。
+5. 用每项复选框选择视频、音频、`BDMV` 或 `ISO`；“仅选此项”会清空其他选择并只保留当前项。
 6. 点击“生成发布材料”并等待任务完成；刷新页面会继续显示当前任务。
 7. 在宿主机 `PTBD_OUTPUT_DIR` 中读取结果。
 
-Docker local 模式不需要填写 VPS SSH 地址、端口或密码。浏览器只提交任务，媒体始终留在 VPS 文件系统上。
+Docker local 模式不需要填写 VPS SSH 地址、端口或密码。浏览器只提交任务，原始媒体始终留在 VPS 文件系统上；只有用户明确开启图床时，生成的截图才会发送到所选图床 API。
+
+### 可选图床上传
+
+图床上传默认关闭。开启后可选择 ImgBB、Lsky Pro v2、S.EE/SM.MS 兼容接口或自定义 Bearer API，并填写完整 API 地址（需要时）和 Token。非回环 API 地址默认必须使用 HTTPS；只有明确设置 `PTBD_ALLOW_INSECURE_IMAGE_HOST=1` 才允许可信内网 HTTP。上传在材料包生成到 `/output` 后执行，不参与原始媒体处理。
+
+成功或部分完成后，结果 ZIP 内会追加 `image-host.json`、`image-host-links.txt` 和 `image-host-bbcode.txt`。它们分别记录逐图状态、成功链接和可粘贴的 BBCode。单图或整批上传失败不会删除材料，也不会把已经成功的生成任务改成失败；无法安全更新归档时保留原 ZIP。`.tar.gz` 回退包不会执行图床归档更新。
+
+Docker 使用本机 Python 处理路径，不经过桌面远端模式的 Shell fallback，因此可以正常执行图床后处理。Docker 控制端就运行在媒体 VPS 上，图床 Token 会保存在宿主 `PTBD_CONFIG_DIR/config.json` 对应的容器 `/config/config.json` 中，而不是“回传到另一台电脑后再上传”。该文件以 `0600` 写入，Web 公开配置、任务状态和普通日志不会返回 Token，只返回是否已保存。备份配置目录时按凭据备份处理，并保持 Web 端口的回环绑定或使用有认证的代理。
 
 ## 6. 挂载与权限
 
@@ -239,7 +254,7 @@ docker compose restart ptbd
 docker compose down
 ```
 
-容器和镜像不是配置备份。需要备份的是宿主机的 `PTBD_CONFIG_DIR`，生成结果位于 `PTBD_OUTPUT_DIR`。
+容器和镜像不是配置备份。需要备份的是宿主机的 `PTBD_CONFIG_DIR`，生成结果位于 `PTBD_OUTPUT_DIR`。如果启用了图床，配置备份包含 API Token，应使用与其他凭据相同的访问控制。
 
 ## 9. 升级与回滚
 
@@ -319,6 +334,12 @@ PTBD_WEB_PORT=8900
 ```bash
 docker compose up -d --force-recreate
 ```
+
+### 图床上传失败
+
+先确认图床开关、提供方、API 地址和 Token 已保存，再从任务结果查看逐图错误。Lsky Pro v2 和自定义提供方必须填写完整上传地址；S.EE 使用默认地址，切换 SM.MS 时填写兼容地址。非回环 HTTP 地址会默认拒绝，应优先改为 HTTPS；只有明确接受可信内网明文风险时才设置 `PTBD_ALLOW_INSECURE_IMAGE_HOST=1` 并重建容器。容器还必须能访问对应 API。
+
+图床失败不需要重新生成材料。先确认 `/output` 中原 ZIP 仍然存在；修正配置后可重新处理所选条目。不要在 issue、终端复制或反向代理日志中粘贴 Token，公开 API 不会主动返回它。
 
 ### 配置意外切到 remote 模式
 

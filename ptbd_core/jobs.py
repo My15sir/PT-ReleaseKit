@@ -23,6 +23,7 @@ class Job:
     logs: list[str] = field(default_factory=list)
     items: list[dict[str, Any]] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
+    image_uploads: list[dict[str, Any]] = field(default_factory=list)
     failed: list[dict[str, str]] = field(default_factory=list)
     result_summary: dict[str, Any] = field(default_factory=dict)
     progress: dict[str, Any] = field(default_factory=dict)
@@ -52,6 +53,9 @@ class Job:
 
     def finish(self, status: str, message: str) -> None:
         with self._lock:
+            if self.cancel_event.is_set() and status != "cancelled":
+                status = "cancelled"
+                message = "任务已取消"
             self.status = status
             self.message = message
             self.ended_at = time.time()
@@ -78,6 +82,8 @@ class Job:
 
     def cancel(self) -> None:
         with self._lock:
+            if self.status not in {"queued", "running"}:
+                return
             if self.cancel_event.is_set():
                 return
             self.cancel_event.set()
@@ -101,6 +107,10 @@ class Job:
     def add_output(self, output: str) -> None:
         with self._lock:
             self.outputs.append(str(output))
+
+    def add_image_upload(self, report: Mapping[str, Any]) -> None:
+        with self._lock:
+            self.image_uploads.append(deepcopy(dict(report)))
 
     def add_failure(self, path: str, error: str) -> None:
         with self._lock:
@@ -138,6 +148,7 @@ class Job:
                 "logs": list(self.logs),
                 "items": deepcopy(self.items),
                 "outputs": list(self.outputs),
+                "image_uploads": deepcopy(self.image_uploads),
                 "failed": deepcopy(self.failed),
                 "result_summary": deepcopy(self.result_summary),
                 "progress": deepcopy(self.progress),

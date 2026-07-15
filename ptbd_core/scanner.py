@@ -15,7 +15,7 @@ from .models import MediaType, ScanItem
 VIDEO_EXTENSIONS = frozenset({".mkv", ".mp4", ".avi", ".mov", ".m2ts", ".wmv", ".webm", ".mpg", ".mpeg"})
 AUDIO_EXTENSIONS = frozenset({".mp3", ".flac", ".wav", ".m4a", ".aac", ".ogg", ".opus"})
 PRUNED_DIR_NAMES = frozenset({"proc", "sys", "dev", "run", "tmp", "node_modules", ".git", ".svn", ".cache", ".npm", ".pnpm-store"})
-DEFAULT_REMOTE_ROOTS = ("/home", "/root", "/data", "/mnt", "/media", "/srv")
+DEFAULT_REMOTE_ROOTS = ("/home",)
 WALK_PROGRESS_INTERVAL = 0.2
 WALK_PROGRESS_DIRECTORY_STEP = 64
 WALK_PROGRESS_FILE_STEP = 256
@@ -320,7 +320,9 @@ def _scan_roots(
         return _collapse_scan_roots([root])
 
     remote_roots = [Path(item) for item in DEFAULT_REMOTE_ROOTS if Path(item).is_dir()]
-    return _collapse_scan_roots(remote_roots or [root])
+    # Missing preferred roots must not silently turn a bounded remote scan into
+    # a full filesystem walk. Full scans arrive as an explicit include of "/".
+    return _collapse_scan_roots(remote_roots)
 
 
 def scan(

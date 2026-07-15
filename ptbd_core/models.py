@@ -30,6 +30,13 @@ class SpectrumBackend(str, Enum):
     FFMPEG = "ffmpeg"
 
 
+class ImageHostProvider(str, Enum):
+    IMGBB = "imgbb"
+    LSKY_V2 = "lsky_v2"
+    SEE = "see"
+    CUSTOM = "custom"
+
+
 @dataclass(frozen=True)
 class ScanItem:
     """One item returned by the legacy ``scan-json`` interface."""
@@ -75,6 +82,10 @@ class AppConfig:
     audio_spectrum_backend: SpectrumBackend
     audio_spectrum_combined_track_seconds: str
     auto_cleanup: bool
+    image_host_enabled: bool = False
+    image_host_provider: ImageHostProvider = ImageHostProvider.IMGBB
+    image_host_endpoint: str = ""
+    image_host_token: str = field(default="", repr=False)
 
     def to_dict(self, *, include_secret: bool = True) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -93,7 +104,12 @@ class AppConfig:
             "audio_spectrum_backend": self.audio_spectrum_backend.value,
             "audio_spectrum_combined_track_seconds": self.audio_spectrum_combined_track_seconds,
             "auto_cleanup": self.auto_cleanup,
+            "image_host_enabled": self.image_host_enabled,
+            "image_host_provider": self.image_host_provider.value,
+            "image_host_endpoint": self.image_host_endpoint,
+            "image_host_token": self.image_host_token if include_secret else "",
         }
         if not include_secret:
             data["password_saved"] = bool(self.remote_password)
+            data["image_host_token_saved"] = bool(self.image_host_token)
         return data

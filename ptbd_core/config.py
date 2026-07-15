@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import urlsplit
 
-from .models import AppConfig, RunMode, SpectrumBackend, SpectrumMode
+from .models import AppConfig, ImageHostProvider, RunMode, SpectrumBackend, SpectrumMode
 
 
 DEFAULT_REMOTE_HOST = "root@your-vps"
@@ -78,7 +78,8 @@ def default_save_dir() -> str:
 
 def default_config() -> AppConfig:
     mode = RunMode.LOCAL if os.environ.get("PTBD_WEB_MODE", "remote").strip().lower() == "local" else RunMode.REMOTE
-    local_root = _clean_text(os.environ.get("PTBD_WEB_LOCAL_ROOT", "/"), field="local_root") or "/"
+    home = str(Path.home())
+    local_root = _clean_text(os.environ.get("PTBD_WEB_LOCAL_ROOT", home), field="local_root") or home
     return AppConfig(
         mode=mode,
         local_root=local_root,
@@ -95,6 +96,10 @@ def default_config() -> AppConfig:
         audio_spectrum_backend=SpectrumBackend.AUTO,
         audio_spectrum_combined_track_seconds="12",
         auto_cleanup=True,
+        image_host_enabled=False,
+        image_host_provider=ImageHostProvider.IMGBB,
+        image_host_endpoint="",
+        image_host_token="",
     )
 
 
@@ -105,11 +110,15 @@ def _clean_text(value: Any, *, field: str) -> str:
     return text
 
 
-def _clean_password(value: Any) -> str:
+def _clean_secret(value: Any, *, field: str) -> str:
     text = str(value if value is not None else "")
     if any(character in text for character in ("\x00", "\r", "\n")):
-        raise ValueError("remote_password contains a forbidden control character")
+        raise ValueError(f"{field} contains a forbidden control character")
     return text
+
+
+def _clean_password(value: Any) -> str:
+    return _clean_secret(value, field="remote_password")
 
 
 def _coerce_bool(value: Any, *, default: bool) -> bool:
@@ -340,7 +349,14 @@ def sanitize_config(
     data = default_config().to_dict()
     data.update(_mapping(existing))
 
-    text_fields = ("local_root", "remote_host", "remote_port", "remote_cmd", "save_dir")
+    text_fields = (
+        "local_root",
+        "remote_host",
+        "remote_port",
+        "remote_cmd",
+        "save_dir",
+        "image_host_endpoint",
+    )
     for field in text_fields:
         if field in raw:
             data[field] = _clean_text(raw.get(field), field=field)
@@ -361,6 +377,25 @@ def sanitize_config(
         else SpectrumBackend.AUTO
     )
 
+    previous_provider_value = data.get("image_host_provider", ImageHostProvider.IMGBB.value)
+    if isinstance(previous_provider_value, ImageHostProvider):
+        previous_provider = previous_provider_value
+    else:
+        previous_provider_text = str(previous_provider_value).strip().lower()
+        previous_provider = (
+            ImageHostProvider(previous_provider_text)
+            if previous_provider_text in {item.value for item in ImageHostProvider}
+            else ImageHostProvider.IMGBB
+        )
+    requested_provider = str(
+        raw.get("image_host_provider", previous_provider.value)
+    ).strip().lower()
+    data["image_host_provider"] = (
+        ImageHostProvider(requested_provider)
+        if requested_provider in {item.value for item in ImageHostProvider}
+        else ImageHostProvider.IMGBB
+    )
+
     raw_seconds = raw.get(
         "audio_spectrum_combined_track_seconds",
         data.get("audio_spectrum_combined_track_seconds", "12"),
@@ -378,6 +413,7 @@ def sanitize_config(
         "remote_bootstrap": True,
         "auto_cleanup": True,
         "scan_full": False,
+        "image_host_enabled": False,
     }
     for field, default in bool_defaults.items():
         if field in raw:
@@ -393,7 +429,20 @@ def sanitize_config(
     else:
         data["remote_password"] = _clean_password(data.get("remote_password", ""))
 
-    data["local_root"] = data.get("local_root") or "/"
+    image_host_token = raw.get("image_host_token")
+    if _coerce_bool(raw.get("clear_image_host_token"), default=False):
+        data["image_host_token"] = ""
+    elif image_host_token is not None and str(image_host_token) != "":
+        data["image_host_token"] = _clean_secret(image_host_token, field="image_host_token")
+    elif data["image_host_provider"] != previous_provider:
+        # Credentials are provider-specific; never reuse a saved token silently.
+        data["image_host_token"] = ""
+    else:
+        data["image_host_token"] = _clean_secret(
+            data.get("image_host_token", ""), field="image_host_token"
+        )
+
+    data["local_root"] = data.get("local_root") or str(Path.home())
     data["remote_host"] = data.get("remote_host") or DEFAULT_REMOTE_HOST
     data["remote_port"] = data.get("remote_port") or DEFAULT_REMOTE_PORT
     data["remote_cmd"] = data.get("remote_cmd") or DEFAULT_REMOTE_CMD
@@ -418,6 +467,10 @@ def sanitize_config(
         audio_spectrum_backend=data["audio_spectrum_backend"],
         audio_spectrum_combined_track_seconds=data["audio_spectrum_combined_track_seconds"],
         auto_cleanup=data["auto_cleanup"],
+        image_host_enabled=data["image_host_enabled"],
+        image_host_provider=data["image_host_provider"],
+        image_host_endpoint=data["image_host_endpoint"],
+        image_host_token=data["image_host_token"],
     )
 
 
