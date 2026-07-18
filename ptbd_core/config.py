@@ -213,7 +213,17 @@ def trim_path_root(value: str) -> str:
 
 
 def normalize_scan_roots(raw: Any) -> str:
-    return shlex.join(split_path_roots(raw))
+    # ``shlex.quote`` quotes every non-ASCII character on some Python builds.
+    # Unicode paths are safe shell words by themselves; quote only when the
+    # path would otherwise be split or interpreted by the shell/legacy lexer.
+    unsafe = set("'\"\\$`;&|<>()*?[]{}!~,#")
+
+    def quote_root(root: str) -> str:
+        if root and not any(character.isspace() or character in unsafe for character in root):
+            return root
+        return shlex.quote(root)
+
+    return " ".join(quote_root(root) for root in split_path_roots(raw))
 
 
 def parse_port(value: str | int | None) -> int | None:

@@ -272,28 +272,33 @@ def package_output(
     if _is_within(destination, source):
         raise ArtifactError("package destination cannot be inside the generated output directory")
     destination.mkdir(parents=True, exist_ok=True)
-    suffix = ".zip" if prefer_zip else ".tar.gz"
-    temporary = destination / f".{source.name}.{uuid.uuid4().hex}{suffix}.tmp"
-
-    try:
-        if prefer_zip:
-            with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as handle:
-                for file_path in list_artifact_files(source):
-                    arcname = Path(source.name) / file_path.relative_to(source)
-                    handle.write(file_path, arcname.as_posix())
-        else:
-            with tarfile.open(temporary, "w:gz") as handle:
-                for file_path in list_artifact_files(source):
-                    arcname = Path(source.name) / file_path.relative_to(source)
-                    handle.add(file_path, arcname=arcname.as_posix(), recursive=False)
-        return _publish_unique_archive(temporary, destination, source.name, suffix)
-    except Exception as exc:
-        raise ArtifactError(f"failed to create package for {source} in {destination}: {exc}") from exc
-    finally:
+    formats = ((".zip", True), (".tar.gz", False)) if prefer_zip else ((".tar.gz", False),)
+    failures: list[tuple[str, Exception]] = []
+    for suffix, use_zip in formats:
+        temporary = destination / f".{source.name}.{uuid.uuid4().hex}{suffix}.tmp"
         try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
+            if use_zip:
+                with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_DEFLATED) as handle:
+                    for file_path in list_artifact_files(source):
+                        arcname = Path(source.name) / file_path.relative_to(source)
+                        handle.write(file_path, arcname.as_posix())
+            else:
+                with tarfile.open(temporary, "w:gz") as handle:
+                    for file_path in list_artifact_files(source):
+                        arcname = Path(source.name) / file_path.relative_to(source)
+                        handle.add(file_path, arcname=arcname.as_posix(), recursive=False)
+            return _publish_unique_archive(temporary, destination, source.name, suffix)
+        except Exception as exc:
+            failures.append((suffix, exc))
+        finally:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    details = "; ".join(f"{suffix}: {error}" for suffix, error in failures)
+    cause = failures[-1][1] if failures else None
+    raise ArtifactError(f"failed to create package for {source} in {destination}: {details}") from cause
 
 
 def cleanup_output(output_dir: str | Path) -> bool:

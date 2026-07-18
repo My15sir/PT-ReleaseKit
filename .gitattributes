@@ -1,0 +1,18 @@
+# Keep scripts and controller/runtime text executable on Linux after a
+# Windows checkout, even when the user's global core.autocrlf is enabled.
+*.sh text eol=lf
+*.py text eol=lf
+*.env text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.desktop text eol=lf
+*.command text eol=lf
+Dockerfile text eol=lf
+bdtool text eol=lf
+ptbd text eol=lf
+ptbd-gui text eol=lf
+ptbd-web text eol=lf
+*.bat text eol=crlf

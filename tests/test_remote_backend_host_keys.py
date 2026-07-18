@@ -235,6 +235,38 @@ class RemoteBackendHostKeyTests(unittest.TestCase):
         self.assertTrue(info.core_deps_ready())
         self.assertFalse(info.spectrum_python_deps_ready())
 
+    def test_non_bootstrap_mode_uses_configured_remote_command(self) -> None:
+        controller = self.make_backend()
+        controller.config.update({"remote_bootstrap": False, "remote_cmd": "/srv/ptbd/bdtool"})
+        self.assertEqual(controller.resolve_remote_command(), "/srv/ptbd/bdtool")
+
+    def test_ready_remote_skips_dependency_install(self) -> None:
+        controller = self.make_backend()
+        controller.remote_cache_root = "/tmp/ptbd-test-cache"
+        info = backend.RemoteSystemInfo(
+            os_name="Linux",
+            distro_id="debian",
+            arch="x86_64",
+            has_tar=True,
+            has_bash=True,
+            has_python3=True,
+            has_curl=True,
+            has_ffmpeg=True,
+            has_ffprobe=True,
+            has_mediainfo=True,
+            has_numpy=True,
+            has_pil=True,
+        )
+        archive = Path(tempfile.gettempdir()) / "ptbd-test-runtime.tar.gz"
+        with (
+            mock.patch.object(controller, "probe_remote_system", return_value=info),
+            mock.patch.object(controller, "ensure_remote_system_deps") as install,
+            mock.patch.object(controller, "build_runtime_archive", return_value=(archive, "hash")),
+            mock.patch.object(controller, "remote_file_ready", return_value=True),
+        ):
+            self.assertEqual(controller.ensure_runtime(), "/tmp/ptbd-test-cache/runtime-hash/ptbd-runtime")
+        install.assert_not_called()
+
     def test_preferred_scan_remains_bounded_when_full_scan_is_disabled(self) -> None:
         controller = self.make_backend()
         controller.config["scan_full"] = False

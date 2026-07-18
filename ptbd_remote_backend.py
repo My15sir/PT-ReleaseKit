@@ -1142,14 +1142,17 @@ class PTBDRemoteBackend:
             f"[gui] 远端系统：os={info.os_name or 'unknown'} id={info.distro_id or 'unknown'} "
             f"version={info.version_id or 'unknown'} arch={info.arch or 'unknown'}"
         )
-        if info.auto_install_supported():
+        spectrum_mode = str(self.config.get("audio_spectrum_mode") or "single")
+        needs_install = not info.core_deps_ready() or (
+            spectrum_mode == "combined" and not info.spectrum_python_deps_ready()
+        )
+        if info.auto_install_supported() and needs_install:
             self.log("[gui] 已识别 Debian / Ubuntu / Alpine，先尝试自动装依赖")
             self.ensure_remote_system_deps()
             info = self.probe_remote_system()
-        if (
-            str(self.config.get("audio_spectrum_mode") or "single") == "combined"
-            and not info.spectrum_python_deps_ready()
-        ):
+        elif info.auto_install_supported():
+            self.log("[gui] 远端依赖已齐全，跳过系统安装")
+        if spectrum_mode == "combined" and not info.spectrum_python_deps_ready():
             raise RemoteCommandError(
                 "组合音频频谱需要远端 Python numpy 和 Pillow；自动安装未能补齐，请先手动安装。"
             )
@@ -1272,7 +1275,7 @@ rm -f "$archive_path"
     def resolve_remote_command(self) -> str:
         if self.config.get("remote_bootstrap"):
             return self.ensure_runtime()
-        return "bdtool"
+        return str(self.config.get("remote_cmd") or "bdtool").strip() or "bdtool"
 
     def build_scan_env(self) -> dict[str, str]:
         env: dict[str, str] = {}

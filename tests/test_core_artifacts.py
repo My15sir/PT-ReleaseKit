@@ -262,6 +262,22 @@ class PackageTests(unittest.TestCase):
             with zipfile.ZipFile(fallback) as handle:
                 self.assertEqual(handle.read("Movie/mediainfo.txt"), b"second\n")
 
+    def test_package_falls_back_to_tar_when_zip_creation_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "generated" / "Movie"
+            output.mkdir(parents=True)
+            (output / "mediainfo.txt").write_bytes(b"media\n")
+            destination = root / "packages"
+
+            with mock.patch("ptbd_core.artifacts.zipfile.ZipFile", side_effect=OSError("zip unavailable")):
+                archive = package_output(output, destination)
+
+            self.assertEqual(archive.name, "Movie.tar.gz")
+            with tarfile.open(archive, "r:gz") as handle:
+                self.assertEqual(handle.extractfile("Movie/mediainfo.txt").read(), b"media\n")  # type: ignore[union-attr]
+            self.assertEqual(list(destination.glob(".*.tmp")), [])
+
     def test_cleanup_only_removes_generated_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

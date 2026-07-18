@@ -581,7 +581,9 @@ def _atomic_add_metadata(
 
         _raise_if_cancelled(should_cancel)
         os.chmod(temporary, archive_mode)
-        with temporary.open("rb") as handle:
+        # Windows rejects fsync on a read-only descriptor (EBADF).  The
+        # temporary archive is ours, so open it read/write before syncing.
+        with temporary.open("r+b") as handle:
             os.fsync(handle.fileno())
         _raise_if_cancelled(should_cancel)
         os.replace(temporary, archive)

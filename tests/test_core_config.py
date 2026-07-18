@@ -32,6 +32,10 @@ class ConfigTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {"PTBD_WEB_LOCAL_ROOT": "/mnt/videos"}, clear=True):
             self.assertEqual(default_config().local_root, "/mnt/videos")
 
+    def test_normalize_scan_roots_keeps_safe_unicode_paths_readable(self) -> None:
+        self.assertEqual(normalize_scan_roots(["/home/发种"]), "/home/发种")
+        self.assertEqual(normalize_scan_roots(["/home/My Movies", "/home/发种"]), "'/home/My Movies' /home/发种")
+
     def test_image_host_config_is_closed_by_default_and_preserves_secret_updates(self) -> None:
         self.assertFalse(default_config().image_host_enabled)
         existing = sanitize_config(
